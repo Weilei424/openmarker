@@ -1,0 +1,163 @@
+# =========================
+# General
+# =========================
+
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+
+# =========================
+# Environment files
+# =========================
+
+.env
+.env.local
+.env.*.local
+
+# =========================
+# Python
+# =========================
+
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyc.*
+*.egg-info/
+.eggs/
+
+venv/
+.venv/
+env/
+ENV/
+
+build/
+dist/
+
+*.egg
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# =========================
+# Node / React
+# =========================
+
+node_modules/
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+.pnpm-store/
+
+.next/
+dist/
+build/
+
+# =========================
+# Tauri / Rust
+# =========================
+
+target/
+
+desktop/src-tauri/target/
+
+*.rs.bk
+
+# Tauri build artifacts
+desktop/src-tauri/gen/
+
+# =========================
+# Editor / IDE
+# =========================
+
+.vscode/
+.idea/
+*.iml
+
+# =========================
+# OS / Windows
+# =========================
+
+*.exe
+*.dll
+*.msi
+
+# installers
+*.zip
+*.tar
+*.gz
+
+# =========================
+# Build outputs
+# =========================
+
+release/
+debug/
+out/
+
+# =========================
+# Geometry / nesting temp files
+# =========================
+
+*.cache
+*.tmp_layout
+*.tmp_nest
+
+# =========================
+# DXF test files (optional)
+# =========================
+
+# If you keep DXF examples in examples/ you may remove this
+*.dxf
+
+# =========================
+# Generated assets
+# =========================
+
+*.svg
+*.png
+*.jpg
+*.jpeg
+
+# =========================
+# Logs
+# =========================
+
+logs/
+*.log
+
+# =========================
+# Python engine artifacts
+# =========================
+
+engine/.mypy_cache/
+engine/.ruff_cache/
+
+# =========================
+# Frontend build artifacts
+# =========================
+
+frontend/dist/
+frontend/.vite/
+
+# =========================
+# Desktop packaging
+# =========================
+
+desktop/dist/
+desktop/build/
+
+# =========================
+# Misc
+# =========================
+
+*.lock
