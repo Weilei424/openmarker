@@ -196,13 +196,6 @@ Contains developer helper scripts for local setup, linting, packaging, and relea
 - Windows packaging reliability
 - usability testing with non-technical users
 
-## Agent workflow
-
-- **Claude Code** implements features and writes code following `CLAUDE.md`
-- **Codex** reviews code and architecture decisions following `CODEX.md`
-- `ROADMAP.md` is the source of truth for phase planning and deliverables
-- `SKILLS.md` tracks useful capabilities and task patterns for both agents
-
 ## First implementation targets
 
 1. Create app shell and repository wiring
