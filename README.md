@@ -2,6 +2,10 @@
 
 Offline-first Windows desktop application for garment pattern layout and basic fabric nesting.
 
+<p align="center">
+  <a href="README_zh.md">中文</a>&nbsp; • &nbsp;
+</p>
+
 ## Purpose
 
 This project is a non-profit fabric layout tool for factory users who are not technical. The product must be simple to install, simple to run, and able to work without internet access.
@@ -205,6 +209,6 @@ Contains developer helper scripts for local setup, linting, packaging, and relea
 5. Support manual drag and rotate
 6. Show simple utilization metrics
 
-## License and usage
+## License
 
-This repository is intended for a non-profit project. Confirm the final license before public release.
+[Apache 2.0](/LICENSE)
