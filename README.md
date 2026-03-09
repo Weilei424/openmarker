@@ -1,4 +1,4 @@
-# Fabric Layout Tool
+# OpenMarker - Fabric Layout Tool
 
 Offline-first Windows desktop application for garment pattern layout and basic fabric nesting.
 
