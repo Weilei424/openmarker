@@ -113,11 +113,12 @@ out/
 *.tmp_nest
 
 # =========================
-# DXF test files (optional)
+# DXF test files
 # =========================
 
-# If you keep DXF examples in examples/ you may remove this
+# ignore DXF everywhere except examples
 *.dxf
+!examples/*.dxf
 
 # =========================
 # Generated assets
