@@ -272,7 +272,7 @@ fabric-layout-tool/
 
 ## 排料引擎
 
-- Python 3.11+
+- Python 3.11（暂不支持 3.12+，因为 `pyclipper` 在构建时会失败）
 - 使用虚拟环境
 
 ---
