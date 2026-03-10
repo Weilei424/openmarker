@@ -57,8 +57,18 @@ cd engine
 
 ---
 
+## Generate placeholder icons (once, before cargo tauri build)
+
+```sh
+python scripts/gen-icons.py
+```
+
+Replace `desktop/src-tauri/icons/` with real artwork before shipping.
+
+---
+
 ## Architecture notes
 
 - Engine and frontend communicate over `http://127.0.0.1:8765` (local loopback only).
-- The Tauri window is just a webview wrapper around the React app.
-- In production (Phase 7), the engine will be bundled as a PyInstaller binary and spawned as a Tauri sidecar.
+- The Tauri window is a webview wrapper around the React app; it does **not** start or supervise the engine process in Phase 1.
+- In Phase 7 (packaging), the engine will be compiled with PyInstaller and wired as a Tauri sidecar so the installer bundles everything into one executable.
