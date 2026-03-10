@@ -1,7 +1,7 @@
 @echo off
 REM Set up the Python engine virtual environment on Windows.
-REM Supported Python versions: 3.11 and 3.12
-REM Python 3.13+ is not yet supported because pyclipper has no compatible wheel.
+REM Supported Python version: 3.11
+REM pyclipper currently fails to build on Python 3.12+ (missing longintrepr.h).
 
 set REPO_ROOT=%~dp0..
 set ENGINE_DIR=%REPO_ROOT%\engine
@@ -12,7 +12,7 @@ echo Setting up Python engine...
 cd /d "%ENGINE_DIR%"
 
 REM Check Python version before creating venv.
-REM Extract major.minor and reject anything outside 3.11-3.12.
+REM Extract major.minor and allow only Python 3.11.
 for /f "tokens=2 delims= " %%V in ('python --version 2^>^&1') do set PY_VER=%%V
 for /f "tokens=1,2 delims=." %%A in ("%PY_VER%") do (
     set PY_MAJOR=%%A
@@ -20,19 +20,14 @@ for /f "tokens=1,2 delims=." %%A in ("%PY_VER%") do (
 )
 
 if not "%PY_MAJOR%"=="3" (
-    echo ERROR: Python 3.11 or 3.12 is required. Found: %PY_VER%
-    echo Please install Python 3.11 or 3.12 from https://www.python.org/downloads/
+    echo ERROR: Python 3.11 is required. Found: %PY_VER%
+    echo Please install Python 3.11 from https://www.python.org/downloads/
     exit /b 1
 )
-if %PY_MINOR% LSS 11 (
-    echo ERROR: Python 3.11 or 3.12 is required. Found: %PY_VER%
-    echo Please install Python 3.11 or 3.12 from https://www.python.org/downloads/
-    exit /b 1
-)
-if %PY_MINOR% GTR 12 (
-    echo ERROR: Python 3.11 or 3.12 is required. Found: %PY_VER%
-    echo Python 3.13+ is not yet supported -- pyclipper has no compatible wheel.
-    echo Please install Python 3.11 or 3.12 from https://www.python.org/downloads/
+if not "%PY_MINOR%"=="11" (
+    echo ERROR: Python 3.11 is required. Found: %PY_VER%
+    echo Python 3.12+ currently fails when building pyclipper (missing longintrepr.h).
+    echo Please install Python 3.11 from https://www.python.org/downloads/
     exit /b 1
 )
 
