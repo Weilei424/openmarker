@@ -129,6 +129,10 @@ out/
 *.jpg
 *.jpeg
 
+# Exception: Tauri app icons must be committed
+!desktop/src-tauri/icons/*.png
+!desktop/src-tauri/icons/*.ico
+
 # =========================
 # Logs
 # =========================
