@@ -36,14 +36,24 @@ curl http://127.0.0.1:8765/ping
 
 ## Frontend + Tauri shell
 
-Open a second terminal:
+**Run from Windows PowerShell** (not WSL — Tauri opens a native Windows window).
 
-```sh
+First time only — install frontend dependencies:
+
+```powershell
+cd frontend
+npm install
+cd ..
+```
+
+Then, open a second terminal and start the Tauri dev shell:
+
+```powershell
 cd desktop/src-tauri
 cargo tauri dev
 ```
 
-This runs Vite dev server (port 1420) and opens the Tauri window.
+This starts the Vite dev server (port 1420) and opens the Tauri window automatically.
 
 ---
 

@@ -272,7 +272,7 @@ fabric-layout-tool/
 
 ## 排料引擎
 
-- Python 3.11（暂不支持 3.12+，因为 `pyclipper` 在构建时会失败）
+- Python 3.10+（推荐 3.11；`pyclipper` 1.4.0 已为 3.10–3.14 提供预编译 wheel，无需本地编译）
 - 使用虚拟环境
 
 ---

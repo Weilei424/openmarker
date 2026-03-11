@@ -175,7 +175,7 @@ Contains developer helper scripts for local setup, linting, packaging, and relea
 
 ### Engine
 
-- Python 3.11 (3.12+ currently unsupported because `pyclipper` fails to build)
+- Python 3.10+ (3.11 recommended; `pyclipper` 1.4.0 ships pre-built wheels for 3.10–3.14)
 - virtual environment
 
 ### Desktop shell
