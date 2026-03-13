@@ -5,12 +5,16 @@ import type { ImportDxfResponse, ImportStatus, Piece } from "../types/engine";
 
 const ENGINE_URL = "http://127.0.0.1:8765";
 
+export type ImportOutcome =
+  | { ok: true; pieces: Piece[]; warnings: string[] }
+  | { ok: false; errorMessage: string };
+
 interface UseImportDxfResult {
   status: ImportStatus;
   pieces: Piece[];
   warnings: string[];
   errorMessage: string;
-  handleFileSelected: (file: File) => Promise<void>;
+  handleFileSelected: (file: File) => Promise<ImportOutcome>;
 }
 
 export function useImportDxf(): UseImportDxfResult {
@@ -19,7 +23,7 @@ export function useImportDxf(): UseImportDxfResult {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [errorMessage, setErrorMessage] = useState("");
 
-  const handleFileSelected = useCallback(async (file: File) => {
+  const handleFileSelected = useCallback(async (file: File): Promise<ImportOutcome> => {
     setStatus("loading");
     setPieces([]);
     setWarnings([]);
@@ -36,18 +40,22 @@ export function useImportDxf(): UseImportDxfResult {
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+        const msg = err.detail ?? `HTTP ${res.status}`;
         setStatus("error");
-        setErrorMessage(err.detail ?? `HTTP ${res.status}`);
-        return;
+        setErrorMessage(msg);
+        return { ok: false, errorMessage: msg };
       }
 
       const data: ImportDxfResponse = await res.json();
       setPieces(data.pieces);
       setWarnings(data.warnings);
       setStatus("success");
+      return { ok: true, pieces: data.pieces, warnings: data.warnings };
     } catch {
+      const msg = "Engine not reachable. Start: scripts/dev-engine.bat";
       setStatus("error");
-      setErrorMessage("Engine not reachable. Start: scripts/dev-engine.bat");
+      setErrorMessage(msg);
+      return { ok: false, errorMessage: msg };
     }
   }, []);
 
