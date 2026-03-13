@@ -3,7 +3,7 @@
 
 import { useState, useCallback, useRef } from "react";
 import type { EngineStatus, PingResponse } from "../types/engine";
-import { useImportDxf } from "../hooks/useImportDxf";
+import { useImportDxf, type ImportOutcome } from "../hooks/useImportDxf";
 import { PieceList } from "../components/pieces/PieceList";
 
 const ENGINE_URL = "http://127.0.0.1:8765";
@@ -37,10 +37,15 @@ export default function App() {
       if (!file) return;
       // Reset input so the same file can be re-selected
       e.target.value = "";
-      await handleFileSelected(file);
-      setStatusMessage(`${pieces.length || "?"} pieces imported from ${file.name}`);
+      // Use the returned outcome — React state is async and would be stale here
+      const outcome: ImportOutcome = await handleFileSelected(file);
+      if (outcome.ok) {
+        setStatusMessage(`${outcome.pieces.length} piece${outcome.pieces.length !== 1 ? "s" : ""} imported from ${file.name}`);
+      } else {
+        setStatusMessage(`Import failed: ${outcome.errorMessage}`);
+      }
     },
-    [handleFileSelected, pieces.length]
+    [handleFileSelected]
   );
 
   // Update status bar message when import completes
