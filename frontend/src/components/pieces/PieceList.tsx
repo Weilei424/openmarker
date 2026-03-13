@@ -20,7 +20,7 @@ export function PieceList({ pieces }: Props) {
             &nbsp;·&nbsp;
             {(piece.area / 100).toFixed(1)} cm²
           </div>
-          {!piece.is_valid && (
+          {piece.validation_notes.length > 0 && (
             <div style={styles.warning}>geometry repaired</div>
           )}
         </div>
