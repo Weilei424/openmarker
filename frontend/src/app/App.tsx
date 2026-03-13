@@ -1,14 +1,20 @@
-// OpenMarker - Phase 1: app shell with engine connectivity check.
+// OpenMarker - Phase 2: DXF import wired into the app shell.
 // Layout: top bar | sidebar + canvas workspace | status bar.
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import type { EngineStatus, PingResponse } from "../types/engine";
+import { useImportDxf } from "../hooks/useImportDxf";
+import { PieceList } from "../components/pieces/PieceList";
 
 const ENGINE_URL = "http://127.0.0.1:8765";
 
 export default function App() {
   const [engineStatus, setEngineStatus] = useState<EngineStatus>("unknown");
   const [statusMessage, setStatusMessage] = useState("Engine not connected");
+
+  const { status: importStatus, pieces, warnings, errorMessage, handleFileSelected } = useImportDxf();
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const pingEngine = useCallback(async () => {
     setEngineStatus("connecting");
@@ -19,11 +25,27 @@ export default function App() {
       const data: PingResponse = await res.json();
       setEngineStatus("connected");
       setStatusMessage(`Engine connected — ${data.message} (v${data.version})`);
-    } catch (err) {
+    } catch {
       setEngineStatus("error");
-      setStatusMessage("Engine not reachable. Start: python engine/api/main.py");
+      setStatusMessage("Engine not reachable. Start: scripts/dev-engine.bat");
     }
   }, []);
+
+  const onFileChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      // Reset input so the same file can be re-selected
+      e.target.value = "";
+      await handleFileSelected(file);
+      setStatusMessage(`${pieces.length || "?"} pieces imported from ${file.name}`);
+    },
+    [handleFileSelected, pieces.length]
+  );
+
+  // Update status bar message when import completes
+  const importButtonLabel =
+    importStatus === "loading" ? "Importing..." : "Import DXF";
 
   return (
     <div style={styles.root}>
@@ -44,7 +66,42 @@ export default function App() {
           </Section>
 
           <Section title="Layout">
-            <p style={styles.placeholder}>Import a DXF to begin.</p>
+            {/* Hidden file input — triggered by the Import DXF button */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".dxf"
+              style={{ display: "none" }}
+              onChange={onFileChange}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={importStatus === "loading"}
+            >
+              {importButtonLabel}
+            </button>
+
+            {importStatus === "error" && (
+              <p style={styles.errorText}>{errorMessage}</p>
+            )}
+
+            {importStatus === "success" && (
+              <>
+                <p style={styles.successText}>{pieces.length} piece{pieces.length !== 1 ? "s" : ""} imported</p>
+                <PieceList pieces={pieces} />
+                {warnings.length > 0 && (
+                  <div style={styles.warningBlock}>
+                    {warnings.map((w, i) => (
+                      <p key={i} style={styles.warningText}>{w}</p>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+
+            {importStatus === "idle" && (
+              <p style={styles.placeholder}>Import a DXF to begin.</p>
+            )}
           </Section>
         </div>
 
@@ -182,5 +239,21 @@ const styles = {
   placeholder: {
     color: "var(--color-text-muted)",
     fontSize: 12,
+  },
+  errorText: {
+    color: "var(--color-error)",
+    fontSize: 12,
+  },
+  successText: {
+    color: "var(--color-success)",
+    fontSize: 12,
+  },
+  warningBlock: {
+    borderTop: "1px solid var(--color-border)",
+    paddingTop: 4,
+  },
+  warningText: {
+    color: "var(--color-warning)",
+    fontSize: 11,
   },
 } as const;
