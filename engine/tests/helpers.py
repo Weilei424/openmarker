@@ -4,6 +4,29 @@ import io
 import ezdxf
 
 
+def make_insert_dxf_bytes(pieces: dict[str, list[tuple[float, float]]]) -> bytes:
+    """
+    Create a DXF in ET CAD INSERT-based format.
+
+    Each piece is stored as a block with a closed LWPOLYLINE, referenced by
+    an INSERT in modelspace — matching the real ET CAD file structure.
+
+    Args:
+        pieces: mapping of block_name -> list of (x, y) points
+    Returns:
+        DXF file content as bytes
+    """
+    doc = ezdxf.new("R2010")
+    msp = doc.modelspace()
+    for block_name, points in pieces.items():
+        blk = doc.blocks.new(block_name)
+        blk.add_lwpolyline(points, close=True, dxfattribs={"layer": "1"})
+        msp.add_blockref(block_name, insert=(0, 0))
+    stream = io.StringIO()
+    doc.write(stream)
+    return stream.getvalue().encode("utf-8")
+
+
 def make_dxf_bytes(pieces: dict[str, list[tuple[float, float]]]) -> bytes:
     """
     Create a minimal DXF in memory with one closed LWPOLYLINE per layer.
