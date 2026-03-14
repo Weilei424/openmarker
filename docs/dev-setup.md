@@ -65,20 +65,19 @@ This starts the Vite dev server (port 1420) and opens the Tauri window automatic
 ## Run engine tests
 
 ```sh
-cd engine
-.venv/bin/pytest tests/ -v         # Linux/macOS
-.venv\Scripts\pytest tests\ -v     # Windows
+# From repo root
+engine\.venv\Scripts\python -m pytest engine\tests\ -v     # Windows
 ```
 
 Test layout:
 
 ```
 tests/
-├── helpers.py                 — shared DXF fixture factory (make_dxf_bytes)
+├── helpers.py                 — shared DXF fixture factories (make_dxf_bytes, make_insert_dxf_bytes)
 ├── integration/
 │   └── test_api.py            — API endpoint tests (no running server needed)
 └── unit/
-    ├── test_dxf_parser.py     — DXF parsing logic
+    ├── test_dxf_parser.py     — DXF parsing logic (flat + INSERT-based paths)
     └── test_normalize.py      — geometry normalization
 ```
 
@@ -98,6 +97,6 @@ Replace `desktop/src-tauri/icons/` with real artwork before shipping.
 
 - Engine and frontend communicate over `http://127.0.0.1:8765` (local loopback only).
 - The Tauri window is a webview wrapper around the React app; it does **not** start or supervise the engine process in development.
-- `engine/core/dxf/parser.py` expects UTF-8 DXF files (standard ezdxf output); ET CAD exports are UTF-8 by default.
+- `engine/core/dxf/parser.py` handles two DXF layouts: INSERT-based (ET CAD format — one block per piece) and flat modelspace (one polyline per layer). ET CAD files are often CP1252-encoded; the parser writes a temp file so `ezdxf.readfile()` can detect encoding automatically.
 - `engine/core/geometry/normalize.py` translates all piece polygons to origin (min_x=0, min_y=0) at parse time. Phase 3 canvas code works in normalized coordinates.
 - In Phase 7 (packaging), the engine will be compiled with PyInstaller and wired as a Tauri sidecar so the installer bundles everything into one executable.
