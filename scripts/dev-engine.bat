@@ -13,4 +13,5 @@ if not exist "%VENV_DIR%\Scripts\python.exe" (
 
 echo Starting OpenMarker engine on http://127.0.0.1:8765 ...
 cd /d "%ENGINE_DIR%"
+set PYTHONPATH=%ENGINE_DIR%
 "%VENV_DIR%\Scripts\python" api/main.py
