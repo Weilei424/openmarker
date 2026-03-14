@@ -7,7 +7,7 @@ import type { Placement, ViewportTransform } from "../types/canvas";
 import { computeFitViewport } from "../utils/placement";
 
 const MIN_SCALE = 0.1;
-const MAX_SCALE = 20;
+const MAX_SCALE = 40;
 const SCALE_STEP = 1.1;
 
 export function useViewport() {
