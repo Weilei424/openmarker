@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import shapely.affinity
-from shapely.geometry import MultiPolygon, Polygon
+from shapely.geometry import GeometryCollection, MultiPolygon, Polygon
 from shapely.validation import make_valid
 
 from core.dxf.parser import RawPiece
@@ -33,12 +33,17 @@ def normalize_piece(raw: RawPiece, piece_id: str) -> Piece:
         repaired = make_valid(polygon)
         notes.append("self-intersection repaired with make_valid")
 
-        if isinstance(repaired, MultiPolygon):
-            # Take the largest sub-polygon by area
-            polygon = max(repaired.geoms, key=lambda g: g.area)
-            notes.append("multi-polygon result: largest sub-polygon kept")
-        elif isinstance(repaired, Polygon):
+        if isinstance(repaired, Polygon):
             polygon = repaired
+        elif isinstance(repaired, (MultiPolygon, GeometryCollection)):
+            # Extract all polygon-type geometries and keep the largest
+            polys = [g for g in repaired.geoms if isinstance(g, Polygon) and not g.is_empty]
+            if not polys:
+                raise ValueError(
+                    f"Piece '{raw.layer}' became degenerate after repair: {repaired.geom_type}"
+                )
+            polygon = max(polys, key=lambda g: g.area)
+            notes.append(f"{repaired.geom_type} result: largest sub-polygon kept")
         else:
             raise ValueError(
                 f"Piece '{raw.layer}' became degenerate after repair: {repaired.geom_type}"
