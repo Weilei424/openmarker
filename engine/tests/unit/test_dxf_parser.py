@@ -1,5 +1,6 @@
 # Unit tests for engine/core/dxf/parser.py
 
+import io
 import sys
 import os
 import pytest
@@ -8,8 +9,8 @@ import ezdxf
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from helpers import make_dxf_bytes
-from core.dxf.parser import parse_dxf
+from helpers import make_dxf_bytes, make_insert_dxf_bytes
+from core.dxf.parser import parse_dxf, _chain_open_segments
 
 
 RECTANGLE = [(0, 0), (100, 0), (100, 80), (0, 80)]
@@ -66,3 +67,75 @@ def test_open_polyline_auto_closed():
 def test_invalid_dxf_bytes():
     with pytest.raises(ezdxf.DXFStructureError):
         parse_dxf(b"this is not a dxf file")
+
+
+# --- INSERT-based (ET CAD) path ---
+
+def test_insert_based_single_piece():
+    dxf = make_insert_dxf_bytes({"FRONT-BODICE": RECTANGLE})
+    pieces = parse_dxf(dxf)
+    assert len(pieces) == 1
+    assert pieces[0].layer == "FRONT-BODICE"
+
+
+def test_insert_based_multiple_pieces():
+    dxf = make_insert_dxf_bytes({
+        "FRONT": RECTANGLE,
+        "BACK": [(0, 0), (120, 0), (120, 100), (0, 100)],
+        "SLEEVE": TRIANGLE,
+    })
+    pieces = parse_dxf(dxf)
+    assert len(pieces) == 3
+    assert {p.layer for p in pieces} == {"FRONT", "BACK", "SLEEVE"}
+
+
+def test_insert_based_repeated_block():
+    """Two INSERTs referencing the same block should produce two pieces."""
+    doc = ezdxf.new("R2010")
+    msp = doc.modelspace()
+    blk = doc.blocks.new("SLEEVE")
+    blk.add_lwpolyline(RECTANGLE, close=True, dxfattribs={"layer": "1"})
+    msp.add_blockref("SLEEVE", insert=(0, 0))
+    msp.add_blockref("SLEEVE", insert=(200, 0))  # second instance
+    stream = io.StringIO()
+    doc.write(stream)
+    dxf = stream.getvalue().encode("utf-8")
+
+    pieces = parse_dxf(dxf)
+    assert len(pieces) == 2
+    assert pieces[0].layer == "SLEEVE"
+    assert pieces[1].layer == "SLEEVE_1"
+
+
+# --- Open-segment chaining ---
+
+def test_chain_open_segments_rectangle():
+    """Four open segments forming a rectangle should chain into one closed loop."""
+    segs = [
+        [(0, 0), (10, 0)],
+        [(10, 0), (10, 8)],
+        [(10, 8), (0, 8)],
+        [(0, 8), (0, 0)],
+    ]
+    result = _chain_open_segments(segs)
+    assert len(result) == 1
+    assert len(result[0]) >= 4
+
+
+def test_flat_file_open_segments():
+    """Flat modelspace with open segments that chain into a closed outline."""
+    doc = ezdxf.new("R2010")
+    msp = doc.modelspace()
+    doc.layers.add("PIECE")
+    # Rectangle split into four open segments on the same layer
+    msp.add_lwpolyline([(0, 0), (10, 0)], close=False, dxfattribs={"layer": "PIECE"})
+    msp.add_lwpolyline([(10, 0), (10, 8)], close=False, dxfattribs={"layer": "PIECE"})
+    msp.add_lwpolyline([(10, 8), (0, 8)], close=False, dxfattribs={"layer": "PIECE"})
+    msp.add_lwpolyline([(0, 8), (0, 0)], close=False, dxfattribs={"layer": "PIECE"})
+    stream = io.StringIO()
+    doc.write(stream)
+    dxf = stream.getvalue().encode("utf-8")
+
+    pieces = parse_dxf(dxf)
+    assert len(pieces) == 1
+    assert pieces[0].layer == "PIECE"
