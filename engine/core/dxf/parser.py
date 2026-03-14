@@ -177,22 +177,20 @@ def _parse_insert_based(doc, msp) -> list[RawPiece]:
     """
     Extract pieces from an INSERT-based file (ET CAD style).
 
-    Each INSERT in modelspace references a block that represents one piece.
-    We read the block definition directly (no transform needed — normalize_piece
-    will translate to origin anyway).
+    Each INSERT in modelspace is one piece instance.  If the same block is
+    referenced multiple times (e.g. two sleeves from one template), each
+    INSERT produces a separate RawPiece; duplicate names get a numeric suffix.
     """
     result: list[RawPiece] = []
-    seen_blocks: set[str] = set()
+    name_counts: dict[str, int] = {}
 
     for entity in msp:
         if entity.dxftype() != "INSERT":
             continue
 
         block_name = entity.dxf.name
-        # Skip internal AutoCAD blocks and duplicates
-        if block_name.startswith("*") or block_name in seen_blocks:
+        if block_name.startswith("*"):
             continue
-        seen_blocks.add(block_name)
 
         try:
             block = doc.blocks[block_name]
@@ -200,13 +198,16 @@ def _parse_insert_based(doc, msp) -> list[RawPiece]:
             continue
 
         closed_polys = _collect_closed_polylines(block)
-
         if not closed_polys:
             continue
 
-        # The piece outline is the largest closed polyline in the block
+        # Assign a unique layer name; append count suffix when a block repeats
+        count = name_counts.get(block_name, 0)
+        name_counts[block_name] = count + 1
+        piece_name = block_name if count == 0 else f"{block_name}_{count}"
+
         best = max(closed_polys, key=_polygon_area)
-        result.append(RawPiece(layer=block_name, points=best, is_closed=True))
+        result.append(RawPiece(layer=piece_name, points=best, is_closed=True))
 
     return result
 
@@ -215,35 +216,23 @@ def _parse_flat(msp) -> list[RawPiece]:
     """
     Fallback: extract pieces from a flat modelspace (no INSERTs).
 
-    Groups polylines by layer; picks the largest per layer.
+    Groups polylines by layer; picks the largest closed outline per layer.
+    Supports both natively-closed polylines and chained open segments.
     """
-    candidates: dict[str, list[list[tuple[float, float]]]] = {}
-
+    # Collect entities per non-ignored layer so _collect_closed_polylines
+    # can handle open-segment chaining within each layer independently.
+    by_layer: dict[str, list] = {}
     for entity in msp:
         layer = entity.dxf.layer
-        if layer in _IGNORED_LAYERS:
-            continue
-
-        dxftype = entity.dxftype()
-        if dxftype == "LWPOLYLINE":
-            points, closed = _extract_lwpolyline(entity)
-        elif dxftype == "POLYLINE":
-            points, closed = _extract_polyline(entity)
-        else:
-            continue
-
-        if len(points) < 3:
-            continue
-
-        if not closed and _distance(points[0], points[-1]) <= _CLOSE_TOLERANCE:
-            closed = True
-
-        if closed:
-            candidates.setdefault(layer, []).append(points)
+        if layer not in _IGNORED_LAYERS:
+            by_layer.setdefault(layer, []).append(entity)
 
     result: list[RawPiece] = []
-    for layer, polylines in candidates.items():
-        best = max(polylines, key=_polygon_area)
+    for layer, entities in by_layer.items():
+        closed_polys = _collect_closed_polylines(entities)
+        if not closed_polys:
+            continue
+        best = max(closed_polys, key=_polygon_area)
         result.append(RawPiece(layer=layer, points=best, is_closed=True))
 
     return result
