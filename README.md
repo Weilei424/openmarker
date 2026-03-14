@@ -64,7 +64,7 @@ This gives a lightweight desktop app with a modern UI and a strong geometry ecos
 ## Repository structure
 
 ```text
-fabric-layout-tool/
+openmarker/
 ├── README.md
 ├── CODEX.md
 ├── CLAUDE.md
