@@ -88,18 +88,28 @@ def _chain_open_segments(
 
     while remaining:
         chain = remaining.pop(0)
-        # Try to extend chain by appending connecting segments
+        # Try to extend chain from either end
         changed = True
         while changed:
             changed = False
             for i, seg in enumerate(remaining):
                 if _distance(chain[-1], seg[0]) <= _CLOSE_TOLERANCE:
-                    chain.extend(seg[1:])  # skip duplicate junction point
+                    chain.extend(seg[1:])
                     remaining.pop(i)
                     changed = True
                     break
                 elif _distance(chain[-1], seg[-1]) <= _CLOSE_TOLERANCE:
                     chain.extend(reversed(seg[:-1]))
+                    remaining.pop(i)
+                    changed = True
+                    break
+                elif _distance(chain[0], seg[-1]) <= _CLOSE_TOLERANCE:
+                    chain[:0] = seg[:-1]
+                    remaining.pop(i)
+                    changed = True
+                    break
+                elif _distance(chain[0], seg[0]) <= _CLOSE_TOLERANCE:
+                    chain[:0] = list(reversed(seg))[:-1]
                     remaining.pop(i)
                     changed = True
                     break
@@ -124,9 +134,14 @@ def _collect_closed_polylines(
     2. Chained open segments   — ET CAD splits each piece outline into multiple
        POLYLINE segments that connect end-to-end.  These are stitched together
        by _chain_open_segments() after collection.
+
+    Open segments are grouped by DXF layer before chaining.  ET CAD blocks
+    contain outlines for multiple sizes on different layers; mixing them
+    produces crossed polygons.
     """
     closed_polys: list[list[tuple[float, float]]] = []
-    open_segments: list[list[tuple[float, float]]] = []
+    # layer -> list of open segment point lists
+    open_by_layer: dict[str, list[list[tuple[float, float]]]] = {}
 
     for entity in entities:
         dxftype = entity.dxftype()
@@ -148,10 +163,12 @@ def _collect_closed_polylines(
             if len(points) >= 3:
                 closed_polys.append(points)
         else:
-            open_segments.append(points)
+            layer = entity.dxf.layer
+            open_by_layer.setdefault(layer, []).append(points)
 
-    # Try to assemble open segments into closed outlines
-    closed_polys.extend(_chain_open_segments(open_segments))
+    # Chain open segments per layer so outlines from different sizes don't mix
+    for segments in open_by_layer.values():
+        closed_polys.extend(_chain_open_segments(segments))
 
     return closed_polys
 
