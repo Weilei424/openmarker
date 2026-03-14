@@ -33,8 +33,7 @@ curl http://127.0.0.1:8765/ping
 # {"status":"ok","message":"OpenMarker engine running","version":"0.1.0"}
 
 # DXF import (Phase 2)
-curl -X POST http://127.0.0.1:8765/import-dxf \
-  -F "file=@examples/input/sample.dxf"
+curl.exe -X POST http://127.0.0.1:8765/import-dxf -F "file=@examples/input/sample.dxf"
 # {"pieces":[...],"piece_count":N,"skipped_count":0,"warnings":[]}
 ```
 
