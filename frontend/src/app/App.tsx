@@ -1,20 +1,29 @@
-// OpenMarker - Phase 2: DXF import wired into the app shell.
+// OpenMarker — Phase 3: Visual workspace with Konva canvas.
 // Layout: top bar | sidebar + canvas workspace | status bar.
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import type { EngineStatus, PingResponse } from "../types/engine";
 import { useImportDxf, type ImportOutcome } from "../hooks/useImportDxf";
 import { PieceList } from "../components/pieces/PieceList";
+import { CanvasWorkspace } from "../components/canvas/CanvasWorkspace";
+import { FabricPanel } from "../components/sidebar/FabricPanel";
 
 const ENGINE_URL = "http://127.0.0.1:8765";
 
 export default function App() {
   const [engineStatus, setEngineStatus] = useState<EngineStatus>("unknown");
   const [statusMessage, setStatusMessage] = useState("Engine not connected");
+  const [selectedPieceId, setSelectedPieceId] = useState<string | null>(null);
+  const [fabricWidthMm, setFabricWidthMm] = useState<number>(1500);
 
   const { status: importStatus, pieces, warnings, errorMessage, handleFileSelected } = useImportDxf();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Reset selection when a new set of pieces is imported.
+  useEffect(() => {
+    setSelectedPieceId(null);
+  }, [pieces]);
 
   const pingEngine = useCallback(async () => {
     setEngineStatus("connecting");
@@ -35,9 +44,9 @@ export default function App() {
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
-      // Reset input so the same file can be re-selected
+      // Reset input so the same file can be re-selected.
       e.target.value = "";
-      // Use the returned outcome — React state is async and would be stale here
+      // Use the returned outcome — React state is async and would be stale here.
       const outcome: ImportOutcome = await handleFileSelected(file);
       if (outcome.ok) {
         setStatusMessage(`${outcome.pieces.length} piece${outcome.pieces.length !== 1 ? "s" : ""} imported from ${file.name}`);
@@ -48,7 +57,6 @@ export default function App() {
     [handleFileSelected]
   );
 
-  // Update status bar message when import completes
   const importButtonLabel =
     importStatus === "loading" ? "Importing..." : "Import DXF";
 
@@ -68,6 +76,10 @@ export default function App() {
               {engineStatus === "connecting" ? "Connecting..." : "Ping Engine"}
             </button>
             <StatusDot status={engineStatus} />
+          </Section>
+
+          <Section title="Fabric">
+            <FabricPanel fabricWidthMm={fabricWidthMm} onChange={setFabricWidthMm} />
           </Section>
 
           <Section title="Layout">
@@ -93,7 +105,11 @@ export default function App() {
             {importStatus === "success" && (
               <>
                 <p style={styles.successText}>{pieces.length} piece{pieces.length !== 1 ? "s" : ""} imported</p>
-                <PieceList pieces={pieces} />
+                <PieceList
+                  pieces={pieces}
+                  selectedPieceId={selectedPieceId}
+                  onSelect={setSelectedPieceId}
+                />
                 {warnings.length > 0 && (
                   <div style={styles.warningBlock}>
                     {warnings.map((w, i) => (
@@ -110,9 +126,14 @@ export default function App() {
           </Section>
         </div>
 
-        {/* Canvas workspace placeholder */}
+        {/* Canvas workspace */}
         <div style={styles.canvas}>
-          <p style={styles.canvasPlaceholder}>Workspace — Phase 3</p>
+          <CanvasWorkspace
+            pieces={pieces}
+            selectedPieceId={selectedPieceId}
+            onSelectPiece={setSelectedPieceId}
+            fabricWidthMm={fabricWidthMm}
+          />
         </div>
       </div>
 
@@ -209,14 +230,7 @@ const styles = {
   },
   canvas: {
     flex: 1,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    background: "#111",
-  },
-  canvasPlaceholder: {
-    color: "var(--color-text-muted)",
-    fontSize: 13,
+    overflow: "hidden",
   },
   statusBar: {
     height: "var(--statusbar-height)",
