@@ -183,7 +183,6 @@ Isolate: DXF parsing, geometry normalization, collision checks, placement rules,
 2. Implement smallest working version.
 3. Add or update tests.
 4. Update docs if behavior or architecture changed.
-5. Do not run `git commit` or `git push`.
 
 ## When making tradeoffs
 
