@@ -2,7 +2,7 @@ type Point = [number, number];
 type Vector = [number, number];
 
 export function translatePolygon(poly: Point[], dx: number, dy: number): Point[] {
-  return poly.map(([x, y]) => [x + dx, y + dy]);
+  return poly.map(([x, y]) => [x + dx, y + dy] as Point);
 }
 
 /**
@@ -17,7 +17,7 @@ export function rotatePolygon(poly: Point[], deg: number, cx: number, cy: number
   return poly.map(([x, y]) => {
     const tx = x - cx;
     const ty = y - cy;
-    return [tx * cos - ty * sin + cx, tx * sin + ty * cos + cy];
+    return [tx * cos - ty * sin + cx, tx * sin + ty * cos + cy] as Point;
   });
 }
 
@@ -27,16 +27,14 @@ function getAxes(poly: Point[]): Vector[] {
     const [x1, y1] = poly[i];
     const [x2, y2] = poly[(i + 1) % poly.length];
     // Edge perpendicular (normal)
-    axes.push([-(y2 - y1), x2 - x1]);
+    axes.push([-(y2 - y1), x2 - x1] as Vector);
   }
   return axes;
 }
 
 function project(poly: Point[], axis: Vector): { min: number; max: number } {
-  const len = Math.sqrt(axis[0] ** 2 + axis[1] ** 2);
-  if (len === 0) return { min: 0, max: 0 };
-  const nx = axis[0] / len;
-  const ny = axis[1] / len;
+  const nx = axis[0];
+  const ny = axis[1];
   const dots = poly.map(([x, y]) => x * nx + y * ny);
   return { min: Math.min(...dots), max: Math.max(...dots) };
 }
@@ -50,8 +48,13 @@ function project(poly: Point[], axis: Vector): { min: number; max: number } {
 export function polygonsIntersect(polyA: Point[], polyB: Point[]): boolean {
   const axes = [...getAxes(polyA), ...getAxes(polyB)];
   for (const axis of axes) {
-    const a = project(polyA, axis);
-    const b = project(polyB, axis);
+    const len = Math.sqrt(axis[0] ** 2 + axis[1] ** 2);
+    if (len === 0) continue;
+    const nx = axis[0] / len;
+    const ny = axis[1] / len;
+    const normalised: Vector = [nx, ny];
+    const a = project(polyA, normalised);
+    const b = project(polyB, normalised);
     // Strict inequality: touching edges are not considered overlapping
     if (a.max <= b.min || b.max <= a.min) return false;
   }
