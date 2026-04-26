@@ -1,5 +1,5 @@
-// Renders a single pattern piece as a Konva Line (closed polygon).
-// Click to select; selected pieces render in orange instead of blue.
+// Renders a single pattern piece as a Konva Group (closed polygon).
+// Click to select; drag to reposition; rotation handle when selected.
 
 import { Line } from "react-konva";
 import type { Piece } from "../../types/engine";
@@ -9,18 +9,20 @@ interface Props {
   piece: Piece;
   placement: Placement;
   isSelected: boolean;
+  isColliding: boolean;
   onSelect: () => void;
+  onDragEnd: (id: string, pos: { x: number; y: number }) => void;
 }
 
-export function PieceShape({ piece, placement, isSelected, onSelect }: Props) {
-  const stroke = isSelected ? "#ff9800" : "#4a9eff";
-  const fill = isSelected ? "rgba(255, 152, 0, 0.12)" : "rgba(74, 158, 255, 0.08)";
+export function PieceShape({ piece, placement, isSelected, isColliding, onSelect }: Props) {
+  const stroke = isColliding ? "#e53935" : isSelected ? "#ff9800" : "#4a9eff";
+  const fill = isColliding
+    ? "rgba(229, 57, 53, 0.25)"
+    : isSelected
+    ? "rgba(255, 152, 0, 0.12)"
+    : "rgba(74, 158, 255, 0.08)";
 
-  // Flatten polygon vertices offset by placement position.
-  const points = piece.polygon.flatMap(([x, y]) => [
-    placement.x + x,
-    placement.y + y,
-  ]);
+  const points = piece.polygon.flatMap(([x, y]) => [placement.x + x, placement.y + y]);
 
   return (
     <Line

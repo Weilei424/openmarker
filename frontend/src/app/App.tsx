@@ -4,6 +4,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import type { EngineStatus, PingResponse } from "../types/engine";
 import { useImportDxf, type ImportOutcome } from "../hooks/useImportDxf";
+import { usePlacements } from "../hooks/usePlacements";
 import { PieceList } from "../components/pieces/PieceList";
 import { CanvasWorkspace } from "../components/canvas/CanvasWorkspace";
 import { FabricPanel } from "../components/sidebar/FabricPanel";
@@ -17,6 +18,7 @@ export default function App() {
   const [fabricWidthMm, setFabricWidthMm] = useState<number>(1500);
 
   const { status: importStatus, pieces, warnings, errorMessage, handleFileSelected } = useImportDxf();
+  const { placements, updatePlacement } = usePlacements(pieces);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -130,6 +132,8 @@ export default function App() {
         <div style={styles.canvas}>
           <CanvasWorkspace
             pieces={pieces}
+            placements={placements}
+            updatePlacement={updatePlacement}
             selectedPieceId={selectedPieceId}
             onSelectPiece={setSelectedPieceId}
             fabricWidthMm={fabricWidthMm}
