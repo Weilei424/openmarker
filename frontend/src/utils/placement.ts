@@ -1,22 +1,24 @@
-// Pure utility functions for initial piece placement and viewport fitting.
-// No side effects — easy to unit test.
-
 import type { Piece } from "../types/engine";
 import type { Placement, ViewportTransform } from "../types/canvas";
 
 const GAP_MM = 10;
 
+export function snapToGrid(value: number, grid = 10): number {
+  // Use Math.floor + 0.5 offset for symmetric (round-half-away-from-zero) behaviour,
+  // so that -15 snaps to -20 rather than -10.
+  return Math.sign(value) * Math.round(Math.abs(value) / grid) * grid;
+}
+
 /**
  * Arrange pieces left-to-right in a horizontal strip with a gap between each.
- * All pieces start at y=GAP_MM. The engine has already translated each piece
- * to origin (0,0), so we only need to shift by x.
+ * All pieces start at y=GAP_MM. Returns rotationDeg: 0 for all pieces.
  */
 export function computePlacements(pieces: Piece[]): Placement[] {
   const placements: Placement[] = [];
   let cursorX = GAP_MM;
 
   for (const piece of pieces) {
-    placements.push({ pieceId: piece.id, x: cursorX, y: GAP_MM });
+    placements.push({ pieceId: piece.id, x: cursorX, y: GAP_MM, rotationDeg: 0 });
     cursorX += piece.bbox.width + GAP_MM;
   }
 
@@ -37,7 +39,6 @@ export function computeFitViewport(
     return { scale: 1, x: 0, y: 0 };
   }
 
-  // Build a lookup so we can find each piece's bbox by id.
   const pieceMap = new Map(pieces.map((p) => [p.id, p]));
 
   let minX = Infinity;
@@ -61,12 +62,10 @@ export function computeFitViewport(
     return { scale: 1, x: 0, y: 0 };
   }
 
-  // Fit with 10% padding on each side (i.e. 80% of stage used).
   const scaleX = (stageW * 0.8) / totalW;
   const scaleY = (stageH * 0.8) / totalH;
   const scale = Math.min(scaleX, scaleY);
 
-  // Center the content.
   const contentPxW = totalW * scale;
   const contentPxH = totalH * scale;
   const offsetX = (stageW - contentPxW) / 2 - minX * scale;

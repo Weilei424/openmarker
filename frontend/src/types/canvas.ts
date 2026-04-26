@@ -2,8 +2,9 @@
 
 export interface Placement {
   pieceId: string;
-  x: number; // mm from workspace origin (left edge of fabric)
-  y: number; // mm from workspace origin (top edge)
+  x: number;           // mm — top-left of unrotated bbox from workspace origin
+  y: number;           // mm — top-left of unrotated bbox from workspace origin
+  rotationDeg: number; // degrees clockwise, normalised to [0, 360)
 }
 
 export interface ViewportTransform {
