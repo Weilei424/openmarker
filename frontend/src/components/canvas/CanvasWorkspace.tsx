@@ -1,8 +1,9 @@
 // Main Konva canvas component for the visual workspace.
-// Renders fabric bounds, placed piece outlines, and handles zoom/pan.
+// Handles zoom/pan, R-key rotation, and per-piece rotation handle.
 
 import { useRef, useState, useEffect } from "react";
-import { Stage, Layer, Rect, Line } from "react-konva";
+import { Stage, Layer, Rect, Line, Circle } from "react-konva";
+import type { KonvaEventObject } from "konva/lib/Node";
 import type { Piece } from "../../types/engine";
 import type { Placement } from "../../types/canvas";
 import { useViewport } from "../../hooks/useViewport";
@@ -10,6 +11,7 @@ import { PieceShape } from "./PieceShape";
 import { ViewportControls } from "./ViewportControls";
 
 const FABRIC_HEIGHT_MM = 99_000;
+const HANDLE_DISTANCE_MM = 20;
 
 interface Props {
   pieces: Piece[];
@@ -53,8 +55,59 @@ export function CanvasWorkspace({
   // eslint-disable-next-line react-hooks/exhaustive-deps -- fire only on new import; drag updates must not re-fit the viewport
   }, [pieces]);
 
+  // R key: rotate selected piece by 90° CW
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.key === "r" || e.key === "R") && selectedPieceId !== null) {
+        const current = placements.find((p) => p.pieceId === selectedPieceId);
+        if (!current) return;
+        const rotationDeg = (current.rotationDeg + 90) % 360;
+        updatePlacement(selectedPieceId, { rotationDeg });
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selectedPieceId, placements, updatePlacement]);
+
   const handleFit = () => {
     fitToContent(placements, pieces, stageSize.w, stageSize.h);
+  };
+
+  // Compute rotation handle position for selected piece
+  const rotationHandle = (() => {
+    if (!selectedPieceId) return null;
+    const pl = placements.find((p) => p.pieceId === selectedPieceId);
+    const piece = pieces.find((p) => p.id === selectedPieceId);
+    if (!pl || !piece) return null;
+
+    const cx = pl.x + piece.bbox.width / 2;
+    const cy = pl.y + piece.bbox.height / 2;
+    const rad = ((pl.rotationDeg - 90) * Math.PI) / 180;
+    const hx = cx + HANDLE_DISTANCE_MM * Math.cos(rad);
+    const hy = cy + HANDLE_DISTANCE_MM * Math.sin(rad);
+    return { cx, cy, hx, hy };
+  })();
+
+  const handleRotateDragMove = (e: KonvaEventObject<DragEvent>) => {
+    if (!selectedPieceId || !rotationHandle) return;
+    const { cx, cy } = rotationHandle;
+    const angle = Math.atan2(e.target.y() - cy, e.target.x() - cx) * (180 / Math.PI);
+    // atan2 = 0 means "right"; rotate +90 so that "up" = 0° Konva rotation
+    const rotationDeg = (angle + 90 + 360) % 360;
+    updatePlacement(selectedPieceId, { rotationDeg });
+  };
+
+  const handleRotateDragEnd = (e: KonvaEventObject<DragEvent>) => {
+    if (!selectedPieceId || !rotationHandle) return;
+    const { cx, cy } = rotationHandle;
+    const angle = Math.atan2(e.target.y() - cy, e.target.x() - cx) * (180 / Math.PI);
+    const raw = (angle + 90 + 360) % 360;
+    const snapped = Math.round(raw / 5) * 5 % 360;
+    updatePlacement(selectedPieceId, { rotationDeg: snapped });
+    // Reposition handle to match snapped rotation so it doesn't jump on next render
+    const snapRad = ((snapped - 90) * Math.PI) / 180;
+    e.target.x(cx + HANDLE_DISTANCE_MM * Math.cos(snapRad));
+    e.target.y(cy + HANDLE_DISTANCE_MM * Math.sin(snapRad));
   };
 
   return (
@@ -75,6 +128,7 @@ export function CanvasWorkspace({
           if (e.target === e.target.getStage()) onSelectPiece(null);
         }}
       >
+        {/* Layer 1: fabric background bounds */}
         <Layer listening={false}>
           <Rect
             x={0}
@@ -92,6 +146,7 @@ export function CanvasWorkspace({
           />
         </Layer>
 
+        {/* Layer 2: piece outlines + rotation handle */}
         <Layer>
           {placements.map((pl) => {
             const piece = pieces.find((p) => p.id === pl.pieceId);
@@ -108,6 +163,40 @@ export function CanvasWorkspace({
               />
             );
           })}
+
+          {/* Rotation handle — only when a piece is selected */}
+          {rotationHandle && (
+            <>
+              <Line
+                points={[rotationHandle.cx, rotationHandle.cy, rotationHandle.hx, rotationHandle.hy]}
+                stroke="#ff9800"
+                strokeWidth={1}
+                strokeScaleEnabled={false}
+                dash={[4, 3]}
+                listening={false}
+              />
+              <Circle
+                x={rotationHandle.hx}
+                y={rotationHandle.hy}
+                radius={6}
+                fill="#ff9800"
+                stroke="white"
+                strokeWidth={1.5}
+                strokeScaleEnabled={false}
+                draggable
+                onDragMove={handleRotateDragMove}
+                onDragEnd={handleRotateDragEnd}
+                onMouseEnter={(e) => {
+                  const container = e.target.getStage()?.container();
+                  if (container) container.style.cursor = "crosshair";
+                }}
+                onMouseLeave={(e) => {
+                  const container = e.target.getStage()?.container();
+                  if (container) container.style.cursor = "default";
+                }}
+              />
+            </>
+          )}
         </Layer>
       </Stage>
 
