@@ -7,6 +7,7 @@ import type { KonvaEventObject } from "konva/lib/Node";
 import type { Piece } from "../../types/engine";
 import type { Placement } from "../../types/canvas";
 import { useViewport } from "../../hooks/useViewport";
+import { useCollisions } from "../../hooks/useCollisions";
 import { PieceShape } from "./PieceShape";
 import { ViewportControls } from "./ViewportControls";
 
@@ -45,6 +46,8 @@ export function CanvasWorkspace({
 
   const { transform, setTransform, handleWheel, fitToContent, zoomIn, zoomOut } =
     useViewport();
+
+  const collidingIds = useCollisions(placements, pieces);
 
   useEffect(() => {
     if (pieces.length === 0) return;
@@ -163,7 +166,7 @@ export function CanvasWorkspace({
                 piece={piece}
                 placement={pl}
                 isSelected={piece.id === selectedPieceId}
-                isColliding={false}
+                isColliding={collidingIds.has(piece.id)}
                 onSelect={() => onSelectPiece(piece.id)}
                 onDragEnd={(id, pos) => updatePlacement(id, pos)}
               />
