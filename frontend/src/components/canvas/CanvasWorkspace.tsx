@@ -1,7 +1,7 @@
 // Main Konva canvas component for the visual workspace.
 // Handles zoom/pan, R-key rotation, and per-piece rotation handle.
 
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, useCallback } from "react";
 import { Stage, Layer, Rect, Line, Circle } from "react-konva";
 import type { KonvaEventObject } from "konva/lib/Node";
 import type { Piece } from "../../types/engine";
@@ -88,27 +88,33 @@ export function CanvasWorkspace({
     return { cx, cy, hx, hy };
   })();
 
-  const handleRotateDragMove = (e: KonvaEventObject<DragEvent>) => {
-    if (!selectedPieceId || !rotationHandle) return;
-    const { cx, cy } = rotationHandle;
+  // Pin rotationHandle in a ref so drag handlers don't close over a stale value
+  const rotationHandleRef = useRef(rotationHandle);
+  rotationHandleRef.current = rotationHandle;
+
+  const handleRotateDragMove = useCallback((e: KonvaEventObject<DragEvent>) => {
+    const rh = rotationHandleRef.current;
+    if (!selectedPieceId || !rh) return;
+    const { cx, cy } = rh;
     const angle = Math.atan2(e.target.y() - cy, e.target.x() - cx) * (180 / Math.PI);
     // atan2 = 0 means "right"; rotate +90 so that "up" = 0° Konva rotation
     const rotationDeg = (angle + 90 + 360) % 360;
     updatePlacement(selectedPieceId, { rotationDeg });
-  };
+  }, [selectedPieceId, updatePlacement]);
 
-  const handleRotateDragEnd = (e: KonvaEventObject<DragEvent>) => {
-    if (!selectedPieceId || !rotationHandle) return;
-    const { cx, cy } = rotationHandle;
+  const handleRotateDragEnd = useCallback((e: KonvaEventObject<DragEvent>) => {
+    const rh = rotationHandleRef.current;
+    if (!selectedPieceId || !rh) return;
+    const { cx, cy } = rh;
     const angle = Math.atan2(e.target.y() - cy, e.target.x() - cx) * (180 / Math.PI);
     const raw = (angle + 90 + 360) % 360;
-    const snapped = Math.round(raw / 5) * 5 % 360;
+    const snapped = (Math.round(raw / 5) * 5) % 360;
     updatePlacement(selectedPieceId, { rotationDeg: snapped });
     // Reposition handle to match snapped rotation so it doesn't jump on next render
     const snapRad = ((snapped - 90) * Math.PI) / 180;
     e.target.x(cx + HANDLE_DISTANCE_MM * Math.cos(snapRad));
     e.target.y(cy + HANDLE_DISTANCE_MM * Math.sin(snapRad));
-  };
+  }, [selectedPieceId, updatePlacement]);
 
   return (
     <div ref={containerRef} style={styles.container}>
@@ -184,6 +190,11 @@ export function CanvasWorkspace({
                 strokeWidth={1.5}
                 strokeScaleEnabled={false}
                 draggable
+                onDragStart={(e) => {
+                  e.cancelBubble = true;
+                  const stage = e.target.getStage();
+                  if (stage) stage.stopDrag();
+                }}
                 onDragMove={handleRotateDragMove}
                 onDragEnd={handleRotateDragEnd}
                 onMouseEnter={(e) => {

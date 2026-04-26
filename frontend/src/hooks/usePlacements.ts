@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import type { Piece } from "../types/engine";
 import type { Placement } from "../types/canvas";
 import { computePlacements } from "../utils/placement";
@@ -13,14 +13,14 @@ export function usePlacements(pieces: Piece[]) {
     setPlacements(computePlacements(pieces));
   }, [pieces]);
 
-  function updatePlacement(
-    id: string,
-    delta: Partial<Omit<Placement, "pieceId">>
-  ) {
-    setPlacements((prev) =>
-      prev.map((p) => (p.pieceId === id ? { ...p, ...delta } : p))
-    );
-  }
+  const updatePlacement = useCallback(
+    (id: string, delta: Partial<Omit<Placement, "pieceId">>) => {
+      setPlacements((prev) =>
+        prev.map((p) => (p.pieceId === id ? { ...p, ...delta } : p))
+      );
+    },
+    []
+  );
 
   function resetPlacements() {
     setPlacements(computePlacements(pieces));
