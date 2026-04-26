@@ -14,7 +14,8 @@ interface Props {
   onDragEnd: (id: string, pos: { x: number; y: number }) => void;
 }
 
-export function PieceShape({ piece, placement, isSelected, isColliding, onSelect }: Props) {
+// onDragEnd is wired to Konva drag events in Task 6 (draggable Group rewrite).
+export function PieceShape({ piece, placement, isSelected, isColliding, onSelect, onDragEnd: _onDragEnd }: Props) {
   const stroke = isColliding ? "#e53935" : isSelected ? "#ff9800" : "#4a9eff";
   const fill = isColliding
     ? "rgba(229, 57, 53, 0.25)"

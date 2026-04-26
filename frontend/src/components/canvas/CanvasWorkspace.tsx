@@ -50,7 +50,8 @@ export function CanvasWorkspace({
       fitToContent(placements, pieces, stageSize.w, stageSize.h);
     }, 0);
     return () => clearTimeout(id);
-  }, [pieces]); // eslint-disable-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- fire only on new import; drag updates must not re-fit the viewport
+  }, [pieces]);
 
   const handleFit = () => {
     fitToContent(placements, pieces, stageSize.w, stageSize.h);
