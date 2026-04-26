@@ -41,6 +41,8 @@ export function PieceShape({
   const cy = piece.bbox.height / 2;
 
   const handleDragEnd = (e: KonvaEventObject<DragEvent>) => {
+    const container = e.target.getStage()?.container();
+    if (container) container.style.cursor = "grab"; // revert from "grabbing"
     // Group position after drag: (placement.x + cx + drag_delta_x, placement.y + cy + drag_delta_y)
     // Recover top-left: subtract cx/cy, then snap.
     const rawX = e.target.x() - cx;
