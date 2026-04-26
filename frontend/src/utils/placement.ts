@@ -4,8 +4,8 @@ import type { Placement, ViewportTransform } from "../types/canvas";
 const GAP_MM = 10;
 
 export function snapToGrid(value: number, grid = 10): number {
-  // Use Math.floor + 0.5 offset for symmetric (round-half-away-from-zero) behaviour,
-  // so that -15 snaps to -20 rather than -10.
+  // Round half away from zero so that negative midpoints (e.g. -15 → -20)
+  // are symmetric with positive ones (e.g. 15 → 20).
   return Math.sign(value) * Math.round(Math.abs(value) / grid) * grid;
 }
 
