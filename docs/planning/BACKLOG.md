@@ -44,12 +44,12 @@
 - [ ] Viewport regression tests
 
 ### Phase 4 — Manual editing
-- [ ] Drag pieces on canvas
-- [ ] Rotate pieces (keyboard or handle)
-- [ ] Snap behavior (optional)
-- [ ] Collision highlight feedback
-- [ ] Placement state model (piece id → x, y, rotation)
-- [ ] Regression tests for drag/rotate transformations
+- [x] Drag pieces on canvas
+- [x] Rotate pieces (R key + handle)
+- [x] Snap behavior (10 mm grid, drag-end)
+- [x] Collision highlight feedback
+- [x] Placement state model (usePlacements hook: pieceId → x, y, rotationDeg)
+- [x] Regression tests for drag/rotate transformations
 
 ### Phase 5 — Simple auto layout
 - [ ] User inputs fabric width
