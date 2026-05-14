@@ -55,7 +55,7 @@ const styles = {
   itemSelected: {
     background: "rgba(74, 158, 255, 0.1)",
     borderLeft: "3px solid #4a9eff",
-    paddingLeft: 5, // compensate for wider border
+    paddingLeft: 6, // compensate for wider border (3px - 1px = 2px extra, so 8 - 2 = 6)
   },
   name: {
     fontSize: 12,

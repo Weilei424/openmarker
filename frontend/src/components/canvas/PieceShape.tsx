@@ -87,7 +87,6 @@ export function PieceShape({
         fill={fill}
         strokeWidth={1}
         strokeScaleEnabled={false}
-        listening={false}
       />
     </Group>
   );

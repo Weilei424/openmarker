@@ -187,17 +187,13 @@ export function CanvasWorkspace({
               <Circle
                 x={rotationHandle.hx}
                 y={rotationHandle.hy}
-                radius={6}
+                radius={Math.max(4, 8 / transform.scale)}
                 fill="#ff9800"
                 stroke="white"
                 strokeWidth={1.5}
                 strokeScaleEnabled={false}
                 draggable
-                onDragStart={(e) => {
-                  e.cancelBubble = true;
-                  const stage = e.target.getStage();
-                  if (stage) stage.stopDrag();
-                }}
+                onMouseDown={(e) => { e.cancelBubble = true; }}
                 onDragMove={handleRotateDragMove}
                 onDragEnd={handleRotateDragEnd}
                 onMouseEnter={(e) => {
