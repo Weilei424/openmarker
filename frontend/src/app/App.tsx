@@ -4,6 +4,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import type { EngineStatus, PingResponse } from "../types/engine";
 import { useImportDxf, type ImportOutcome } from "../hooks/useImportDxf";
+import { usePlacements } from "../hooks/usePlacements";
 import { PieceList } from "../components/pieces/PieceList";
 import { CanvasWorkspace } from "../components/canvas/CanvasWorkspace";
 import { FabricPanel } from "../components/sidebar/FabricPanel";
@@ -17,6 +18,7 @@ export default function App() {
   const [fabricWidthMm, setFabricWidthMm] = useState<number>(1500);
 
   const { status: importStatus, pieces, warnings, errorMessage, handleFileSelected } = useImportDxf();
+  const { placements, updatePlacement } = usePlacements(pieces);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -50,6 +52,9 @@ export default function App() {
       const outcome: ImportOutcome = await handleFileSelected(file);
       if (outcome.ok) {
         setStatusMessage(`${outcome.pieces.length} piece${outcome.pieces.length !== 1 ? "s" : ""} imported from ${file.name}`);
+        // Auto-size fabric width to contain the initial single-row layout (10 mm gap between pieces).
+        const totalW = outcome.pieces.reduce((sum, p) => sum + p.bbox.width + 10, 10);
+        setFabricWidthMm(Math.ceil(totalW / 10) * 10);
       } else {
         setStatusMessage(`Import failed: ${outcome.errorMessage}`);
       }
@@ -130,6 +135,8 @@ export default function App() {
         <div style={styles.canvas}>
           <CanvasWorkspace
             pieces={pieces}
+            placements={placements}
+            updatePlacement={updatePlacement}
             selectedPieceId={selectedPieceId}
             onSelectPiece={setSelectedPieceId}
             fabricWidthMm={fabricWidthMm}

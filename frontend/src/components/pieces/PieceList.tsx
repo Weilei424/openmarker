@@ -46,16 +46,21 @@ const styles = {
     gap: 4,
   },
   item: {
-    padding: "6px 8px",
+    paddingTop: 6,
+    paddingRight: 8,
+    paddingBottom: 6,
+    paddingLeft: 6,
     background: "rgba(255,255,255,0.04)",
     borderRadius: 4,
-    border: "1px solid var(--color-border)",
+    borderTop: "1px solid var(--color-border)",
+    borderRight: "1px solid var(--color-border)",
+    borderBottom: "1px solid var(--color-border)",
+    borderLeft: "3px solid transparent",
     cursor: "pointer" as const,
   },
   itemSelected: {
     background: "rgba(74, 158, 255, 0.1)",
     borderLeft: "3px solid #4a9eff",
-    paddingLeft: 5, // compensate for wider border
   },
   name: {
     fontSize: 12,

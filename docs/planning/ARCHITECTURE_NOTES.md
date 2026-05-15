@@ -36,6 +36,18 @@
 | `frontend/utils/placement.ts` | Pure placement math (no side effects) |
 | `desktop/src-tauri/` | Window creation, sidecar lifecycle (Phase 7) |
 
+## Phase 4 Decisions
+
+**Placement state lives in `usePlacements`** — A React hook in `App.tsx` owns the `Placement[]` array (pieceId, x, y, rotationDeg). It initialises from `computePlacements(pieces)` on each import and exposes `updatePlacement(id, delta)` for drag/rotate edits. Rotations are stored as float degrees; the engine can accept arbitrary angles.
+
+**Collision detection: SAT + out-of-bounds in `useCollisions`** — `computeCollidingIds` checks all piece pairs with the Separating Axis Theorem and also flags any piece whose rotated-polygon AABB extends outside the fabric bounds (x < 0, x > fabricWidthMm, or y < 0). Results drive red highlight in `PieceShape`.
+
+**Manual panning replaces Stage `draggable`** — Konva's built-in Stage dragging conflicts with child-node dragging: both register a drag target on `mousedown`, causing the canvas to pan after every piece drag. Stage `draggable` is removed; panning is implemented manually via `onMouseDown/Move/Up` on the Stage, activating only when `e.target === stage` (empty canvas click). A `window.mouseup` listener clears pan state if the mouse exits the Stage.
+
+**Smooth rotation via direct Konva mutation** — During rotation-handle drag, `onDragMove` directly calls `layer.findOne('#piece-X').rotation(deg)` and updates the dashed line's points, bypassing React state. This avoids triggering React re-renders and collision-detection overhead on every mousemove, and prevents react-konva from resetting the Circle's `x/y` props mid-drag (which would snap the handle back to the arc each frame). The final angle is committed to React state on `dragEnd` with a 1° snap.
+
+**CJK encoding detection in parser** — After the initial `ezdxf.readfile()`, block/layer names are inspected for chars in U+0080–U+00FF (Latin supplement). This range is the signature of GBK or Big5 bytes misread as CP1252. If detected, the file is re-read with `encoding='gbk'` then `'big5'` as fallback, enabling correct display of Simplified and Traditional Chinese piece names.
+
 ## Design Constraints
 
 - **Offline-first:** No network calls outside `127.0.0.1`. No CDN assets, no telemetry.
