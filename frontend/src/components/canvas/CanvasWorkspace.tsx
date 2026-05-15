@@ -8,6 +8,7 @@ import type { Piece } from "../../types/engine";
 import type { Placement } from "../../types/canvas";
 import { useViewport } from "../../hooks/useViewport";
 import { useCollisions } from "../../hooks/useCollisions";
+import { computePlacements } from "../../utils/placement";
 import { PieceShape } from "./PieceShape";
 import { ViewportControls } from "./ViewportControls";
 
@@ -49,13 +50,17 @@ export function CanvasWorkspace({
 
   const collidingIds = useCollisions(placements, pieces);
 
+  // Auto-fit when a new set of pieces is imported.
+  // Use computePlacements(pieces) directly to avoid a stale-closure on `placements`
+  // (usePlacements resets placement state asynchronously, so the prop may still
+  // hold the previous import's values when this effect fires).
   useEffect(() => {
     if (pieces.length === 0) return;
     const id = setTimeout(() => {
-      fitToContent(placements, pieces, stageSize.w, stageSize.h);
+      fitToContent(computePlacements(pieces), pieces, stageSize.w, stageSize.h);
     }, 0);
     return () => clearTimeout(id);
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- fire only on new import; drag updates must not re-fit the viewport
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- fire only on new import
   }, [pieces]);
 
   // R key: rotate selected piece by 90° CW
@@ -71,6 +76,38 @@ export function CanvasWorkspace({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [selectedPieceId, placements, updatePlacement]);
+
+  // Manual panning: track mousedown on empty Stage area, update transform on mousemove.
+  // Using refs avoids stale closures and prevents re-renders during pan.
+  const panningRef = useRef<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    const onWindowMouseUp = () => { panningRef.current = null; };
+    window.addEventListener("mouseup", onWindowMouseUp);
+    return () => window.removeEventListener("mouseup", onWindowMouseUp);
+  }, []);
+
+  const handleStageMouseDown = useCallback((e: KonvaEventObject<MouseEvent>) => {
+    if (e.target !== e.target.getStage()) return;
+    panningRef.current = { x: e.evt.clientX, y: e.evt.clientY };
+    const container = e.target.getStage()?.container();
+    if (container) container.style.cursor = "grabbing";
+  }, []);
+
+  const handleStageMouseMove = useCallback((e: KonvaEventObject<MouseEvent>) => {
+    if (!panningRef.current) return;
+    const dx = e.evt.clientX - panningRef.current.x;
+    const dy = e.evt.clientY - panningRef.current.y;
+    panningRef.current = { x: e.evt.clientX, y: e.evt.clientY };
+    setTransform((t) => ({ ...t, x: t.x + dx, y: t.y + dy }));
+  }, [setTransform]);
+
+  const handleStageMouseUp = useCallback((e: KonvaEventObject<MouseEvent>) => {
+    if (!panningRef.current) return;
+    panningRef.current = null;
+    const container = e.target.getStage()?.container();
+    if (container) container.style.cursor = "default";
+  }, []);
 
   const handleFit = () => {
     fitToContent(placements, pieces, stageSize.w, stageSize.h);
@@ -97,10 +134,6 @@ export function CanvasWorkspace({
   const rotationHandleRef = useRef(rotationHandle);
   rotationHandleRef.current = rotationHandle;
 
-  const handleRotateDragStart = useCallback((e: KonvaEventObject<DragEvent>) => {
-    e.target.getStage()?.draggable(false);
-  }, []);
-
   const handleRotateDragMove = useCallback((e: KonvaEventObject<DragEvent>) => {
     const rh = rotationHandleRef.current;
     if (!selectedPieceId || !rh) return;
@@ -112,7 +145,6 @@ export function CanvasWorkspace({
   }, [selectedPieceId, updatePlacement]);
 
   const handleRotateDragEnd = useCallback((e: KonvaEventObject<DragEvent>) => {
-    e.target.getStage()?.draggable(true);
     const rh = rotationHandleRef.current;
     if (!selectedPieceId || !rh) return;
     const { cx, cy, handleDist } = rh;
@@ -131,15 +163,14 @@ export function CanvasWorkspace({
       <Stage
         width={stageSize.w}
         height={stageSize.h}
-        draggable
         scaleX={transform.scale}
         scaleY={transform.scale}
         x={transform.x}
         y={transform.y}
         onWheel={handleWheel}
-        onDragEnd={(e) => {
-          setTransform((t) => ({ ...t, x: e.target.x(), y: e.target.y() }));
-        }}
+        onMouseDown={handleStageMouseDown}
+        onMouseMove={handleStageMouseMove}
+        onMouseUp={handleStageMouseUp}
         onClick={(e) => {
           if (e.target === e.target.getStage()) onSelectPiece(null);
         }}
@@ -201,7 +232,6 @@ export function CanvasWorkspace({
                 strokeScaleEnabled={false}
                 draggable
                 onMouseDown={(e) => { e.cancelBubble = true; }}
-                onDragStart={handleRotateDragStart}
                 onDragMove={handleRotateDragMove}
                 onDragEnd={handleRotateDragEnd}
                 onMouseEnter={(e) => {

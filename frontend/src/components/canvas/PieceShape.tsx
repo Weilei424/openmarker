@@ -41,13 +41,11 @@ export function PieceShape({
   const cy = piece.bbox.height / 2;
 
   const handleDragStart = (e: KonvaEventObject<DragEvent>) => {
-    e.target.getStage()?.draggable(false);
     const container = e.target.getStage()?.container();
     if (container) container.style.cursor = "grabbing";
   };
 
   const handleDragEnd = (e: KonvaEventObject<DragEvent>) => {
-    e.target.getStage()?.draggable(true);
     const container = e.target.getStage()?.container();
     if (container) container.style.cursor = "grab";
     // Group position after drag: (placement.x + cx + drag_delta_x, placement.y + cy + drag_delta_y)
