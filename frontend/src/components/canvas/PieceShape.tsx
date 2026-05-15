@@ -67,6 +67,7 @@ export function PieceShape({
 
   return (
     <Group
+      id={`piece-${piece.id}`}
       x={placement.x + cx}
       y={placement.y + cy}
       offsetX={cx}

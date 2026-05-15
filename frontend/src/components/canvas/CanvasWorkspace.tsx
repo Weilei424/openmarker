@@ -3,6 +3,7 @@
 
 import { useRef, useState, useEffect, useCallback } from "react";
 import { Stage, Layer, Rect, Line, Circle } from "react-konva";
+import type Konva from "konva";
 import type { KonvaEventObject } from "konva/lib/Node";
 import type { Piece } from "../../types/engine";
 import type { Placement } from "../../types/canvas";
@@ -49,6 +50,11 @@ export function CanvasWorkspace({
     useViewport();
 
   const collidingIds = useCollisions(placements, pieces, fabricWidthMm);
+
+  // Ref to Layer 2 (pieces + handles) for direct Konva node manipulation during
+  // rotation drag, avoiding React re-renders and the collision-detection overhead
+  // they carry on every mousemove.
+  const layer2Ref = useRef<Konva.Layer | null>(null);
 
   // Auto-fit when a new set of pieces is imported.
   // Use computePlacements(pieces) directly to avoid a stale-closure on `placements`
@@ -141,8 +147,18 @@ export function CanvasWorkspace({
     const angle = Math.atan2(e.target.y() - cy, e.target.x() - cx) * (180 / Math.PI);
     // atan2 = 0 means "right"; rotate +90 so that "up" = 0° Konva rotation
     const rotationDeg = (angle + 90 + 360) % 360;
-    updatePlacement(selectedPieceId, { rotationDeg });
-  }, [selectedPieceId, updatePlacement]);
+
+    // Directly mutate Konva nodes instead of going through React state.
+    // This avoids re-renders (and the collision detection they trigger) on every
+    // mousemove, and prevents react-konva from resetting the Circle's x/y props
+    // mid-drag, which would cause the handle to snap back to the arc each frame.
+    const layer = layer2Ref.current;
+    if (layer) {
+      layer.findOne<Konva.Group>(`#piece-${selectedPieceId}`)?.rotation(rotationDeg);
+      layer.findOne<Konva.Line>('#rotation-line')?.points([cx, cy, e.target.x(), e.target.y()]);
+      layer.batchDraw();
+    }
+  }, [selectedPieceId]);
 
   const handleRotateDragEnd = useCallback((e: KonvaEventObject<DragEvent>) => {
     const rh = rotationHandleRef.current;
@@ -150,7 +166,8 @@ export function CanvasWorkspace({
     const { cx, cy, handleDist } = rh;
     const angle = Math.atan2(e.target.y() - cy, e.target.x() - cx) * (180 / Math.PI);
     const raw = (angle + 90 + 360) % 360;
-    const snapped = (Math.round(raw / 5) * 5) % 360;
+    // Snap to 1° on release — fine enough for manual work, exact float stored in state.
+    const snapped = Math.round(raw) % 360;
     updatePlacement(selectedPieceId, { rotationDeg: snapped });
     // Reposition handle to match snapped rotation so it doesn't jump on next render
     const snapRad = ((snapped - 90) * Math.PI) / 180;
@@ -194,7 +211,7 @@ export function CanvasWorkspace({
         </Layer>
 
         {/* Layer 2: piece outlines + rotation handle */}
-        <Layer>
+        <Layer ref={layer2Ref}>
           {placements.map((pl) => {
             const piece = pieces.find((p) => p.id === pl.pieceId);
             if (!piece) return null;
@@ -215,6 +232,7 @@ export function CanvasWorkspace({
           {rotationHandle && (
             <>
               <Line
+                id="rotation-line"
                 points={[rotationHandle.cx, rotationHandle.cy, rotationHandle.hx, rotationHandle.hy]}
                 stroke="#ff9800"
                 strokeWidth={1}
