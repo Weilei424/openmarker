@@ -75,6 +75,7 @@ export function PieceShape({
       draggable
       onClick={onSelect}
       onTap={onSelect}
+      onMouseDown={(e) => { e.cancelBubble = true; }}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
       onMouseEnter={handleMouseEnter}
