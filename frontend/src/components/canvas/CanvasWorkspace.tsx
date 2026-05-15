@@ -48,7 +48,7 @@ export function CanvasWorkspace({
   const { transform, setTransform, handleWheel, fitToContent, zoomIn, zoomOut } =
     useViewport();
 
-  const collidingIds = useCollisions(placements, pieces);
+  const collidingIds = useCollisions(placements, pieces, fabricWidthMm);
 
   // Auto-fit when a new set of pieces is imported.
   // Use computePlacements(pieces) directly to avoid a stale-closure on `placements`

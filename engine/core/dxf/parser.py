@@ -238,6 +238,37 @@ def _parse_flat(msp) -> list[RawPiece]:
     return result
 
 
+def _read_dxf(tmp_path: str):
+    """
+    Read a DXF file, retrying with CJK encodings when auto-detection yields
+    garbled text.
+
+    ezdxf uses the $DWGCODEPAGE header to pick an encoding.  Many Chinese CAD
+    files declare ANSI_1252 (CP1252) while storing GBK or Big5 bytes, so
+    layer/block names come out as Latin-supplement characters (U+0080–U+00FF).
+    When that signature is detected, the file is re-read with 'gbk' then 'big5'.
+    """
+    try:
+        doc = ezdxf.readfile(tmp_path)
+    except OSError as exc:
+        raise ezdxf.DXFStructureError(str(exc)) from exc
+
+    # Check if any block/layer name contains Latin-supplement chars — the
+    # tell-tale sign of CJK bytes misinterpreted as CP1252.
+    names: list[str] = [b.name for b in doc.blocks if not b.name.startswith("*")]
+    names += [e.dxf.layer for e in doc.modelspace() if hasattr(e.dxf, "layer")]
+    has_garbled = any(any(0x80 <= ord(c) <= 0xFF for c in n) for n in names)
+
+    if has_garbled:
+        for enc in ("gbk", "big5"):
+            try:
+                return ezdxf.readfile(tmp_path, encoding=enc)
+            except Exception:
+                continue
+
+    return doc
+
+
 def parse_dxf(file_bytes: bytes) -> list[RawPiece]:
     """
     Parse a DXF file (as raw bytes) and return one RawPiece per pattern piece.
@@ -253,12 +284,7 @@ def parse_dxf(file_bytes: bytes) -> list[RawPiece]:
     try:
         os.write(tmp_fd, file_bytes)
         os.close(tmp_fd)
-        try:
-            doc = ezdxf.readfile(tmp_path)
-        except OSError as exc:
-            # ezdxf raises OSError for binary/corrupt content that isn't DXF;
-            # re-raise as DXFStructureError so callers get a consistent exception.
-            raise ezdxf.DXFStructureError(str(exc)) from exc
+        doc = _read_dxf(tmp_path)
     finally:
         os.unlink(tmp_path)
     msp = doc.modelspace()

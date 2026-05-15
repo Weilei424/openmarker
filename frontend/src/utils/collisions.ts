@@ -14,7 +14,11 @@ function transformedPolygon(piece: Piece, pl: Placement): Point[] {
   return translatePolygon(poly, pl.x, pl.y);
 }
 
-export function computeCollidingIds(placements: Placement[], pieces: Piece[]): Set<string> {
+export function computeCollidingIds(
+  placements: Placement[],
+  pieces: Piece[],
+  fabricWidthMm: number,
+): Set<string> {
   const collidingIds = new Set<string>();
   const pieceMap = new Map(pieces.map((p) => [p.id, p]));
 
@@ -25,12 +29,22 @@ export function computeCollidingIds(placements: Placement[], pieces: Piece[]): S
     })
     .filter((x): x is { pieceId: string; poly: Point[] } => x !== null);
 
+  // Piece-to-piece intersection check
   for (let i = 0; i < transformed.length; i++) {
     for (let j = i + 1; j < transformed.length; j++) {
       if (polygonsIntersect(transformed[i].poly, transformed[j].poly)) {
         collidingIds.add(transformed[i].pieceId);
         collidingIds.add(transformed[j].pieceId);
       }
+    }
+  }
+
+  // Out-of-bounds check: flag pieces that extend outside the fabric area
+  for (const { pieceId, poly } of transformed) {
+    const xs = poly.map(([x]) => x);
+    const ys = poly.map(([, y]) => y);
+    if (Math.min(...xs) < 0 || Math.max(...xs) > fabricWidthMm || Math.min(...ys) < 0) {
+      collidingIds.add(pieceId);
     }
   }
 
