@@ -96,6 +96,7 @@ def _strip_pack(
     fabric_grain_deg: float,
     dim_fn,
     fits_fn,
+    on_placed=None,
 ) -> tuple[list[Placement], float, float]:
     sorted_pieces = sorted(pieces, key=lambda p: p.area, reverse=True)
     _validate_pieces_fit(sorted_pieces, fabric_width_mm, grain_mode, fabric_grain_deg, dim_fn)
@@ -110,7 +111,7 @@ def _strip_pack(
         best: tuple[float, float, float] | None = None
         for rot in allowed_rotations(grain_mode, fabric_grain_deg, piece.grainline_direction_deg):
             w, h = dim_fn(piece, rot)
-            if fits_fn(piece, x, y, rot, w, placements) and x + w + GAP <= fabric_width_mm:
+            if fits_fn(piece, x, y, rot, w) and x + w + GAP <= fabric_width_mm:
                 if best is None or h < best[2]:
                     best = (rot, w, h)
         return best
@@ -123,7 +124,8 @@ def _strip_pack(
             if w + 2 * GAP <= fabric_width_mm:
                 if best is None or h < best[2]:
                     best = (rot, w, h)
-        return best  # type: ignore — validated above
+        assert best is not None, "piece passed validation but no rotation fits — invariant violated"
+        return best
 
     for piece in sorted_pieces:
         result = _best_rotation(piece, x_cursor, shelf_y)
@@ -135,6 +137,8 @@ def _strip_pack(
 
         rot, w, h = result
         placements.append(Placement(piece.id, round(x_cursor, 4), round(shelf_y, 4), rot))
+        if on_placed is not None:
+            on_placed(piece, placements[-1], rot)
         x_cursor += w + GAP
         shelf_h = max(shelf_h, h)
 
@@ -158,7 +162,7 @@ def auto_layout_bbox(
     Returns (placements, marker_length_mm, utilization_pct).
     Raises ValueError if any piece cannot fit at any allowed rotation.
     """
-    def fits_bbox(piece, x, y, rot, w, placed):
+    def fits_bbox(piece, x, y, rot, w):
         # Bbox non-overlap is guaranteed by the left-to-right cursor; no extra check needed.
         return True
 
@@ -183,55 +187,18 @@ def auto_layout_polygon(
     """
     placed_polys: list[ShapelyPolygon] = []
 
-    def fits_polygon(piece, x, y, rot, w, placed):
+    def fits_polygon(piece, x, y, rot, w):
         candidate = _placed_polygon(piece, x, y, rot)
         if candidate.bounds[2] + GAP > fabric_width_mm:
             return False
         return not any(candidate.intersects(pp) for pp in placed_polys)
 
-    def _strip_pack_polygon():
-        sorted_pieces = sorted(pieces, key=lambda p: p.area, reverse=True)
-        _validate_pieces_fit(sorted_pieces, fabric_width_mm, grain_mode, fabric_grain_deg, _polygon_dims)
+    def on_placed(piece, placement, rot):
+        placed_polys.append(_placed_polygon(piece, placement.x, placement.y, rot))
 
-        placements: list[Placement] = []
-        shelf_y = GAP
-        shelf_h = 0.0
-        x_cursor = GAP
-
-        def _best_rotation(piece, x, y):
-            best = None
-            for rot in allowed_rotations(grain_mode, fabric_grain_deg, piece.grainline_direction_deg):
-                w, h = _polygon_dims(piece, rot)
-                if fits_polygon(piece, x, y, rot, w, placements) and x + w + GAP <= fabric_width_mm:
-                    if best is None or h < best[2]:
-                        best = (rot, w, h)
-            return best
-
-        def _best_rotation_new_shelf(piece):
-            best = None
-            for rot in allowed_rotations(grain_mode, fabric_grain_deg, piece.grainline_direction_deg):
-                w, h = _polygon_dims(piece, rot)
-                if w + 2 * GAP <= fabric_width_mm:
-                    if best is None or h < best[2]:
-                        best = (rot, w, h)
-            return best
-
-        for piece in sorted_pieces:
-            result = _best_rotation(piece, x_cursor, shelf_y)
-            if result is None:
-                shelf_y += shelf_h + GAP
-                shelf_h = 0.0
-                x_cursor = GAP
-                result = _best_rotation_new_shelf(piece)
-
-            rot, w, h = result
-            placements.append(Placement(piece.id, round(x_cursor, 4), round(shelf_y, 4), rot))
-            placed_polys.append(_placed_polygon(piece, x_cursor, shelf_y, rot))
-            x_cursor += w + GAP
-            shelf_h = max(shelf_h, h)
-
-        return placements
-
-    placements = _strip_pack_polygon()
-    marker_length, utilization = _compute_metrics(placements, pieces, fabric_width_mm, _polygon_dims)
-    return placements, marker_length, utilization
+    return _strip_pack(
+        pieces, fabric_width_mm, grain_mode, fabric_grain_deg,
+        dim_fn=_polygon_dims,
+        fits_fn=fits_polygon,
+        on_placed=on_placed,
+    )
