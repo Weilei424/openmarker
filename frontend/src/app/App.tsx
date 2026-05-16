@@ -2,12 +2,15 @@
 // Layout: top bar | sidebar + canvas workspace | status bar.
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import type { EngineStatus, PingResponse } from "../types/engine";
+import type { EngineStatus, PingResponse, GrainMode, AutoLayoutPlacement } from "../types/engine";
+import type { Placement } from "../types/canvas";
 import { useImportDxf, type ImportOutcome } from "../hooks/useImportDxf";
 import { usePlacements } from "../hooks/usePlacements";
+import { useAutoLayout } from "../hooks/useAutoLayout";
 import { PieceList } from "../components/pieces/PieceList";
 import { CanvasWorkspace } from "../components/canvas/CanvasWorkspace";
 import { FabricPanel } from "../components/sidebar/FabricPanel";
+import { GrainPanel } from "../components/sidebar/GrainPanel";
 
 const ENGINE_URL = "http://127.0.0.1:8765";
 
@@ -18,7 +21,13 @@ export default function App() {
   const [fabricWidthMm, setFabricWidthMm] = useState<number>(1500);
 
   const { status: importStatus, pieces, warnings, errorMessage, handleFileSelected } = useImportDxf();
-  const { placements, updatePlacement } = usePlacements(pieces);
+  const { placements, updatePlacement, resetPlacements, setAllPlacements } = usePlacements(pieces);
+
+  const [grainDirectionDeg, setGrainDirectionDeg] = useState<number>(0);
+  const [grainMode, setGrainMode] = useState<GrainMode>("none");
+  const [fastMode, setFastMode] = useState<boolean>(false);
+
+  const { runAutoLayout, status: autoStatus, errorMessage: autoError } = useAutoLayout();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -62,6 +71,27 @@ export default function App() {
     [handleFileSelected]
   );
 
+  const handleAutoLayout = useCallback(async () => {
+    if (pieces.length === 0) return;
+    const result = await runAutoLayout(pieces, fabricWidthMm, grainMode, grainDirectionDeg, fastMode);
+    if (result) {
+      const mapped: Placement[] = result.placements.map((pl: AutoLayoutPlacement) => ({
+        pieceId: pl.piece_id,
+        x: pl.x,
+        y: pl.y,
+        rotationDeg: pl.rotation_deg,
+      }));
+      setAllPlacements(mapped);
+      setStatusMessage(
+        `Auto layout: ${result.placements.length} piece${result.placements.length !== 1 ? "s" : ""} · ` +
+        `Marker: ${Math.round(result.marker_length_mm)} mm · ` +
+        `Utilization: ${result.utilization_pct}%`
+      );
+    } else {
+      setStatusMessage(`Auto layout failed: ${autoError ?? "unknown error"}`);
+    }
+  }, [pieces, fabricWidthMm, grainMode, grainDirectionDeg, fastMode, runAutoLayout, setAllPlacements, autoError]);
+
   const importButtonLabel =
     importStatus === "loading" ? "Importing..." : "Import DXF";
 
@@ -87,6 +117,17 @@ export default function App() {
             <FabricPanel fabricWidthMm={fabricWidthMm} onChange={setFabricWidthMm} />
           </Section>
 
+          <Section title="Grain">
+            <GrainPanel
+              grainDirectionDeg={grainDirectionDeg}
+              grainMode={grainMode}
+              fastMode={fastMode}
+              onGrainDirectionChange={setGrainDirectionDeg}
+              onGrainModeChange={setGrainMode}
+              onFastModeChange={setFastMode}
+            />
+          </Section>
+
           <Section title="Layout">
             {/* Hidden file input — triggered by the Import DXF button */}
             <input
@@ -101,6 +142,22 @@ export default function App() {
               disabled={importStatus === "loading"}
             >
               {importButtonLabel}
+            </button>
+
+            <button
+              onClick={handleAutoLayout}
+              disabled={pieces.length === 0 || autoStatus === "loading"}
+              style={{ opacity: pieces.length === 0 ? 0.4 : 1 }}
+            >
+              {autoStatus === "loading" ? "Running..." : "Auto Layout"}
+            </button>
+
+            <button
+              onClick={resetPlacements}
+              disabled={pieces.length === 0}
+              style={{ fontSize: 11, opacity: pieces.length === 0 ? 0.4 : 1 }}
+            >
+              Reset Layout
             </button>
 
             {importStatus === "error" && (
