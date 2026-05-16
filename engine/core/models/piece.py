@@ -23,3 +23,4 @@ class Piece:
     bbox: BoundingBox
     is_valid: bool                             # True if Shapely considers the geometry valid
     validation_notes: list[str] = field(default_factory=list)  # non-fatal warnings
+    grainline_direction_deg: float | None = None  # None = no grainline LINE found on layer "7" in the DXF block for this piece

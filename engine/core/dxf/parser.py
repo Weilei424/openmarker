@@ -33,6 +33,8 @@ class RawPiece:
     layer: str
     points: list[tuple[float, float]]
     is_closed: bool
+    grainline: tuple[tuple[float, float], tuple[float, float]] | None = None
+    # grainline = ((start_x, start_y), (end_x, end_y)) in raw DXF coordinates
 
 
 def _distance(a: tuple[float, float], b: tuple[float, float]) -> float:
