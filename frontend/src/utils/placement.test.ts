@@ -16,6 +16,7 @@ function makePiece(id: string, width: number, height: number): Piece {
     bbox: { min_x: 0, min_y: 0, max_x: width, max_y: height, width, height },
     is_valid: true,
     validation_notes: [],
+    grainline_direction_deg: null,
   };
 }
 

@@ -25,6 +25,7 @@ export interface Piece {
   bbox: BoundingBox;
   is_valid: boolean;
   validation_notes: string[];
+  grainline_direction_deg: number | null;
 }
 
 export interface ImportDxfResponse {
