@@ -56,14 +56,15 @@
 - [x] Smooth rotation via direct Konva mutation (no React re-renders during drag)
 - [x] CJK encoding detection in DXF parser (GBK / Big5 fallback)
 
-### Pre-Phase 5 Fixes
-- [ ] Parse `Quantity: N` from TEXT entities in each DXF block; emit N copies of the piece
-- [ ] Name duplicated pieces `{name} (1)`, `{name} (2)` … when quantity > 1
-- [ ] Y-axis flip in `normalize_piece()` (DXF Y-up → canvas Y-down)
-- [ ] Parse `LINE` on layer 7 in each DXF block as grainline; store start/end in `RawPiece`
-- [ ] Apply Y-flip + origin translate to grainline coords in `normalize_piece()`
-- [ ] Add `grainline_direction_deg: float | None` to `Piece` model and engine.ts type
-- [ ] Update/add tests: quantity expansion, Y-flip orientation, grainline parsing, 2×2 fixture
+### Pre-Phase 5 Fixes ✓
+- [x] Parse `Quantity: N` from TEXT entities in each DXF block; emit N copies of the piece
+- [x] Name duplicated pieces `{name} (1)`, `{name} (2)` … when quantity > 1
+- [x] Y-axis flip in `normalize_piece()` (DXF Y-up → canvas Y-down)
+- [x] Parse `LINE` on layer 7 in each DXF block as grainline; store start/end in `RawPiece`
+- [x] Apply Y-flip + origin translate to grainline coords in `normalize_piece()`
+- [x] Add `grainline_direction_deg: float | None` to `Piece` model and engine.ts type
+- [x] Update/add tests: quantity expansion, Y-flip orientation, grainline parsing, 2×2 fixture
+- [x] Cap max zoom to 500% (MAX_SCALE = 5) to prevent stroke-artifact confusion
 
 ### Phase 5 — Simple auto layout
 - [ ] User inputs fabric width
