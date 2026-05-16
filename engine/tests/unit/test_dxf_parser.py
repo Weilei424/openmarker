@@ -185,3 +185,50 @@ def test_quantity_missing_defaults_to_one():
     pieces = parse_dxf(data)
     assert len(pieces) == 1
     assert pieces[0].layer == "BACK"
+
+
+# --- Grainline extraction ---
+
+def _make_dxf_with_grainline(
+    block_name: str,
+    piece_points: list,
+    grain_start: tuple,
+    grain_end: tuple,
+) -> bytes:
+    """Helper: DXF block with a piece polygon and a layer-7 LINE grainline."""
+    doc = ezdxf.new("R2010")
+    blk = doc.blocks.new(block_name)
+    blk.add_lwpolyline(piece_points, close=True, dxfattribs={"layer": "1"})
+    blk.add_line(grain_start, grain_end, dxfattribs={"layer": "7"})
+    msp = doc.modelspace()
+    msp.add_blockref(block_name, (0, 0))
+    stream = io.StringIO()
+    doc.write(stream)
+    return stream.getvalue().encode("utf-8")
+
+
+def test_grainline_extracted_from_layer_7():
+    data = _make_dxf_with_grainline(
+        "PIECE",
+        [(0, 0), (100, 0), (100, 200), (0, 200)],
+        grain_start=(50, 0),
+        grain_end=(50, 100),
+    )
+    pieces = parse_dxf(data)
+    assert len(pieces) == 1
+    assert pieces[0].grainline is not None
+    start, end = pieces[0].grainline
+    assert start == pytest.approx((50.0, 0.0), abs=0.01)
+    assert end == pytest.approx((50.0, 100.0), abs=0.01)
+
+
+def test_grainline_absent_when_no_layer7_line():
+    doc = ezdxf.new("R2010")
+    blk = doc.blocks.new("NOLINE")
+    blk.add_lwpolyline([(0, 0), (100, 0), (100, 100), (0, 100)], close=True, dxfattribs={"layer": "1"})
+    msp = doc.modelspace()
+    msp.add_blockref("NOLINE", (0, 0))
+    stream = io.StringIO()
+    doc.write(stream)
+    pieces = parse_dxf(stream.getvalue().encode("utf-8"))
+    assert pieces[0].grainline is None

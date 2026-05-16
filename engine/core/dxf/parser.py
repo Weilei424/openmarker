@@ -188,6 +188,18 @@ def _parse_quantity(block) -> int:
     return 1
 
 
+def _extract_grainline(
+    block,
+) -> tuple[tuple[float, float], tuple[float, float]] | None:
+    """Return (start, end) of the first LINE on layer '7' in the block, or None."""
+    for entity in block:
+        if entity.dxftype() == "LINE" and entity.dxf.layer == "7":
+            start = (float(entity.dxf.start.x), float(entity.dxf.start.y))
+            end = (float(entity.dxf.end.x), float(entity.dxf.end.y))
+            return (start, end)
+    return None
+
+
 def _parse_insert_based(doc, msp) -> list[RawPiece]:
     """
     Extract pieces from an INSERT-based file (ET CAD style).
@@ -226,10 +238,11 @@ def _parse_insert_based(doc, msp) -> list[RawPiece]:
 
         quantity = _parse_quantity(block)
         best = max(closed_polys, key=_polygon_area)
+        grainline = _extract_grainline(block)
 
         for i in range(quantity):
             piece_name = f"{base_name} ({i + 1})" if quantity > 1 else base_name
-            result.append(RawPiece(layer=piece_name, points=best, is_closed=True))
+            result.append(RawPiece(layer=piece_name, points=best, is_closed=True, grainline=grainline))
 
     return result
 
