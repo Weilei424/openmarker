@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from helpers import make_dxf_bytes, make_insert_dxf_bytes
-from core.dxf.parser import parse_dxf, _chain_open_segments
+from core.dxf.parser import parse_dxf, _chain_open_segments, _parse_quantity
 
 
 RECTANGLE = [(0, 0), (100, 0), (100, 80), (0, 80)]
@@ -139,3 +139,49 @@ def test_flat_file_open_segments():
     pieces = parse_dxf(dxf)
     assert len(pieces) == 1
     assert pieces[0].layer == "PIECE"
+
+
+# --- Quantity expansion ---
+
+def _make_dxf_with_quantity(block_name: str, quantity: int, points=None) -> bytes:
+    """Helper: create a minimal DXF with one block INSERT, given quantity TEXT."""
+    if points is None:
+        points = [(0, 0), (100, 0), (100, 100), (0, 100)]
+    doc = ezdxf.new("R2010")
+    blk = doc.blocks.new(block_name)
+    blk.add_lwpolyline(points, close=True, dxfattribs={"layer": "1"})
+    blk.add_text(f"Quantity: {quantity}", dxfattribs={"layer": "1", "insert": (0, 0), "height": 0})
+    msp = doc.modelspace()
+    msp.add_blockref(block_name, (0, 0))
+    stream = io.StringIO()
+    doc.write(stream)
+    return stream.getvalue().encode("utf-8")
+
+
+def test_quantity_1_produces_one_piece_no_suffix():
+    data = _make_dxf_with_quantity("FRONT", 1)
+    pieces = parse_dxf(data)
+    assert len(pieces) == 1
+    assert pieces[0].layer == "FRONT"
+
+
+def test_quantity_2_produces_two_pieces_with_suffix():
+    data = _make_dxf_with_quantity("FRONT", 2)
+    pieces = parse_dxf(data)
+    assert len(pieces) == 2
+    assert pieces[0].layer == "FRONT (1)"
+    assert pieces[1].layer == "FRONT (2)"
+
+
+def test_quantity_missing_defaults_to_one():
+    doc = ezdxf.new("R2010")
+    blk = doc.blocks.new("BACK")
+    blk.add_lwpolyline([(0, 0), (100, 0), (100, 50), (0, 50)], close=True, dxfattribs={"layer": "1"})
+    msp = doc.modelspace()
+    msp.add_blockref("BACK", (0, 0))
+    stream = io.StringIO()
+    doc.write(stream)
+    data = stream.getvalue().encode("utf-8")
+    pieces = parse_dxf(data)
+    assert len(pieces) == 1
+    assert pieces[0].layer == "BACK"
