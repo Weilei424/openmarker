@@ -10,7 +10,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from helpers import make_dxf_bytes, make_insert_dxf_bytes
+import dataclasses
+
 from core.dxf.parser import parse_dxf, _chain_open_segments, _parse_quantity
+from core.geometry.normalize import normalize_piece
 
 
 RECTANGLE = [(0, 0), (100, 0), (100, 80), (0, 80)]
@@ -232,3 +235,58 @@ def test_grainline_absent_when_no_layer7_line():
     doc.write(stream)
     pieces = parse_dxf(stream.getvalue().encode("utf-8"))
     assert pieces[0].grainline is None
+
+
+# --- Acceptance tests: 2×2 fixture (2 piece types × quantity 2, with grainlines) ---
+
+_FIXTURE_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "..", "..", "..", "..", "..", "..", "..",
+    "examples", "input",
+    "2_pieces_x_2_with_grainline.dxf"
+)
+
+
+def _load_fixture_raw():
+    with open(_FIXTURE_PATH, "rb") as f:
+        return parse_dxf(f.read())
+
+
+def test_2_pieces_x_2_fixture_produces_4_pieces():
+    """Fixture has 2 piece types each with quantity 2 → 4 raw pieces."""
+    pieces = _load_fixture_raw()
+    assert len(pieces) == 4
+
+
+def test_2_pieces_x_2_fixture_naming():
+    """Piece names match expected quantity-expanded layer names."""
+    pieces = _load_fixture_raw()
+    names = {p.layer for p in pieces}
+    assert names == {"123.2.S (1)", "123.2.S (2)", "123.1.S (1)", "123.1.S (2)"}
+
+
+def test_2_pieces_x_2_fixture_grainlines_present():
+    """All 4 pieces carry a non-None grainline extracted from layer-7 LINE."""
+    pieces = _load_fixture_raw()
+    for p in pieces:
+        assert p.grainline is not None, f"piece {p.layer!r} has no grainline"
+
+
+def test_2_pieces_x_2_fixture_normalized_grainline_degrees():
+    """Normalized grainline angles match the fixture geometry (5° tolerance).
+
+    123.2.S pieces: vertical line → 270°
+    123.1.S pieces: horizontal line → 0°
+    """
+    raw_pieces = _load_fixture_raw()
+    normalized = [normalize_piece(r, f"p{i}") for i, r in enumerate(raw_pieces)]
+
+    for p in normalized:
+        if "123.2.S" in p.name:
+            assert p.grainline_direction_deg == pytest.approx(270.0, abs=5), (
+                f"{p.name}: expected ~270°, got {p.grainline_direction_deg}"
+            )
+        elif "123.1.S" in p.name:
+            assert p.grainline_direction_deg == pytest.approx(0.0, abs=5), (
+                f"{p.name}: expected ~0°, got {p.grainline_direction_deg}"
+            )
