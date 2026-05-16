@@ -56,6 +56,15 @@
 - [x] Smooth rotation via direct Konva mutation (no React re-renders during drag)
 - [x] CJK encoding detection in DXF parser (GBK / Big5 fallback)
 
+### Pre-Phase 5 Fixes
+- [ ] Parse `Quantity: N` from TEXT entities in each DXF block; emit N copies of the piece
+- [ ] Name duplicated pieces `{name} (1)`, `{name} (2)` … when quantity > 1
+- [ ] Y-axis flip in `normalize_piece()` (DXF Y-up → canvas Y-down)
+- [ ] Parse `LINE` on layer 7 in each DXF block as grainline; store start/end in `RawPiece`
+- [ ] Apply Y-flip + origin translate to grainline coords in `normalize_piece()`
+- [ ] Add `grainline_direction_deg: float | None` to `Piece` model and engine.ts type
+- [ ] Update/add tests: quantity expansion, Y-flip orientation, grainline parsing, 2×2 fixture
+
 ### Phase 5 — Simple auto layout
 - [ ] User inputs fabric width
 - [ ] Run placement heuristic (strip packing or guillotine)
