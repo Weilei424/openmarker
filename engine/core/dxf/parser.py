@@ -33,6 +33,8 @@ class RawPiece:
     layer: str
     points: list[tuple[float, float]]
     is_closed: bool
+    grainline: tuple[tuple[float, float], tuple[float, float]] | None = None
+    # grainline = ((start_x, start_y), (end_x, end_y)) in raw DXF coordinates
 
 
 def _distance(a: tuple[float, float], b: tuple[float, float]) -> float:
@@ -173,6 +175,31 @@ def _collect_closed_polylines(
     return closed_polys
 
 
+def _parse_quantity(block) -> int:
+    """Scan TEXT entities in a block for 'Quantity: N'; return N (default 1)."""
+    for entity in block:
+        if entity.dxftype() == "TEXT":
+            text = entity.dxf.text.strip()
+            if text.startswith("Quantity:"):
+                try:
+                    return max(1, int(text.split(":", 1)[1].strip()))
+                except ValueError:
+                    pass
+    return 1
+
+
+def _extract_grainline(
+    block,
+) -> tuple[tuple[float, float], tuple[float, float]] | None:
+    """Return (start, end) of the first LINE on layer '7' in the block, or None."""
+    for entity in block:
+        if entity.dxftype() == "LINE" and entity.dxf.layer == "7":
+            start = (float(entity.dxf.start.x), float(entity.dxf.start.y))
+            end = (float(entity.dxf.end.x), float(entity.dxf.end.y))
+            return (start, end)
+    return None
+
+
 def _parse_insert_based(doc, msp) -> list[RawPiece]:
     """
     Extract pieces from an INSERT-based file (ET CAD style).
@@ -180,6 +207,10 @@ def _parse_insert_based(doc, msp) -> list[RawPiece]:
     Each INSERT in modelspace is one piece instance.  If the same block is
     referenced multiple times (e.g. two sleeves from one template), each
     INSERT produces a separate RawPiece; duplicate names get a numeric suffix.
+
+    When a block contains a 'Quantity: N' TEXT entity, that INSERT expands to
+    N pieces named '{name} (1)' … '{name} (N)'.  Quantity 1 produces one piece
+    with no suffix.
     """
     result: list[RawPiece] = []
     name_counts: dict[str, int] = {}
@@ -201,13 +232,17 @@ def _parse_insert_based(doc, msp) -> list[RawPiece]:
         if not closed_polys:
             continue
 
-        # Assign a unique layer name; append count suffix when a block repeats
         count = name_counts.get(block_name, 0)
         name_counts[block_name] = count + 1
-        piece_name = block_name if count == 0 else f"{block_name}_{count}"
+        base_name = block_name if count == 0 else f"{block_name}_{count}"
 
+        quantity = _parse_quantity(block)
         best = max(closed_polys, key=_polygon_area)
-        result.append(RawPiece(layer=piece_name, points=best, is_closed=True))
+        grainline = _extract_grainline(block)
+
+        for i in range(quantity):
+            piece_name = f"{base_name} ({i + 1})" if quantity > 1 else base_name
+            result.append(RawPiece(layer=piece_name, points=best, is_closed=True, grainline=grainline))
 
     return result
 

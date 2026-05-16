@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import shapely.affinity
 from shapely.geometry import GeometryCollection, MultiPolygon, Polygon
 from shapely.validation import make_valid
@@ -15,11 +17,13 @@ def normalize_piece(raw: RawPiece, piece_id: str) -> Piece:
     Build a normalized Piece from a RawPiece.
 
     Steps:
-    1. Build a Shapely Polygon.
-    2. Repair invalid geometry via make_valid; take the largest sub-polygon if needed.
-    3. Reject degenerate results (non-Polygon after repair).
-    4. Translate to origin (min_x=0, min_y=0).
-    5. Return populated Piece.
+    1. Flip Y (DXF Y-up → canvas Y-down).
+    2. Build a Shapely Polygon.
+    3. Repair invalid geometry via make_valid; take the largest sub-polygon if needed.
+    4. Reject degenerate results (non-Polygon after repair).
+    5. Translate to origin (min_x=0, min_y=0).
+    6. Apply same Y-flip + translate to grainline; compute direction angle.
+    7. Return populated Piece.
 
     Raises ValueError if the geometry is degenerate after repair.
     """
@@ -27,7 +31,10 @@ def normalize_piece(raw: RawPiece, piece_id: str) -> Piece:
         raise ValueError(f"Piece '{raw.layer}' has fewer than 3 points")
 
     notes: list[str] = []
-    polygon = Polygon(raw.points)
+
+    # Flip Y: DXF uses Y-up; canvas uses Y-down.
+    points = [(x, -y) for x, y in raw.points]
+    polygon = Polygon(points)
 
     if not polygon.is_valid:
         repaired = make_valid(polygon)
@@ -71,6 +78,19 @@ def normalize_piece(raw: RawPiece, piece_id: str) -> Piece:
         height=round(height, 6),
     )
 
+    # Grainline: apply same Y-flip and origin translate as the polygon.
+    grainline_deg: float | None = None
+    if raw.grainline is not None:
+        (sx, sy), (ex, ey) = raw.grainline
+        # Y-flip then translate by the same offset used for the polygon
+        sx_n = sx - minx
+        sy_n = (-sy) - miny
+        ex_n = ex - minx
+        ey_n = (-ey) - miny
+        dx = ex_n - sx_n
+        dy = ey_n - sy_n
+        grainline_deg = round(math.degrees(math.atan2(dy, dx)) % 360, 6)
+
     return Piece(
         id=piece_id,
         name=raw.layer,
@@ -79,4 +99,5 @@ def normalize_piece(raw: RawPiece, piece_id: str) -> Piece:
         bbox=bbox,
         is_valid=polygon.is_valid,
         validation_notes=notes,
+        grainline_direction_deg=grainline_deg,
     )

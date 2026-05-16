@@ -10,7 +10,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from helpers import make_dxf_bytes, make_insert_dxf_bytes
-from core.dxf.parser import parse_dxf, _chain_open_segments
+import dataclasses
+
+from core.dxf.parser import parse_dxf, _chain_open_segments, _parse_quantity
+from core.geometry.normalize import normalize_piece
 
 
 RECTANGLE = [(0, 0), (100, 0), (100, 80), (0, 80)]
@@ -139,3 +142,151 @@ def test_flat_file_open_segments():
     pieces = parse_dxf(dxf)
     assert len(pieces) == 1
     assert pieces[0].layer == "PIECE"
+
+
+# --- Quantity expansion ---
+
+def _make_dxf_with_quantity(block_name: str, quantity: int, points=None) -> bytes:
+    """Helper: create a minimal DXF with one block INSERT, given quantity TEXT."""
+    if points is None:
+        points = [(0, 0), (100, 0), (100, 100), (0, 100)]
+    doc = ezdxf.new("R2010")
+    blk = doc.blocks.new(block_name)
+    blk.add_lwpolyline(points, close=True, dxfattribs={"layer": "1"})
+    blk.add_text(f"Quantity: {quantity}", dxfattribs={"layer": "1", "insert": (0, 0), "height": 0})
+    msp = doc.modelspace()
+    msp.add_blockref(block_name, (0, 0))
+    stream = io.StringIO()
+    doc.write(stream)
+    return stream.getvalue().encode("utf-8")
+
+
+def test_quantity_1_produces_one_piece_no_suffix():
+    data = _make_dxf_with_quantity("FRONT", 1)
+    pieces = parse_dxf(data)
+    assert len(pieces) == 1
+    assert pieces[0].layer == "FRONT"
+
+
+def test_quantity_2_produces_two_pieces_with_suffix():
+    data = _make_dxf_with_quantity("FRONT", 2)
+    pieces = parse_dxf(data)
+    assert len(pieces) == 2
+    assert pieces[0].layer == "FRONT (1)"
+    assert pieces[1].layer == "FRONT (2)"
+
+
+def test_quantity_missing_defaults_to_one():
+    doc = ezdxf.new("R2010")
+    blk = doc.blocks.new("BACK")
+    blk.add_lwpolyline([(0, 0), (100, 0), (100, 50), (0, 50)], close=True, dxfattribs={"layer": "1"})
+    msp = doc.modelspace()
+    msp.add_blockref("BACK", (0, 0))
+    stream = io.StringIO()
+    doc.write(stream)
+    data = stream.getvalue().encode("utf-8")
+    pieces = parse_dxf(data)
+    assert len(pieces) == 1
+    assert pieces[0].layer == "BACK"
+
+
+# --- Grainline extraction ---
+
+def _make_dxf_with_grainline(
+    block_name: str,
+    piece_points: list,
+    grain_start: tuple,
+    grain_end: tuple,
+) -> bytes:
+    """Helper: DXF block with a piece polygon and a layer-7 LINE grainline."""
+    doc = ezdxf.new("R2010")
+    blk = doc.blocks.new(block_name)
+    blk.add_lwpolyline(piece_points, close=True, dxfattribs={"layer": "1"})
+    blk.add_line(grain_start, grain_end, dxfattribs={"layer": "7"})
+    msp = doc.modelspace()
+    msp.add_blockref(block_name, (0, 0))
+    stream = io.StringIO()
+    doc.write(stream)
+    return stream.getvalue().encode("utf-8")
+
+
+def test_grainline_extracted_from_layer_7():
+    data = _make_dxf_with_grainline(
+        "PIECE",
+        [(0, 0), (100, 0), (100, 200), (0, 200)],
+        grain_start=(50, 0),
+        grain_end=(50, 100),
+    )
+    pieces = parse_dxf(data)
+    assert len(pieces) == 1
+    assert pieces[0].grainline is not None
+    start, end = pieces[0].grainline
+    assert start == pytest.approx((50.0, 0.0), abs=0.01)
+    assert end == pytest.approx((50.0, 100.0), abs=0.01)
+
+
+def test_grainline_absent_when_no_layer7_line():
+    doc = ezdxf.new("R2010")
+    blk = doc.blocks.new("NOLINE")
+    blk.add_lwpolyline([(0, 0), (100, 0), (100, 100), (0, 100)], close=True, dxfattribs={"layer": "1"})
+    msp = doc.modelspace()
+    msp.add_blockref("NOLINE", (0, 0))
+    stream = io.StringIO()
+    doc.write(stream)
+    pieces = parse_dxf(stream.getvalue().encode("utf-8"))
+    assert pieces[0].grainline is None
+
+
+# --- Acceptance tests: 2×2 fixture (2 piece types × quantity 2, with grainlines) ---
+
+_FIXTURE_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "..", "..", "..", "..", "..", "..", "..",
+    "examples", "input",
+    "2_pieces_x_2_with_grainline.dxf"
+)
+
+
+def _load_fixture_raw():
+    with open(_FIXTURE_PATH, "rb") as f:
+        return parse_dxf(f.read())
+
+
+def test_2_pieces_x_2_fixture_produces_4_pieces():
+    """Fixture has 2 piece types each with quantity 2 → 4 raw pieces."""
+    pieces = _load_fixture_raw()
+    assert len(pieces) == 4
+
+
+def test_2_pieces_x_2_fixture_naming():
+    """Piece names match expected quantity-expanded layer names."""
+    pieces = _load_fixture_raw()
+    names = {p.layer for p in pieces}
+    assert names == {"123.2.S (1)", "123.2.S (2)", "123.1.S (1)", "123.1.S (2)"}
+
+
+def test_2_pieces_x_2_fixture_grainlines_present():
+    """All 4 pieces carry a non-None grainline extracted from layer-7 LINE."""
+    pieces = _load_fixture_raw()
+    for p in pieces:
+        assert p.grainline is not None, f"piece {p.layer!r} has no grainline"
+
+
+def test_2_pieces_x_2_fixture_normalized_grainline_degrees():
+    """Normalized grainline angles match the fixture geometry (5° tolerance).
+
+    123.2.S pieces: vertical line → 270°
+    123.1.S pieces: horizontal line → 0°
+    """
+    raw_pieces = _load_fixture_raw()
+    normalized = [normalize_piece(r, f"p{i}") for i, r in enumerate(raw_pieces)]
+
+    for p in normalized:
+        if "123.2.S" in p.name:
+            assert p.grainline_direction_deg == pytest.approx(270.0, abs=5), (
+                f"{p.name}: expected ~270°, got {p.grainline_direction_deg}"
+            )
+        elif "123.1.S" in p.name:
+            assert p.grainline_direction_deg == pytest.approx(0.0, abs=5), (
+                f"{p.name}: expected ~0°, got {p.grainline_direction_deg}"
+            )
