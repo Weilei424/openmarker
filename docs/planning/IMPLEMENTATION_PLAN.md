@@ -64,19 +64,36 @@ OpenMarker is a Windows-first, offline-first desktop fabric layout tool for non-
 
 ---
 
+### Pre-Phase 5 Fixes
+
+**Goal:** Fix three parser/normalizer bugs discovered during Phase 4 testing, and add grainline parsing infrastructure required by Phase 5.
+
+**Key files:** `engine/core/dxf/parser.py`, `engine/core/geometry/normalize.py`, `engine/core/models/piece.py`, `frontend/src/types/engine.ts`
+
+**Deliverables:**
+- Quantity expansion: DXF `Quantity: N` → N pieces per block, named `{name} (1)` … `{name} (N)` when N > 1
+- Y-axis flip: pieces render in correct orientation (DXF Y-up → canvas Y-down)
+- Grainline parsing: `LINE` layer-7 in each DXF block → `Piece.grainline_direction_deg`
+
+**Success criteria:** Importing `examples/input/2_pieces_x_2_with_grainline.dxf` produces 4 pieces with correct orientation and `grainline_direction_deg` set on each. All parser and normalizer tests pass.
+
+---
+
 ### Phase 5 — Simple auto layout
 
-**Goal:** One-click heuristic placement that fills fabric width and reports utilization.
+**Prerequisite:** Pre-Phase 5 fixes complete (grainline data in `Piece` model).
+
+**Goal:** One-click heuristic placement that fills fabric width and reports utilization. Respects grainline constraints from DXF data.
 
 **Planned additions:**
-- Engine endpoint `POST /auto-layout` → accepts pieces + fabric width, returns placements
-- Strip-packing heuristic (sort by height descending, pack left-to-right, shelf-next when row full)
-- Response: `{ placements: [{pieceId, x, y, rotation}], markerLengthMm, utilizationPct }`
-- UI: "Auto Layout" button in topbar; result replaces current placements
-- Utilization display in status bar (manual vs auto)
-- Tests: heuristic packs 100% utilization on trivial input; no collisions in output
+- Engine: `engine/core/layout/grain.py` and `heuristic.py`
+- Engine endpoint `POST /auto-layout` → accepts pieces + fabric settings, returns placements + metrics
+- Strip-packing heuristic: bbox mode (fast) and polygon mode (default, uses Shapely)
+- Grain constraint: per-piece `target_rotation = (fabric_grain_deg - piece.grainline_direction_deg) % 360`; pieces without grainline data are unconstrained
+- UI: `GrainPanel` (grain direction, grain mode, fast mode toggle); Auto Layout button; utilization in status bar
+- Tests: grain logic, strip-packing, grain enforcement end-to-end
 
-**Success criteria:** User can compare manual and auto layout; utilization number is correct.
+**Success criteria:** Auto layout places all pieces respecting grain constraints; utilization % is correct; fast vs default mode both produce valid outputs.
 
 ---
 
