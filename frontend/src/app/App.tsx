@@ -12,6 +12,7 @@ import { CanvasWorkspace } from "../components/canvas/CanvasWorkspace";
 import { FabricPanel } from "../components/sidebar/FabricPanel";
 import { GrainPanel } from "../components/sidebar/GrainPanel";
 import { computeMarkerMetrics } from "../utils/metrics";
+import { engineToFrontendPlacement } from "../utils/enginePlacement";
 
 const FABRIC_GRAIN_DEG = 90; // Fabric grain runs top → bottom (fixed by design).
 
@@ -83,26 +84,9 @@ export default function App() {
     const result = await runAutoLayout(pieces, fabricWidthMm, grainMode, FABRIC_GRAIN_DEG, fastMode);
     if (result) {
       const pieceMap = new Map(pieces.map((p) => [p.id, p]));
-      const mapped: Placement[] = result.placements.map((pl: AutoLayoutPlacement) => {
-        const piece = pieceMap.get(pl.piece_id)!;
-        const w = piece.bbox.width;
-        const h = piece.bbox.height;
-        // Engine returns (x,y) = top-left of the ROTATED bounding box.
-        // PieceShape convention: (x,y) = top-left of the UNROTATED bbox;
-        // rotation is applied around its center (x+w/2, y+h/2).
-        // Convert by computing the rotated bbox dimensions and back-projecting.
-        const rot = (pl.rotation_deg * Math.PI) / 180;
-        const cosA = Math.abs(Math.cos(rot));
-        const sinA = Math.abs(Math.sin(rot));
-        const wRot = w * cosA + h * sinA;
-        const hRot = w * sinA + h * cosA;
-        return {
-          pieceId: pl.piece_id,
-          x: pl.x - w / 2 + wRot / 2,
-          y: pl.y - h / 2 + hRot / 2,
-          rotationDeg: pl.rotation_deg,
-        };
-      });
+      const mapped: Placement[] = result.placements.map((pl: AutoLayoutPlacement) =>
+        engineToFrontendPlacement(pieceMap.get(pl.piece_id)!, pl.x, pl.y, pl.rotation_deg)
+      );
       setAllPlacements(mapped);
       setStatusMessage(
         `Auto layout: ${result.placements.length} piece${result.placements.length !== 1 ? "s" : ""} · ` +
@@ -226,6 +210,7 @@ export default function App() {
             onSelectPiece={setSelectedPieceId}
             fabricWidthMm={fabricWidthMm}
             grainMode={grainMode}
+            markerLengthMm={metrics.length}
           />
         </div>
       </div>
