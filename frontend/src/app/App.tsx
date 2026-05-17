@@ -1,7 +1,7 @@
 // OpenMarker — Phase 3: Visual workspace with Konva canvas.
 // Layout: top bar | sidebar + canvas workspace | status bar.
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import type { EngineStatus, PingResponse, GrainMode, AutoLayoutPlacement } from "../types/engine";
 import type { Placement } from "../types/canvas";
 import { useImportDxf, type ImportOutcome } from "../hooks/useImportDxf";
@@ -11,6 +11,9 @@ import { PieceList } from "../components/pieces/PieceList";
 import { CanvasWorkspace } from "../components/canvas/CanvasWorkspace";
 import { FabricPanel } from "../components/sidebar/FabricPanel";
 import { GrainPanel } from "../components/sidebar/GrainPanel";
+import { computeMarkerMetrics } from "../utils/metrics";
+
+const FABRIC_GRAIN_DEG = 90; // Fabric grain runs top → bottom (fixed by design).
 
 const ENGINE_URL = "http://127.0.0.1:8765";
 
@@ -23,11 +26,15 @@ export default function App() {
   const { status: importStatus, pieces, warnings, errorMessage, handleFileSelected } = useImportDxf();
   const { placements, updatePlacement, resetPlacements, setAllPlacements } = usePlacements(pieces);
 
-  const [grainDirectionDeg, setGrainDirectionDeg] = useState<number>(0);
   const [grainMode, setGrainMode] = useState<GrainMode>("none");
   const [fastMode, setFastMode] = useState<boolean>(false);
 
   const { runAutoLayout, status: autoStatus, errorMessage: autoError } = useAutoLayout();
+
+  const metrics = useMemo(
+    () => computeMarkerMetrics(placements, pieces, fabricWidthMm),
+    [placements, pieces, fabricWidthMm]
+  );
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -73,7 +80,7 @@ export default function App() {
 
   const handleAutoLayout = useCallback(async () => {
     if (pieces.length === 0) return;
-    const result = await runAutoLayout(pieces, fabricWidthMm, grainMode, grainDirectionDeg, fastMode);
+    const result = await runAutoLayout(pieces, fabricWidthMm, grainMode, FABRIC_GRAIN_DEG, fastMode);
     if (result) {
       const pieceMap = new Map(pieces.map((p) => [p.id, p]));
       const mapped: Placement[] = result.placements.map((pl: AutoLayoutPlacement) => {
@@ -105,7 +112,7 @@ export default function App() {
     } else {
       setStatusMessage(`Auto layout failed: ${autoError ?? "unknown error"}`);
     }
-  }, [pieces, fabricWidthMm, grainMode, grainDirectionDeg, fastMode, runAutoLayout, setAllPlacements, autoError]);
+  }, [pieces, fabricWidthMm, grainMode, fastMode, runAutoLayout, setAllPlacements, autoError]);
 
   const importButtonLabel =
     importStatus === "loading" ? "Importing..." : "Import DXF";
@@ -134,12 +141,18 @@ export default function App() {
 
           <Section title="Grain">
             <GrainPanel
-              grainDirectionDeg={grainDirectionDeg}
               grainMode={grainMode}
               fastMode={fastMode}
-              onGrainDirectionChange={setGrainDirectionDeg}
               onGrainModeChange={setGrainMode}
               onFastModeChange={setFastMode}
+            />
+          </Section>
+
+          <Section title="Metrics">
+            <MetricsPanel
+              length={metrics.length}
+              utilization={metrics.utilization}
+              hasPlacements={placements.length > 0}
             />
           </Section>
 
@@ -213,7 +226,6 @@ export default function App() {
             onSelectPiece={setSelectedPieceId}
             fabricWidthMm={fabricWidthMm}
             grainMode={grainMode}
-            grainDirectionDeg={grainDirectionDeg}
           />
         </div>
       </div>
@@ -231,6 +243,37 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     <div style={styles.section}>
       <div style={styles.sectionTitle}>{title}</div>
       <div style={styles.sectionBody}>{children}</div>
+    </div>
+  );
+}
+
+function MetricsPanel({
+  length,
+  utilization,
+  hasPlacements,
+}: {
+  length: number;
+  utilization: number;
+  hasPlacements: boolean;
+}) {
+  if (!hasPlacements) {
+    return <p style={styles.placeholder}>No pieces placed.</p>;
+  }
+  const utilColor =
+    utilization >= 75 ? "var(--color-success)" : utilization >= 50 ? "var(--color-warning)" : "var(--color-text)";
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={styles.metricRow}>
+        <span style={styles.metricLabel}>Marker length</span>
+        <span style={styles.metricValue}>{Math.round(length)} mm</span>
+      </div>
+      <div style={styles.metricRow}>
+        <span style={styles.metricLabel}>Utilization</span>
+        <span style={{ ...styles.metricValue, color: utilColor, fontSize: 14 }}>{utilization.toFixed(1)}%</span>
+      </div>
+      <div style={styles.utilBarTrack}>
+        <div style={{ ...styles.utilBarFill, width: `${Math.min(100, utilization)}%`, background: utilColor }} />
+      </div>
     </div>
   );
 }
@@ -355,5 +398,29 @@ const styles = {
   warningText: {
     color: "var(--color-warning)",
     fontSize: 11,
+  },
+  metricRow: {
+    display: "flex",
+    justifyContent: "space-between" as const,
+    alignItems: "center",
+    fontSize: 12,
+  },
+  metricLabel: {
+    color: "var(--color-text-muted)",
+  },
+  metricValue: {
+    fontWeight: 600,
+    color: "var(--color-text)",
+  },
+  utilBarTrack: {
+    height: 4,
+    background: "var(--color-border)",
+    borderRadius: 2,
+    overflow: "hidden" as const,
+    marginTop: 2,
+  },
+  utilBarFill: {
+    height: "100%",
+    transition: "width 0.2s ease",
   },
 } as const;
