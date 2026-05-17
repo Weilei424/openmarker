@@ -60,12 +60,17 @@ def _compute_metrics(
     fabric_width_mm: float,
     dim_fn,
 ) -> tuple[float, float]:
-    """Return (marker_length_mm, utilization_pct)."""
+    """Return (marker_length_mm, utilization_pct).
+
+    Marker length is the lowest Y edge across all placed pieces (the "length"
+    direction we're trying to minimize). Fabric width constrains the X axis;
+    pieces stack downward into the unlimited length direction.
+    """
     if not placements:
         return 0.0, 0.0
     piece_map = {p.id: p for p in pieces}
     marker_length = max(
-        pl.x + dim_fn(piece_map[pl.piece_id], pl.rotation_deg)[0]
+        pl.y + dim_fn(piece_map[pl.piece_id], pl.rotation_deg)[1]
         for pl in placements
     ) + GAP
     total_area = sum(p.area for p in pieces)
@@ -100,8 +105,11 @@ def _strip_pack(
     dim_fn,
     fits_fn,
     on_placed=None,
+    sort_key=None,
 ) -> tuple[list[Placement], float, float]:
-    sorted_pieces = sorted(pieces, key=lambda p: p.area, reverse=True)
+    if sort_key is None:
+        sort_key = lambda p: p.area
+    sorted_pieces = sorted(pieces, key=sort_key, reverse=True)
     _validate_pieces_fit(sorted_pieces, fabric_width_mm, grain_mode, fabric_grain_deg, dim_fn)
 
     placements: list[Placement] = []
@@ -150,6 +158,31 @@ def _strip_pack(
 
 
 # ---------------------------------------------------------------------------
+# Sort strategies — tried in order; best (shortest marker length) wins.
+# ---------------------------------------------------------------------------
+
+_SORT_STRATEGIES = [
+    lambda p: p.area,                                    # largest area first
+    lambda p: max(p.bbox.width, p.bbox.height),          # longest dim first
+    lambda p: p.bbox.height,                             # tallest first
+    lambda p: p.bbox.width,                              # widest first
+]
+
+
+def _best_of_strategies(run_one) -> tuple[list[Placement], float, float]:
+    """Run the packer with each sort strategy and return the result with the
+    shortest marker length. `run_one` is a callable taking a sort_key and
+    returning (placements, marker_length, utilization)."""
+    best: tuple[list[Placement], float, float] | None = None
+    for sort_key in _SORT_STRATEGIES:
+        result = run_one(sort_key)
+        if best is None or result[1] < best[1]:
+            best = result
+    assert best is not None
+    return best
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -169,11 +202,15 @@ def auto_layout_bbox(
         # Bbox non-overlap is guaranteed by the left-to-right cursor; no extra check needed.
         return True
 
-    return _strip_pack(
-        pieces, fabric_width_mm, grain_mode, fabric_grain_deg,
-        dim_fn=_rotated_bbox_dims,
-        fits_fn=fits_bbox,
-    )
+    def run_one(sort_key):
+        return _strip_pack(
+            pieces, fabric_width_mm, grain_mode, fabric_grain_deg,
+            dim_fn=_rotated_bbox_dims,
+            fits_fn=fits_bbox,
+            sort_key=sort_key,
+        )
+
+    return _best_of_strategies(run_one)
 
 
 def auto_layout_polygon(
@@ -188,20 +225,25 @@ def auto_layout_polygon(
     Returns (placements, marker_length_mm, utilization_pct).
     Raises ValueError if any piece cannot fit at any allowed rotation.
     """
-    placed_polys: list[ShapelyPolygon] = []
+    def run_one(sort_key):
+        # Fresh placed_polys list per strategy attempt.
+        placed_polys: list[ShapelyPolygon] = []
 
-    def fits_polygon(piece, x, y, rot, w):
-        candidate = _placed_polygon(piece, x, y, rot)
-        if candidate.bounds[2] + GAP > fabric_width_mm:
-            return False
-        return not any(candidate.intersects(pp) for pp in placed_polys)
+        def fits_polygon(piece, x, y, rot, w):
+            candidate = _placed_polygon(piece, x, y, rot)
+            if candidate.bounds[2] + GAP > fabric_width_mm:
+                return False
+            return not any(candidate.intersects(pp) for pp in placed_polys)
 
-    def on_placed(piece, placement, rot):
-        placed_polys.append(_placed_polygon(piece, placement.x, placement.y, rot))
+        def on_placed(piece, placement, rot):
+            placed_polys.append(_placed_polygon(piece, placement.x, placement.y, rot))
 
-    return _strip_pack(
-        pieces, fabric_width_mm, grain_mode, fabric_grain_deg,
-        dim_fn=_polygon_dims,
-        fits_fn=fits_polygon,
-        on_placed=on_placed,
-    )
+        return _strip_pack(
+            pieces, fabric_width_mm, grain_mode, fabric_grain_deg,
+            dim_fn=_polygon_dims,
+            fits_fn=fits_polygon,
+            on_placed=on_placed,
+            sort_key=sort_key,
+        )
+
+    return _best_of_strategies(run_one)
