@@ -2,7 +2,7 @@
 // Handles zoom/pan, R-key rotation, and per-piece rotation handle.
 
 import { useRef, useState, useEffect, useCallback } from "react";
-import { Stage, Layer, Rect, Line, Circle, Arrow } from "react-konva";
+import { Stage, Layer, Rect, Line, Circle } from "react-konva";
 import type Konva from "konva";
 import type { KonvaEventObject } from "konva/lib/Node";
 import type { Piece, GrainMode } from "../../types/engine";
@@ -24,6 +24,7 @@ interface Props {
   onSelectPiece: (id: string | null) => void;
   fabricWidthMm: number;
   grainMode: GrainMode;
+  markerLengthMm: number;
 }
 
 export function CanvasWorkspace({
@@ -34,6 +35,7 @@ export function CanvasWorkspace({
   onSelectPiece,
   fabricWidthMm,
   grainMode,
+  markerLengthMm,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [stageSize, setStageSize] = useState({ w: 800, h: 600 });
@@ -210,23 +212,15 @@ export function CanvasWorkspace({
             stroke="#555"
             strokeWidth={1}
           />
-          {grainMode !== "none" && (() => {
-            // Fabric grain always runs top → bottom (90° in screen).
-            const arrowLen = 60 / transform.scale;
-            const ax = fabricWidthMm - 60 / transform.scale;
-            const ay = 40 / transform.scale;
-            return (
-              <Arrow
-                points={[ax, ay, ax, ay + arrowLen]}
-                fill="#facc15"
-                stroke="#facc15"
-                strokeWidth={2}
-                strokeScaleEnabled={false}
-                pointerLength={10 / transform.scale}
-                pointerWidth={8 / transform.scale}
-              />
-            );
-          })()}
+          {markerLengthMm > 0 && (
+            <Line
+              points={[0, markerLengthMm, fabricWidthMm, markerLengthMm]}
+              stroke="#facc15"
+              strokeWidth={1.5}
+              strokeScaleEnabled={false}
+              dash={[8, 6]}
+            />
+          )}
         </Layer>
 
         {/* Layer 2: piece outlines + rotation handle */}
