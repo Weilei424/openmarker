@@ -118,7 +118,7 @@ def test_polygon_three_squares_all_placed():
 
 
 def test_polygon_no_overlaps():
-    """Placed polygons must not intersect each other."""
+    """Placed polygons may touch but must not have positive-area overlap."""
     pieces = [_make_rect(f"p{i}", 80 + i * 10, 120) for i in range(5)]
     placements, _, _ = auto_layout_polygon(
         pieces, fabric_width_mm=600, grain_mode="none", fabric_grain_deg=0.0
@@ -137,7 +137,49 @@ def test_polygon_no_overlaps():
     for i, a in enumerate(placed):
         for j, b in enumerate(placed):
             if i < j:
-                assert not a.intersects(b), f"Pieces {i} and {j} overlap"
+                # Touching at shared edges yields intersection area = 0 (allowed).
+                # Only positive-area overlap is a collision.
+                overlap_area = a.intersection(b).area if a.intersects(b) else 0.0
+                assert overlap_area < 1e-3, f"Pieces {i} and {j} overlap by {overlap_area:.4f} mm²"
+
+
+def test_polygon_blf_fills_gap_above_shorter_neighbor():
+    """BLF should place a small piece in the gap above a shorter neighbor,
+    not start a new shelf below the tallest piece. This is the failure mode
+    of pure shelf-packing that BLF specifically fixes."""
+    # piece_A: 100x200 (tall). piece_B: 100x100 (short).
+    # After placing A at (10, 10) and B at (110, 10), there's an L-shaped
+    # gap to the right of B and above A's bottom. piece_C (100x50) fits there
+    # at approximately (110, 110) — touching B's bottom and A's right.
+    a = _make_rect("A", 100, 200)
+    b = _make_rect("B", 100, 100)
+    c = _make_rect("C", 100, 50)
+    placements, _, _ = auto_layout_polygon(
+        [a, b, c], fabric_width_mm=300, grain_mode="none", fabric_grain_deg=0.0
+    )
+
+    pl_c = next(pl for pl in placements if pl.piece_id == "C")
+    # Below A's bottom edge (which is ~210) would mean a new shelf. BLF must
+    # find the gap above A's bottom — piece C must sit at y < 200.
+    assert pl_c.y < 200, (
+        f"BLF failed to fill the gap above the shorter neighbor; "
+        f"piece C ended up at y={pl_c.y} (expected < 200)"
+    )
+
+
+def test_polygon_touching_is_not_collision():
+    """Two squares placed edge-to-edge with no inter-piece gap should both
+    succeed (touching boundaries is allowed; only positive-area overlap is rejected)."""
+    pieces = [_make_square(f"p{i}", 100) for i in range(3)]
+    placements, _, _ = auto_layout_polygon(
+        pieces, fabric_width_mm=350, grain_mode="none", fabric_grain_deg=0.0
+    )
+    assert len(placements) == 3
+    # In a 350mm-wide fabric with EDGE_GAP=10 on each side, the usable width is
+    # 330mm. Three 100mm squares (3*100=300) need at most 30mm of slack,
+    # so they should all land on the same shelf (touching each other).
+    ys = {pl.y for pl in placements}
+    assert len(ys) == 1, f"expected single shelf with touching pieces; got y-values {ys}"
 
 
 def test_polygon_grain_single_enforced():
