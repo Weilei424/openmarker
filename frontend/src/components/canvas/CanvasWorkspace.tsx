@@ -2,10 +2,10 @@
 // Handles zoom/pan, R-key rotation, and per-piece rotation handle.
 
 import { useRef, useState, useEffect, useCallback } from "react";
-import { Stage, Layer, Rect, Line, Circle } from "react-konva";
+import { Stage, Layer, Rect, Line, Circle, Arrow } from "react-konva";
 import type Konva from "konva";
 import type { KonvaEventObject } from "konva/lib/Node";
-import type { Piece } from "../../types/engine";
+import type { Piece, GrainMode } from "../../types/engine";
 import type { Placement } from "../../types/canvas";
 import { useViewport } from "../../hooks/useViewport";
 import { useCollisions } from "../../hooks/useCollisions";
@@ -23,6 +23,8 @@ interface Props {
   selectedPieceId: string | null;
   onSelectPiece: (id: string | null) => void;
   fabricWidthMm: number;
+  grainMode: GrainMode;
+  grainDirectionDeg: number;
 }
 
 export function CanvasWorkspace({
@@ -32,6 +34,8 @@ export function CanvasWorkspace({
   selectedPieceId,
   onSelectPiece,
   fabricWidthMm,
+  grainMode,
+  grainDirectionDeg,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [stageSize, setStageSize] = useState({ w: 800, h: 600 });
@@ -192,7 +196,7 @@ export function CanvasWorkspace({
           if (e.target === e.target.getStage()) onSelectPiece(null);
         }}
       >
-        {/* Layer 1: fabric background bounds */}
+        {/* Layer 1: fabric background bounds + grain direction indicator */}
         <Layer listening={false}>
           <Rect
             x={0}
@@ -208,6 +212,28 @@ export function CanvasWorkspace({
             stroke="#555"
             strokeWidth={1}
           />
+          {grainMode !== "none" && (() => {
+            const arrowLen = 60 / transform.scale;
+            const rad = (grainDirectionDeg * Math.PI) / 180;
+            const ax = fabricWidthMm - 80 / transform.scale;
+            const ay = 40 / transform.scale;
+            return (
+              <Arrow
+                points={[
+                  ax - (arrowLen / 2) * Math.cos(rad),
+                  ay - (arrowLen / 2) * Math.sin(rad),
+                  ax + (arrowLen / 2) * Math.cos(rad),
+                  ay + (arrowLen / 2) * Math.sin(rad),
+                ]}
+                fill="#facc15"
+                stroke="#facc15"
+                strokeWidth={2}
+                strokeScaleEnabled={false}
+                pointerLength={10 / transform.scale}
+                pointerWidth={8 / transform.scale}
+              />
+            );
+          })()}
         </Layer>
 
         {/* Layer 2: piece outlines + rotation handle */}
@@ -224,6 +250,8 @@ export function CanvasWorkspace({
                 isColliding={collidingIds.has(piece.id)}
                 onSelect={() => onSelectPiece(piece.id)}
                 onDragEnd={(id, pos) => updatePlacement(id, pos)}
+                grainMode={grainMode}
+                scale={transform.scale}
               />
             );
           })}
