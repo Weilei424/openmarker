@@ -35,10 +35,13 @@ def _rotated_bbox_dims(piece: Piece, rotation_deg: float) -> tuple[float, float]
 
 
 def _placed_polygon(piece: Piece, x: float, y: float, rotation_deg: float) -> ShapelyPolygon:
-    """Return the piece polygon rotated CW by rotation_deg and translated to (x, y)."""
+    """Return the piece polygon rotated CW by rotation_deg (screen) and translated to (x, y).
+
+    Our piece coords are screen (y down). Shapely is +angle = CCW in math.
+    Because flipping y inverts the rotation direction, Shapely +angle = CW in screen.
+    """
     poly = ShapelyPolygon(piece.polygon)
-    # Shapely rotate is CCW-positive; negate for CW convention
-    rotated = shapely.affinity.rotate(poly, -rotation_deg, origin=(0, 0), use_radians=False)
+    rotated = shapely.affinity.rotate(poly, rotation_deg, origin=(0, 0), use_radians=False)
     minx, miny = rotated.bounds[0], rotated.bounds[1]
     return shapely.affinity.translate(rotated, xoff=-minx + x, yoff=-miny + y)
 
@@ -46,7 +49,7 @@ def _placed_polygon(piece: Piece, x: float, y: float, rotation_deg: float) -> Sh
 def _polygon_dims(piece: Piece, rotation_deg: float) -> tuple[float, float]:
     """Return (width, height) from actual rotated polygon bounds."""
     poly = ShapelyPolygon(piece.polygon)
-    rotated = shapely.affinity.rotate(poly, -rotation_deg, origin=(0, 0), use_radians=False)
+    rotated = shapely.affinity.rotate(poly, rotation_deg, origin=(0, 0), use_radians=False)
     minx, miny, maxx, maxy = rotated.bounds
     return maxx - minx, maxy - miny
 
