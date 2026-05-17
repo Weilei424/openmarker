@@ -5,7 +5,7 @@ import { useRef, useState, useEffect, useCallback } from "react";
 import { Stage, Layer, Rect, Line, Circle } from "react-konva";
 import type Konva from "konva";
 import type { KonvaEventObject } from "konva/lib/Node";
-import type { Piece } from "../../types/engine";
+import type { Piece, GrainMode } from "../../types/engine";
 import type { Placement } from "../../types/canvas";
 import { useViewport } from "../../hooks/useViewport";
 import { useCollisions } from "../../hooks/useCollisions";
@@ -23,6 +23,8 @@ interface Props {
   selectedPieceId: string | null;
   onSelectPiece: (id: string | null) => void;
   fabricWidthMm: number;
+  grainMode: GrainMode;
+  markerLengthMm: number;
 }
 
 export function CanvasWorkspace({
@@ -32,6 +34,8 @@ export function CanvasWorkspace({
   selectedPieceId,
   onSelectPiece,
   fabricWidthMm,
+  grainMode,
+  markerLengthMm,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [stageSize, setStageSize] = useState({ w: 800, h: 600 });
@@ -192,7 +196,7 @@ export function CanvasWorkspace({
           if (e.target === e.target.getStage()) onSelectPiece(null);
         }}
       >
-        {/* Layer 1: fabric background bounds */}
+        {/* Layer 1: fabric background bounds + grain direction indicator */}
         <Layer listening={false}>
           <Rect
             x={0}
@@ -208,6 +212,15 @@ export function CanvasWorkspace({
             stroke="#555"
             strokeWidth={1}
           />
+          {markerLengthMm > 0 && (
+            <Line
+              points={[0, markerLengthMm, fabricWidthMm, markerLengthMm]}
+              stroke="#facc15"
+              strokeWidth={1.5}
+              strokeScaleEnabled={false}
+              dash={[8, 6]}
+            />
+          )}
         </Layer>
 
         {/* Layer 2: piece outlines + rotation handle */}
@@ -224,6 +237,8 @@ export function CanvasWorkspace({
                 isColliding={collidingIds.has(piece.id)}
                 onSelect={() => onSelectPiece(piece.id)}
                 onDragEnd={(id, pos) => updatePlacement(id, pos)}
+                grainMode={grainMode}
+                scale={transform.scale}
               />
             );
           })}

@@ -1,13 +1,20 @@
 // OpenMarker — Phase 3: Visual workspace with Konva canvas.
 // Layout: top bar | sidebar + canvas workspace | status bar.
 
-import { useState, useCallback, useRef, useEffect } from "react";
-import type { EngineStatus, PingResponse } from "../types/engine";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import type { EngineStatus, PingResponse, GrainMode, AutoLayoutPlacement } from "../types/engine";
+import type { Placement } from "../types/canvas";
 import { useImportDxf, type ImportOutcome } from "../hooks/useImportDxf";
 import { usePlacements } from "../hooks/usePlacements";
+import { useAutoLayout } from "../hooks/useAutoLayout";
 import { PieceList } from "../components/pieces/PieceList";
 import { CanvasWorkspace } from "../components/canvas/CanvasWorkspace";
 import { FabricPanel } from "../components/sidebar/FabricPanel";
+import { GrainPanel } from "../components/sidebar/GrainPanel";
+import { computeMarkerMetrics } from "../utils/metrics";
+import { engineToFrontendPlacement } from "../utils/enginePlacement";
+
+const FABRIC_GRAIN_DEG = 90; // Fabric grain runs top → bottom (fixed by design).
 
 const ENGINE_URL = "http://127.0.0.1:8765";
 
@@ -18,7 +25,17 @@ export default function App() {
   const [fabricWidthMm, setFabricWidthMm] = useState<number>(1500);
 
   const { status: importStatus, pieces, warnings, errorMessage, handleFileSelected } = useImportDxf();
-  const { placements, updatePlacement } = usePlacements(pieces);
+  const { placements, updatePlacement, resetPlacements, setAllPlacements } = usePlacements(pieces);
+
+  const [grainMode, setGrainMode] = useState<GrainMode>("none");
+  const [fastMode, setFastMode] = useState<boolean>(false);
+
+  const { runAutoLayout, status: autoStatus, errorMessage: autoError } = useAutoLayout();
+
+  const metrics = useMemo(
+    () => computeMarkerMetrics(placements, pieces, fabricWidthMm),
+    [placements, pieces, fabricWidthMm]
+  );
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -62,6 +79,25 @@ export default function App() {
     [handleFileSelected]
   );
 
+  const handleAutoLayout = useCallback(async () => {
+    if (pieces.length === 0) return;
+    const result = await runAutoLayout(pieces, fabricWidthMm, grainMode, FABRIC_GRAIN_DEG, fastMode);
+    if (result) {
+      const pieceMap = new Map(pieces.map((p) => [p.id, p]));
+      const mapped: Placement[] = result.placements.map((pl: AutoLayoutPlacement) =>
+        engineToFrontendPlacement(pieceMap.get(pl.piece_id)!, pl.x, pl.y, pl.rotation_deg)
+      );
+      setAllPlacements(mapped);
+      setStatusMessage(
+        `Auto layout: ${result.placements.length} piece${result.placements.length !== 1 ? "s" : ""} · ` +
+        `Marker: ${Math.round(result.marker_length_mm)} mm · ` +
+        `Utilization: ${result.utilization_pct}%`
+      );
+    } else {
+      setStatusMessage(`Auto layout failed: ${autoError ?? "unknown error"}`);
+    }
+  }, [pieces, fabricWidthMm, grainMode, fastMode, runAutoLayout, setAllPlacements, autoError]);
+
   const importButtonLabel =
     importStatus === "loading" ? "Importing..." : "Import DXF";
 
@@ -87,6 +123,23 @@ export default function App() {
             <FabricPanel fabricWidthMm={fabricWidthMm} onChange={setFabricWidthMm} />
           </Section>
 
+          <Section title="Grain">
+            <GrainPanel
+              grainMode={grainMode}
+              fastMode={fastMode}
+              onGrainModeChange={setGrainMode}
+              onFastModeChange={setFastMode}
+            />
+          </Section>
+
+          <Section title="Metrics">
+            <MetricsPanel
+              length={metrics.length}
+              utilization={metrics.utilization}
+              hasPlacements={placements.length > 0}
+            />
+          </Section>
+
           <Section title="Layout">
             {/* Hidden file input — triggered by the Import DXF button */}
             <input
@@ -101,6 +154,22 @@ export default function App() {
               disabled={importStatus === "loading"}
             >
               {importButtonLabel}
+            </button>
+
+            <button
+              onClick={handleAutoLayout}
+              disabled={pieces.length === 0 || autoStatus === "loading"}
+              style={{ opacity: pieces.length === 0 ? 0.4 : 1 }}
+            >
+              {autoStatus === "loading" ? "Running..." : "Auto Layout"}
+            </button>
+
+            <button
+              onClick={resetPlacements}
+              disabled={pieces.length === 0}
+              style={{ fontSize: 11, opacity: pieces.length === 0 ? 0.4 : 1 }}
+            >
+              Reset Layout
             </button>
 
             {importStatus === "error" && (
@@ -140,6 +209,8 @@ export default function App() {
             selectedPieceId={selectedPieceId}
             onSelectPiece={setSelectedPieceId}
             fabricWidthMm={fabricWidthMm}
+            grainMode={grainMode}
+            markerLengthMm={metrics.length}
           />
         </div>
       </div>
@@ -157,6 +228,37 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     <div style={styles.section}>
       <div style={styles.sectionTitle}>{title}</div>
       <div style={styles.sectionBody}>{children}</div>
+    </div>
+  );
+}
+
+function MetricsPanel({
+  length,
+  utilization,
+  hasPlacements,
+}: {
+  length: number;
+  utilization: number;
+  hasPlacements: boolean;
+}) {
+  if (!hasPlacements) {
+    return <p style={styles.placeholder}>No pieces placed.</p>;
+  }
+  const utilColor =
+    utilization >= 75 ? "var(--color-success)" : utilization >= 50 ? "var(--color-warning)" : "var(--color-text)";
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={styles.metricRow}>
+        <span style={styles.metricLabel}>Marker length</span>
+        <span style={styles.metricValue}>{Math.round(length)} mm</span>
+      </div>
+      <div style={styles.metricRow}>
+        <span style={styles.metricLabel}>Utilization</span>
+        <span style={{ ...styles.metricValue, color: utilColor, fontSize: 14 }}>{utilization.toFixed(1)}%</span>
+      </div>
+      <div style={styles.utilBarTrack}>
+        <div style={{ ...styles.utilBarFill, width: `${Math.min(100, utilization)}%`, background: utilColor }} />
+      </div>
     </div>
   );
 }
@@ -281,5 +383,29 @@ const styles = {
   warningText: {
     color: "var(--color-warning)",
     fontSize: 11,
+  },
+  metricRow: {
+    display: "flex",
+    justifyContent: "space-between" as const,
+    alignItems: "center",
+    fontSize: 12,
+  },
+  metricLabel: {
+    color: "var(--color-text-muted)",
+  },
+  metricValue: {
+    fontWeight: 600,
+    color: "var(--color-text)",
+  },
+  utilBarTrack: {
+    height: 4,
+    background: "var(--color-border)",
+    borderRadius: 2,
+    overflow: "hidden" as const,
+    marginTop: 2,
+  },
+  utilBarFill: {
+    height: "100%",
+    transition: "width 0.2s ease",
   },
 } as const;

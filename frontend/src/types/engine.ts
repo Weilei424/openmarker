@@ -36,3 +36,18 @@ export interface ImportDxfResponse {
 }
 
 export type ImportStatus = "idle" | "loading" | "success" | "error";
+
+export type GrainMode = "none" | "single" | "bi";
+
+export interface AutoLayoutPlacement {
+  piece_id: string;
+  x: number;
+  y: number;
+  rotation_deg: number;
+}
+
+export interface AutoLayoutResponse {
+  placements: AutoLayoutPlacement[];
+  marker_length_mm: number;
+  utilization_pct: number;
+}
