@@ -24,7 +24,6 @@ interface Props {
   onSelectPiece: (id: string | null) => void;
   fabricWidthMm: number;
   grainMode: GrainMode;
-  grainDirectionDeg: number;
 }
 
 export function CanvasWorkspace({
@@ -35,7 +34,6 @@ export function CanvasWorkspace({
   onSelectPiece,
   fabricWidthMm,
   grainMode,
-  grainDirectionDeg,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [stageSize, setStageSize] = useState({ w: 800, h: 600 });
@@ -213,18 +211,13 @@ export function CanvasWorkspace({
             strokeWidth={1}
           />
           {grainMode !== "none" && (() => {
+            // Fabric grain always runs top → bottom (90° in screen).
             const arrowLen = 60 / transform.scale;
-            const rad = (grainDirectionDeg * Math.PI) / 180;
-            const ax = fabricWidthMm - 80 / transform.scale;
+            const ax = fabricWidthMm - 60 / transform.scale;
             const ay = 40 / transform.scale;
             return (
               <Arrow
-                points={[
-                  ax - (arrowLen / 2) * Math.cos(rad),
-                  ay - (arrowLen / 2) * Math.sin(rad),
-                  ax + (arrowLen / 2) * Math.cos(rad),
-                  ay + (arrowLen / 2) * Math.sin(rad),
-                ]}
+                points={[ax, ay, ax, ay + arrowLen]}
                 fill="#facc15"
                 stroke="#facc15"
                 strokeWidth={2}
