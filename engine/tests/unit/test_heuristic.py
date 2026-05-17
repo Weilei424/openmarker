@@ -130,7 +130,7 @@ def test_polygon_no_overlaps():
     for pl in placements:
         piece = next(p for p in pieces if p.id == pl.piece_id)
         poly = SP(piece.polygon)
-        rotated = shapely.affinity.rotate(poly, -pl.rotation_deg, origin=(0, 0))
+        rotated = shapely.affinity.rotate(poly, pl.rotation_deg, origin=(0, 0))
         minx, miny = rotated.bounds[0], rotated.bounds[1]
         placed.append(shapely.affinity.translate(rotated, xoff=-minx + pl.x, yoff=-miny + pl.y))
 
