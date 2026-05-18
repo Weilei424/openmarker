@@ -67,7 +67,7 @@ export function PieceShape({
 
   const handleMouseEnter = (e: KonvaEventObject<MouseEvent>) => {
     const container = e.target.getStage()?.container();
-    if (container) container.style.cursor = "grab";
+    if (container) container.style.cursor = editable ? "grab" : "pointer";
   };
 
   const handleMouseLeave = (e: KonvaEventObject<MouseEvent>) => {
@@ -84,13 +84,14 @@ export function PieceShape({
       offsetY={cy}
       rotation={placement.rotationDeg}
       draggable={editable}
-      onClick={editable ? onSelect : undefined}
-      onTap={editable ? onSelect : undefined}
-      onMouseDown={editable ? (e) => { e.cancelBubble = true; } : undefined}
+      // Click-to-select is always available, regardless of editable. Drag is gated.
+      onClick={onSelect}
+      onTap={onSelect}
+      onMouseDown={(e) => { e.cancelBubble = true; }}
       onDragStart={editable ? handleDragStart : undefined}
       onDragEnd={editable ? handleDragEnd : undefined}
-      onMouseEnter={editable ? handleMouseEnter : undefined}
-      onMouseLeave={editable ? handleMouseLeave : undefined}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
     >
       <Line
         points={flatPoints}
