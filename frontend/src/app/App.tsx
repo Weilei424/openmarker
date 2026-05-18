@@ -254,7 +254,7 @@ export default function App() {
                 <PieceList
                   pieces={pieces}
                   selectedPieceId={selectedPieceId}
-                  onSelect={setSelectedPieceId}
+                  onSelect={(id) => setSelectedPieceId(id === selectedPieceId ? null : id)}
                 />
                 {warnings.length > 0 && (
                   <div style={styles.warningBlock}>
