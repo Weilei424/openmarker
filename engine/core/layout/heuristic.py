@@ -8,6 +8,7 @@ import shapely.affinity
 from shapely.geometry import Polygon as ShapelyPolygon, box as shapely_box
 from shapely.ops import unary_union
 
+from core.layout.cancellation import CancellationError, is_cancelled
 from core.layout.grain import allowed_rotations
 from core.models.piece import Piece
 
@@ -185,6 +186,8 @@ def _strip_pack(
         return best
 
     for piece in sorted_pieces:
+        if is_cancelled():
+            raise CancellationError("Auto-layout cancelled by user.")
         result = _best_rotation(piece, x_cursor, shelf_y)
         if result is None:
             shelf_y += shelf_h + EDGE_GAP
@@ -237,6 +240,8 @@ def _blf_pack(
     placed_polys: list[ShapelyPolygon] = []
 
     for piece in sorted_pieces:
+        if is_cancelled():
+            raise CancellationError("Auto-layout cancelled by user.")
         rotations = _layout_rotations(
             grain_mode, fabric_grain_deg, piece.grainline_direction_deg
         )
@@ -418,6 +423,8 @@ def _blf_pack_nfp(
     placed_polys: list[ShapelyPolygon] = []
 
     for piece in sorted_pieces:
+        if is_cancelled():
+            raise CancellationError("Auto-layout cancelled by user.")
         rotations = _layout_rotations(
             grain_mode, fabric_grain_deg, piece.grainline_direction_deg
         )
@@ -488,26 +495,26 @@ def _blf_pack_nfp(
                 break  # vertices sorted ascending; first valid is best at this rotation
 
         # Fallback: if NFP found nothing usable, force a "new shelf" placement
-        # below every placed piece at the first rotation that fits the width.
+        # below every placed piece at the first rotation whose width fits.
+        # The candidate sits strictly below max_placed_bottom + EDGE_GAP, so by
+        # construction it cannot overlap any placed piece — no overlap check.
         if best is None:
             max_placed_bottom = (
                 max((pp.bounds[3] for pp in placed_polys), default=EDGE_GAP)
             )
             fallback_y = max_placed_bottom + EDGE_GAP
             for rot in rotations:
-                new_coords = _polygon_at_origin(piece, rot)
-                pw, ph = _polygon_dims(piece, rot)
+                pw, _ = _polygon_dims(piece, rot)
                 if pw + 2 * EDGE_GAP > fabric_width_mm:
                     continue
                 candidate_poly = _placed_polygon(piece, EDGE_GAP, fallback_y, rot)
-                if any(_has_area_overlap(candidate_poly, pp) for pp in placed_polys):
-                    continue  # extremely unlikely below all placed
                 best = (fallback_y, EDGE_GAP, rot, candidate_poly)
                 break
 
         if best is None:
             raise ValueError(
-                f"Cannot place piece '{piece.name}' — no valid NFP-BLF position found."
+                f"Cannot place piece '{piece.name}' — no rotation fits "
+                f"within fabric width {fabric_width_mm:.0f} mm."
             )
 
         bbox_tl_y, bbox_tl_x, rot, candidate_poly = best
