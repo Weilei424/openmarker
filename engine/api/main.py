@@ -8,10 +8,17 @@ import io
 import ezdxf
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from core.dxf import parse_dxf
 from core.geometry import normalize_piece
+from core.layout.cancellation import (
+    CancellationError,
+    request_cancellation,
+    reset_cancellation,
+)
 from core.layout.heuristic import auto_layout_bbox, auto_layout_polygon
 from core.models.piece import BoundingBox, Piece as PieceModel
 
@@ -129,15 +136,23 @@ async def auto_layout_endpoint(request: Request) -> dict:
             grainline_direction_deg=d.get("grainline_direction_deg"),
         ))
 
-    try:
+    # Clear any stale cancellation flag from a previous run.
+    reset_cancellation()
+
+    # Run the CPU-bound layout in a worker thread so other endpoints
+    # (notably /cancel-layout, /ping) stay responsive while it runs.
+    def _do_layout():
         if fast_mode:
-            placements, marker_length, utilization = auto_layout_bbox(
-                pieces, fabric_width_mm, grain_mode, grain_direction_deg
-            )
-        else:
-            placements, marker_length, utilization = auto_layout_polygon(
-                pieces, fabric_width_mm, grain_mode, grain_direction_deg
-            )
+            return auto_layout_bbox(pieces, fabric_width_mm, grain_mode, grain_direction_deg)
+        return auto_layout_polygon(pieces, fabric_width_mm, grain_mode, grain_direction_deg)
+
+    try:
+        placements, marker_length, utilization = await run_in_threadpool(_do_layout)
+    except CancellationError:
+        return JSONResponse(
+            status_code=499,  # Client Closed Request (Nginx convention)
+            content={"detail": "cancelled"},
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -149,6 +164,14 @@ async def auto_layout_endpoint(request: Request) -> dict:
         "marker_length_mm": marker_length,
         "utilization_pct": utilization,
     }
+
+
+@app.post("/cancel-layout")
+def cancel_layout() -> dict:
+    """Signal the in-progress auto-layout (if any) to abort at the next
+    piece-placement checkpoint. Returns immediately."""
+    request_cancellation()
+    return {"ok": True}
 
 
 if __name__ == "__main__":
