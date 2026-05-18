@@ -69,6 +69,12 @@ export function useAutoLayout() {
   );
 
   const abort = useCallback(() => {
+    // Tell the engine to stop its current run at the next checkpoint
+    // (the layout loop checks a cancellation flag between piece placements).
+    // Fire-and-forget; the response is ignored.
+    fetch(`${ENGINE_URL}/cancel-layout`, { method: "POST" }).catch(() => {
+      // Engine might be unreachable; that's OK — the abort below still cancels the in-flight fetch.
+    });
     abortRef.current?.abort();
   }, []);
 
