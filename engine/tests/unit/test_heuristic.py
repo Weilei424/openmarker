@@ -167,6 +167,38 @@ def test_polygon_blf_fills_gap_above_shorter_neighbor():
     )
 
 
+def test_polygon_nfp_triangles_nest_diagonally():
+    """NFP-BLF should pack right triangles much tighter than bbox shelf-packing
+    can, because two triangles fit inside one rectangle's bbox when their
+    hypotenuses meet. Bbox-strip-pack treats each triangle as a full rectangle
+    and wastes ~half the space."""
+    def tri(name, w, h):
+        return Piece(
+            id=name, name=name,
+            polygon=[(0, 0), (w, 0), (0, h)],
+            area=w * h / 2,
+            bbox=BoundingBox(0, 0, w, h, w, h),
+            is_valid=True,
+            grainline_direction_deg=None,
+        )
+
+    # 8 right triangles in a 500mm fabric. Each triangle: area = 100*200/2 = 10000 mm².
+    # Bbox-shelf would treat each as a 100*200 rectangle (4 per row of 500mm,
+    # 2 rows → length ~410mm → util ~40%). NFP-BLF should nest pairs of
+    # triangles into shared 100*200 rectangles (one 0°, one 180° per pair) and
+    # reach much higher utilization.
+    pieces = [tri(f"t{i}", 100, 200) for i in range(8)]
+    placements, length, util = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="none", fabric_grain_deg=0.0
+    )
+    assert len(placements) == 8
+    assert util > 60.0, (
+        f"NFP-BLF should achieve >60% utilization on right triangles via "
+        f"diagonal nesting; got {util}% (length={length}mm). Bbox-shelf "
+        f"typically gets ~35% on this input."
+    )
+
+
 def test_polygon_touching_is_not_collision():
     """Two squares placed edge-to-edge with no inter-piece gap should both
     succeed (touching boundaries is allowed; only positive-area overlap is rejected)."""
