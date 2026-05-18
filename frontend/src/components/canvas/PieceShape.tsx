@@ -2,9 +2,9 @@
 // Drag repositions the piece (snapped to 10 mm grid).
 // Selected pieces show an orange outline; colliding pieces show red.
 
-import { Group, Line } from "react-konva";
+import { Group, Line, Arrow } from "react-konva";
 import type { KonvaEventObject } from "konva/lib/Node";
-import type { Piece } from "../../types/engine";
+import type { Piece, GrainMode } from "../../types/engine";
 import type { Placement } from "../../types/canvas";
 import { snapToGrid } from "../../utils/placement";
 
@@ -15,6 +15,11 @@ interface Props {
   isColliding: boolean;
   onSelect: () => void;
   onDragEnd: (id: string, pos: { x: number; y: number }) => void;
+  grainMode: GrainMode;
+  scale: number;
+  baseStroke: string;
+  baseFill: string;
+  editable: boolean;
 }
 
 export function PieceShape({
@@ -24,13 +29,18 @@ export function PieceShape({
   isColliding,
   onSelect,
   onDragEnd,
+  grainMode,
+  scale,
+  baseStroke,
+  baseFill,
+  editable,
 }: Props) {
-  const stroke = isColliding ? "#e53935" : isSelected ? "#ff9800" : "#4a9eff";
+  const stroke = isColliding ? "#e53935" : isSelected ? "#ff9800" : baseStroke;
   const fill = isColliding
     ? "rgba(229, 57, 53, 0.25)"
     : isSelected
     ? "rgba(255, 152, 0, 0.12)"
-    : "rgba(74, 158, 255, 0.08)";
+    : baseFill;
 
   // Polygon points in Group-local coordinates (piece is at origin)
   const flatPoints = piece.polygon.flatMap(([x, y]) => [x, y]);
@@ -73,14 +83,14 @@ export function PieceShape({
       offsetX={cx}
       offsetY={cy}
       rotation={placement.rotationDeg}
-      draggable
-      onClick={onSelect}
-      onTap={onSelect}
-      onMouseDown={(e) => { e.cancelBubble = true; }}
-      onDragStart={handleDragStart}
-      onDragEnd={handleDragEnd}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
+      draggable={editable}
+      onClick={editable ? onSelect : undefined}
+      onTap={editable ? onSelect : undefined}
+      onMouseDown={editable ? (e) => { e.cancelBubble = true; } : undefined}
+      onDragStart={editable ? handleDragStart : undefined}
+      onDragEnd={editable ? handleDragEnd : undefined}
+      onMouseEnter={editable ? handleMouseEnter : undefined}
+      onMouseLeave={editable ? handleMouseLeave : undefined}
     >
       <Line
         points={flatPoints}
@@ -90,6 +100,27 @@ export function PieceShape({
         strokeWidth={1}
         strokeScaleEnabled={false}
       />
+      {grainMode !== "none" && piece.grainline_direction_deg !== null && (() => {
+        const arrowLen = 50 / scale;
+        const rad = (piece.grainline_direction_deg * Math.PI) / 180;
+        return (
+          <Arrow
+            points={[
+              cx - (arrowLen / 2) * Math.cos(rad),
+              cy - (arrowLen / 2) * Math.sin(rad),
+              cx + (arrowLen / 2) * Math.cos(rad),
+              cy + (arrowLen / 2) * Math.sin(rad),
+            ]}
+            fill="#facc15"
+            stroke="#facc15"
+            strokeWidth={1.5}
+            strokeScaleEnabled={false}
+            pointerLength={8 / scale}
+            pointerWidth={6 / scale}
+            listening={false}
+          />
+        );
+      })()}
     </Group>
   );
 }

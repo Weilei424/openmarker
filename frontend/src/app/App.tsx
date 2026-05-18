@@ -1,13 +1,20 @@
 // OpenMarker — Phase 3: Visual workspace with Konva canvas.
 // Layout: top bar | sidebar + canvas workspace | status bar.
 
-import { useState, useCallback, useRef, useEffect } from "react";
-import type { EngineStatus, PingResponse } from "../types/engine";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import type { EngineStatus, PingResponse, GrainMode, AutoLayoutPlacement, Piece } from "../types/engine";
+import type { Placement } from "../types/canvas";
 import { useImportDxf, type ImportOutcome } from "../hooks/useImportDxf";
 import { usePlacements } from "../hooks/usePlacements";
+import { useAutoLayout } from "../hooks/useAutoLayout";
 import { PieceList } from "../components/pieces/PieceList";
 import { CanvasWorkspace } from "../components/canvas/CanvasWorkspace";
 import { FabricPanel } from "../components/sidebar/FabricPanel";
+import { GrainPanel } from "../components/sidebar/GrainPanel";
+import { computeMarkerMetrics } from "../utils/metrics";
+import { engineToFrontendPlacement } from "../utils/enginePlacement";
+
+const FABRIC_GRAIN_DEG = 90; // Fabric grain runs top → bottom (fixed by design).
 
 const ENGINE_URL = "http://127.0.0.1:8765";
 
@@ -18,7 +25,42 @@ export default function App() {
   const [fabricWidthMm, setFabricWidthMm] = useState<number>(1500);
 
   const { status: importStatus, pieces, warnings, errorMessage, handleFileSelected } = useImportDxf();
-  const { placements, updatePlacement } = usePlacements(pieces);
+
+  const [grainMode, setGrainMode] = useState<GrainMode>("none");
+  const [fastMode, setFastMode] = useState<boolean>(false);
+  const [copiesInput, setCopiesInput] = useState<string>("");
+  const [manualEditEnabled, setManualEditEnabled] = useState<boolean>(false);
+
+  const { runAutoLayout, abort: abortAutoLayout, status: autoStatus, errorMessage: autoError } = useAutoLayout();
+
+  // Effective copy count: 1 when input is empty/invalid, otherwise clamped to [1, 20].
+  const copies = useMemo(() => {
+    const trimmed = copiesInput.trim();
+    if (trimmed === "") return 1;
+    const v = parseInt(trimmed, 10);
+    if (!Number.isFinite(v) || v < 1) return 1;
+    return Math.min(20, Math.floor(v));
+  }, [copiesInput]);
+
+  // Expand the imported pieces by `copies` so the canvas / engine / metrics
+  // operate on the multi-set layout. setIndex tags each copy for coloring.
+  const expandedPieces = useMemo<Piece[]>(() => {
+    if (pieces.length === 0) return [];
+    const out: Piece[] = [];
+    for (let setIdx = 0; setIdx < copies; setIdx++) {
+      for (const p of pieces) {
+        out.push({ ...p, id: `${p.id}__c${setIdx}`, setIndex: setIdx });
+      }
+    }
+    return out;
+  }, [pieces, copies]);
+
+  const { placements, updatePlacement, resetPlacements, setAllPlacements } = usePlacements(expandedPieces);
+
+  const metrics = useMemo(
+    () => computeMarkerMetrics(placements, expandedPieces, fabricWidthMm),
+    [placements, expandedPieces, fabricWidthMm]
+  );
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -62,6 +104,35 @@ export default function App() {
     [handleFileSelected]
   );
 
+  const handleAutoLayout = useCallback(async () => {
+    if (expandedPieces.length === 0) return;
+    // Normalize the copies input so the user sees the effective value
+    // (empty → "1", out-of-range → clamped).
+    const canonical = String(copies);
+    if (copiesInput.trim() !== canonical) {
+      setCopiesInput(canonical);
+    }
+    const outcome = await runAutoLayout(
+      expandedPieces, fabricWidthMm, grainMode, FABRIC_GRAIN_DEG, fastMode,
+    );
+    if (outcome.ok) {
+      const pieceMap = new Map(expandedPieces.map((p) => [p.id, p]));
+      const mapped: Placement[] = outcome.data.placements.map((pl: AutoLayoutPlacement) =>
+        engineToFrontendPlacement(pieceMap.get(pl.piece_id)!, pl.x, pl.y, pl.rotation_deg)
+      );
+      setAllPlacements(mapped);
+      setStatusMessage(
+        `Auto layout: ${outcome.data.placements.length} piece${outcome.data.placements.length !== 1 ? "s" : ""} · ` +
+        `Marker: ${Math.round(outcome.data.marker_length_mm)} mm · ` +
+        `Utilization: ${outcome.data.utilization_pct}%`
+      );
+    } else if (outcome.aborted) {
+      setStatusMessage("Auto layout stopped.");
+    } else {
+      setStatusMessage(`Auto layout failed: ${outcome.errorMessage}`);
+    }
+  }, [expandedPieces, fabricWidthMm, grainMode, fastMode, runAutoLayout, setAllPlacements, copies, copiesInput]);
+
   const importButtonLabel =
     importStatus === "loading" ? "Importing..." : "Import DXF";
 
@@ -87,6 +158,47 @@ export default function App() {
             <FabricPanel fabricWidthMm={fabricWidthMm} onChange={setFabricWidthMm} />
           </Section>
 
+          <Section title="Grain">
+            <GrainPanel
+              grainMode={grainMode}
+              fastMode={fastMode}
+              onGrainModeChange={setGrainMode}
+              onFastModeChange={setFastMode}
+            />
+          </Section>
+
+          <Section title="Settings">
+            <label style={styles.settingRow}>
+              <span style={styles.settingLabel}>Copies (1–20)</span>
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={copiesInput}
+                placeholder="1"
+                onChange={(e) => setCopiesInput(e.target.value)}
+                style={styles.numberInput}
+              />
+            </label>
+            <label style={styles.checkRow}>
+              <input
+                type="checkbox"
+                checked={manualEditEnabled}
+                onChange={(e) => setManualEditEnabled(e.target.checked)}
+              />
+              <span style={{ fontSize: 12 }}>Enable manual edit on canvas</span>
+            </label>
+          </Section>
+
+          <Section title="Metrics">
+            <MetricsPanel
+              length={metrics.length}
+              utilization={metrics.utilization}
+              overflowsFabric={metrics.overflowsFabric}
+              hasPlacements={placements.length > 0}
+            />
+          </Section>
+
           <Section title="Layout">
             {/* Hidden file input — triggered by the Import DXF button */}
             <input
@@ -102,6 +214,35 @@ export default function App() {
             >
               {importButtonLabel}
             </button>
+
+            <button
+              onClick={handleAutoLayout}
+              disabled={pieces.length === 0 || autoStatus === "loading"}
+              style={{ opacity: pieces.length === 0 ? 0.4 : 1 }}
+            >
+              {autoStatus === "loading" ? "Running..." : "Auto Layout"}
+            </button>
+
+            {autoStatus === "loading" && (
+              <button
+                onClick={abortAutoLayout}
+                style={{ fontSize: 12, background: "var(--color-error, #b91c1c)", color: "#fff" }}
+              >
+                Stop
+              </button>
+            )}
+
+            <button
+              onClick={resetPlacements}
+              disabled={pieces.length === 0}
+              style={{ fontSize: 11, opacity: pieces.length === 0 ? 0.4 : 1 }}
+            >
+              Reset Layout
+            </button>
+
+            {autoStatus === "error" && autoError && (
+              <p style={styles.errorText}>{autoError}</p>
+            )}
 
             {importStatus === "error" && (
               <p style={styles.errorText}>{errorMessage}</p>
@@ -134,12 +275,15 @@ export default function App() {
         {/* Canvas workspace */}
         <div style={styles.canvas}>
           <CanvasWorkspace
-            pieces={pieces}
+            pieces={expandedPieces}
             placements={placements}
             updatePlacement={updatePlacement}
             selectedPieceId={selectedPieceId}
             onSelectPiece={setSelectedPieceId}
             fabricWidthMm={fabricWidthMm}
+            grainMode={grainMode}
+            markerLengthMm={metrics.length}
+            manualEditEnabled={manualEditEnabled}
           />
         </div>
       </div>
@@ -157,6 +301,46 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     <div style={styles.section}>
       <div style={styles.sectionTitle}>{title}</div>
       <div style={styles.sectionBody}>{children}</div>
+    </div>
+  );
+}
+
+function MetricsPanel({
+  length,
+  utilization,
+  overflowsFabric,
+  hasPlacements,
+}: {
+  length: number;
+  utilization: number;
+  overflowsFabric: boolean;
+  hasPlacements: boolean;
+}) {
+  if (!hasPlacements) {
+    return <p style={styles.placeholder}>No pieces placed.</p>;
+  }
+  const utilColor =
+    utilization >= 75 ? "var(--color-success)" : utilization >= 50 ? "var(--color-warning)" : "var(--color-text)";
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={styles.metricRow}>
+        <span style={styles.metricLabel}>Marker length</span>
+        <span style={styles.metricValue}>{Math.round(length)} mm</span>
+      </div>
+      <div style={styles.metricRow}>
+        <span style={styles.metricLabel}>Utilization</span>
+        <span style={{ ...styles.metricValue, color: utilColor, fontSize: 14 }}>
+          {overflowsFabric ? "—" : `${utilization.toFixed(1)}%`}
+        </span>
+      </div>
+      {!overflowsFabric && (
+        <div style={styles.utilBarTrack}>
+          <div style={{ ...styles.utilBarFill, width: `${Math.min(100, utilization)}%`, background: utilColor }} />
+        </div>
+      )}
+      {overflowsFabric && (
+        <p style={styles.warningText}>Pieces overflow fabric — run Auto Layout to fit.</p>
+      )}
     </div>
   );
 }
@@ -281,5 +465,56 @@ const styles = {
   warningText: {
     color: "var(--color-warning)",
     fontSize: 11,
+  },
+  metricRow: {
+    display: "flex",
+    justifyContent: "space-between" as const,
+    alignItems: "center",
+    fontSize: 12,
+  },
+  metricLabel: {
+    color: "var(--color-text-muted)",
+  },
+  metricValue: {
+    fontWeight: 600,
+    color: "var(--color-text)",
+  },
+  utilBarTrack: {
+    height: 4,
+    background: "var(--color-border)",
+    borderRadius: 2,
+    overflow: "hidden" as const,
+    marginTop: 2,
+  },
+  utilBarFill: {
+    height: "100%",
+    transition: "width 0.2s ease",
+  },
+  settingRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between" as const,
+    gap: 8,
+    fontSize: 12,
+  },
+  settingLabel: {
+    color: "var(--color-text-muted)",
+  },
+  numberInput: {
+    width: 60,
+    padding: "2px 6px",
+    background: "var(--color-surface)",
+    color: "var(--color-text)",
+    border: "1px solid var(--color-border)",
+    borderRadius: 3,
+    fontSize: 12,
+    textAlign: "right" as const,
+  },
+  checkRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    cursor: "pointer",
+    marginTop: 6,
   },
 } as const;

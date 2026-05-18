@@ -40,11 +40,15 @@ function project(poly: Point[], axis: Vector): { min: number; max: number } {
 }
 
 /**
- * Separating Axis Theorem intersection test.
- * Returns true if the polygons overlap (touching edges = false).
- * NOTE: SAT is exact for convex polygons. Concave polygons may produce
- * false negatives — acceptable for Phase 4 where most pieces are near-convex.
+ * Separating Axis Theorem intersection test with a sub-mm tolerance so that
+ * pieces the engine placed exactly touching are not flagged as colliding by
+ * floating-point precision noise from the engine→Konva coord conversion.
+ *
+ * SAT is exact for convex polygons. Concave polygons may produce false
+ * negatives — acceptable for the typical near-convex garment pieces here.
  */
+const SAT_OVERLAP_TOLERANCE_MM = 0.5;
+
 export function polygonsIntersect(polyA: Point[], polyB: Point[]): boolean {
   const axes = [...getAxes(polyA), ...getAxes(polyB)];
   for (const axis of axes) {
@@ -55,8 +59,9 @@ export function polygonsIntersect(polyA: Point[], polyB: Point[]): boolean {
     const normalised: Vector = [nx, ny];
     const a = project(polyA, normalised);
     const b = project(polyB, normalised);
-    // Strict inequality: touching edges are not considered overlapping
-    if (a.max <= b.min || b.max <= a.min) return false;
+    // Treat sub-mm overlaps as touching (separation, not collision).
+    if (a.max - b.min <= SAT_OVERLAP_TOLERANCE_MM) return false;
+    if (b.max - a.min <= SAT_OVERLAP_TOLERANCE_MM) return false;
   }
   return true;
 }

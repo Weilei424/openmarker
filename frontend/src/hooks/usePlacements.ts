@@ -22,9 +22,13 @@ export function usePlacements(pieces: Piece[]) {
     []
   );
 
+  const setAllPlacements = useCallback((newPlacements: Placement[]) => {
+    setPlacements(newPlacements);
+  }, []);
+
   function resetPlacements() {
     setPlacements(computePlacements(pieces));
   }
 
-  return { placements, updatePlacement, resetPlacements };
+  return { placements, updatePlacement, resetPlacements, setAllPlacements };
 }

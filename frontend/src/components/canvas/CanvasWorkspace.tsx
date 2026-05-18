@@ -5,11 +5,12 @@ import { useRef, useState, useEffect, useCallback } from "react";
 import { Stage, Layer, Rect, Line, Circle } from "react-konva";
 import type Konva from "konva";
 import type { KonvaEventObject } from "konva/lib/Node";
-import type { Piece } from "../../types/engine";
+import type { Piece, GrainMode } from "../../types/engine";
 import type { Placement } from "../../types/canvas";
 import { useViewport } from "../../hooks/useViewport";
 import { useCollisions } from "../../hooks/useCollisions";
 import { computePlacements } from "../../utils/placement";
+import { colorForSet, fillForSet } from "../../utils/setColors";
 import { PieceShape } from "./PieceShape";
 import { ViewportControls } from "./ViewportControls";
 
@@ -23,6 +24,9 @@ interface Props {
   selectedPieceId: string | null;
   onSelectPiece: (id: string | null) => void;
   fabricWidthMm: number;
+  grainMode: GrainMode;
+  markerLengthMm: number;
+  manualEditEnabled: boolean;
 }
 
 export function CanvasWorkspace({
@@ -32,6 +36,9 @@ export function CanvasWorkspace({
   selectedPieceId,
   onSelectPiece,
   fabricWidthMm,
+  grainMode,
+  markerLengthMm,
+  manualEditEnabled,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [stageSize, setStageSize] = useState({ w: 800, h: 600 });
@@ -69,8 +76,9 @@ export function CanvasWorkspace({
   // eslint-disable-next-line react-hooks/exhaustive-deps -- fire only on new import
   }, [pieces]);
 
-  // R key: rotate selected piece by 90° CW
+  // R key: rotate selected piece by 90° CW (only while manual edit is enabled).
   useEffect(() => {
+    if (!manualEditEnabled) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.key === "r" || e.key === "R") && selectedPieceId !== null) {
         const current = placements.find((p) => p.pieceId === selectedPieceId);
@@ -81,7 +89,7 @@ export function CanvasWorkspace({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedPieceId, placements, updatePlacement]);
+  }, [selectedPieceId, placements, updatePlacement, manualEditEnabled]);
 
   // Manual panning: track mousedown on empty Stage area, update transform on mousemove.
   // Using refs avoids stale closures and prevents re-renders during pan.
@@ -121,7 +129,9 @@ export function CanvasWorkspace({
 
   // Compute rotation handle position for selected piece.
   // Handle distance scales with the piece so it always lands outside the bbox.
+  // Only shown when manual edit is enabled.
   const rotationHandle = (() => {
+    if (!manualEditEnabled) return null;
     if (!selectedPieceId) return null;
     const pl = placements.find((p) => p.pieceId === selectedPieceId);
     const piece = pieces.find((p) => p.id === selectedPieceId);
@@ -192,7 +202,7 @@ export function CanvasWorkspace({
           if (e.target === e.target.getStage()) onSelectPiece(null);
         }}
       >
-        {/* Layer 1: fabric background bounds */}
+        {/* Layer 1: fabric background bounds + grain direction indicator */}
         <Layer listening={false}>
           <Rect
             x={0}
@@ -208,6 +218,15 @@ export function CanvasWorkspace({
             stroke="#555"
             strokeWidth={1}
           />
+          {markerLengthMm > 0 && (
+            <Line
+              points={[0, markerLengthMm, fabricWidthMm, markerLengthMm]}
+              stroke="#facc15"
+              strokeWidth={1.5}
+              strokeScaleEnabled={false}
+              dash={[8, 6]}
+            />
+          )}
         </Layer>
 
         {/* Layer 2: piece outlines + rotation handle */}
@@ -215,6 +234,7 @@ export function CanvasWorkspace({
           {placements.map((pl) => {
             const piece = pieces.find((p) => p.id === pl.pieceId);
             if (!piece) return null;
+            const setIdx = piece.setIndex ?? 0;
             return (
               <PieceShape
                 key={piece.id}
@@ -224,6 +244,11 @@ export function CanvasWorkspace({
                 isColliding={collidingIds.has(piece.id)}
                 onSelect={() => onSelectPiece(piece.id)}
                 onDragEnd={(id, pos) => updatePlacement(id, pos)}
+                grainMode={grainMode}
+                scale={transform.scale}
+                baseStroke={colorForSet(setIdx)}
+                baseFill={fillForSet(setIdx, 0.12)}
+                editable={manualEditEnabled}
               />
             );
           })}

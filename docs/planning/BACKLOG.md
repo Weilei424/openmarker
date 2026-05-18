@@ -67,11 +67,27 @@
 - [x] Cap max zoom to 500% (MAX_SCALE = 5) to prevent stroke-artifact confusion
 
 ### Phase 5 — Simple auto layout
-- [ ] User inputs fabric width
-- [ ] Run placement heuristic (strip packing or guillotine)
-- [ ] Compute marker length
-- [ ] Compute utilization percentage
-- [ ] Show manual vs auto utilization comparison
+- [x] User inputs fabric width
+- [x] Run placement heuristic (NFP-based Bottom-Left-Fill via pyclipper + Shapely)
+- [x] Compute marker length (max Y bottom edge of placed pieces + edge gap)
+- [x] Compute utilization percentage (clamped to 100% with overflow warning)
+- [x] Multi-strategy sort (area / max-dim / height / width DESC); best wins
+- [x] Grain mode (none / single / bi) with fabric grain fixed at 90°
+- [x] Fast mode (bbox shelf-pack) vs accurate mode (polygon NFP-BLF)
+- [x] Copies (1–20) with per-set color palette (no black/white/yellow)
+- [x] Manual-edit toggle (off by default); R-key + drag + rotation handle gated
+- [x] Stop button — engine cancellation flag + /cancel-layout endpoint + run_in_threadpool
+- [x] Live metrics panel + dotted marker-length line on canvas
+- [x] Fabric/piece grain arrows when grain mode != none
+
+### Phase 5 (optimization round) — UX redesign & remaining bugs
+See `docs/superpowers/plans/2026-05-18-phase5-auto-layout-optimization.md`.
+- [ ] Top piece-library panel (always-visible horizontal strip of imported pieces with names)
+- [ ] Don't render pieces on canvas until auto-layout completes (no initial single-row preview)
+- [ ] Rotate canvas 90° CCW (fabric extends right; grain arrow points right; marker-length line vertical)
+- [ ] Selection (click) decoupled from manual-edit; click empty / re-click to deselect
+- [ ] Touching-still-flagged-red on irregular pieces — placement verify step + larger overlap eps
+- [ ] Optional: better error diagnostics when fallback rejects (piece + rotation + dim)
 
 ### Phase 6 — Export
 - [ ] Export layout as DXF or PNG

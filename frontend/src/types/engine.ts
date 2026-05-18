@@ -26,6 +26,9 @@ export interface Piece {
   is_valid: boolean;
   validation_notes: string[];
   grainline_direction_deg: number | null;
+  // Frontend-only: which copy/set this piece belongs to (0-based). The engine
+  // ignores it; it just uses `id` as an opaque token.
+  setIndex?: number;
 }
 
 export interface ImportDxfResponse {
@@ -36,3 +39,18 @@ export interface ImportDxfResponse {
 }
 
 export type ImportStatus = "idle" | "loading" | "success" | "error";
+
+export type GrainMode = "none" | "single" | "bi";
+
+export interface AutoLayoutPlacement {
+  piece_id: string;
+  x: number;
+  y: number;
+  rotation_deg: number;
+}
+
+export interface AutoLayoutResponse {
+  placements: AutoLayoutPlacement[];
+  marker_length_mm: number;
+  utilization_pct: number;
+}
