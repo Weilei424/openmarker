@@ -26,6 +26,9 @@ export interface Piece {
   is_valid: boolean;
   validation_notes: string[];
   grainline_direction_deg: number | null;
+  // Frontend-only: which copy/set this piece belongs to (0-based). The engine
+  // ignores it; it just uses `id` as an opaque token.
+  setIndex?: number;
 }
 
 export interface ImportDxfResponse {
