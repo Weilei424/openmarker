@@ -2,14 +2,14 @@
 // Handles zoom/pan, R-key rotation, and per-piece rotation handle.
 
 import { useRef, useState, useEffect, useCallback } from "react";
-import { Stage, Layer, Rect, Line, Circle } from "react-konva";
+import { Stage, Layer, Rect, Line, Circle, Group } from "react-konva";
 import type Konva from "konva";
 import type { KonvaEventObject } from "konva/lib/Node";
 import type { Piece, GrainMode } from "../../types/engine";
 import type { Placement } from "../../types/canvas";
 import { useViewport } from "../../hooks/useViewport";
 import { useCollisions } from "../../hooks/useCollisions";
-import { computePlacements } from "../../utils/placement";
+import { computeFitViewportFromWorldBbox } from "../../utils/placement";
 import { colorForSet, fillForSet } from "../../utils/setColors";
 import { PieceShape } from "./PieceShape";
 import { ViewportControls } from "./ViewportControls";
@@ -53,8 +53,40 @@ export function CanvasWorkspace({
     return () => ro.disconnect();
   }, []);
 
-  const { transform, setTransform, handleWheel, fitToContent, zoomIn, zoomOut } =
+  const { transform, setTransform, handleWheel, zoomIn, zoomOut } =
     useViewport();
+
+  // World bbox after the canvas's 90° CCW rotation. Engine bbox
+  // (ex_min, ey_min)→(ex_max, ey_max) maps to world
+  // (ey_min, fabricWidthMm - ex_max)→(ey_max, fabricWidthMm - ex_min).
+  const computeWorldBbox = useCallback((): {
+    minX: number; minY: number; maxX: number; maxY: number;
+  } => {
+    const pieceMap = new Map(pieces.map((p) => [p.id, p]));
+    let exMin = Infinity, eyMin = Infinity, exMax = -Infinity, eyMax = -Infinity;
+
+    // Always include the fabric outline so the user sees the strip even with no placements.
+    exMin = 0;
+    eyMin = 0;
+    exMax = fabricWidthMm;
+    eyMax = Math.max(markerLengthMm, fabricWidthMm); // show at least a square chunk
+
+    for (const pl of placements) {
+      const piece = pieceMap.get(pl.pieceId);
+      if (!piece) continue;
+      exMin = Math.min(exMin, pl.x);
+      eyMin = Math.min(eyMin, pl.y);
+      exMax = Math.max(exMax, pl.x + piece.bbox.width);
+      eyMax = Math.max(eyMax, pl.y + piece.bbox.height);
+    }
+
+    return {
+      minX: eyMin,
+      minY: fabricWidthMm - exMax,
+      maxX: eyMax,
+      maxY: fabricWidthMm - exMin,
+    };
+  }, [pieces, placements, fabricWidthMm, markerLengthMm]);
 
   const collidingIds = useCollisions(placements, pieces, fabricWidthMm);
 
@@ -63,18 +95,20 @@ export function CanvasWorkspace({
   // they carry on every mousemove.
   const layer2Ref = useRef<Konva.Layer | null>(null);
 
-  // Auto-fit when a new set of pieces is imported.
-  // Use computePlacements(pieces) directly to avoid a stale-closure on `placements`
-  // (usePlacements resets placement state asynchronously, so the prop may still
-  // hold the previous import's values when this effect fires).
+  // Auto-fit on import + auto-fit when an auto-layout result arrives (placements
+  // becomes non-empty). Other transitions (manual drag, copies change) are NOT
+  // auto-fit — they'd be disruptive while the user works.
   useEffect(() => {
     if (pieces.length === 0) return;
     const id = setTimeout(() => {
-      fitToContent(computePlacements(pieces), pieces, stageSize.w, stageSize.h);
+      const bb = computeWorldBbox();
+      setTransform(computeFitViewportFromWorldBbox(
+        bb.minX, bb.minY, bb.maxX, bb.maxY, stageSize.w, stageSize.h,
+      ));
     }, 0);
     return () => clearTimeout(id);
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- fire only on new import
-  }, [pieces]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally fires on import + new placements
+  }, [pieces, placements.length === 0]);
 
   // R key: rotate selected piece by 90° CW (only while manual edit is enabled).
   useEffect(() => {
@@ -124,7 +158,10 @@ export function CanvasWorkspace({
   }, []);
 
   const handleFit = () => {
-    fitToContent(placements, pieces, stageSize.w, stageSize.h);
+    const bb = computeWorldBbox();
+    setTransform(computeFitViewportFromWorldBbox(
+      bb.minX, bb.minY, bb.maxX, bb.maxY, stageSize.w, stageSize.h,
+    ));
   };
 
   // Compute rotation handle position for selected piece.
@@ -202,35 +239,42 @@ export function CanvasWorkspace({
           if (e.target === e.target.getStage()) onSelectPiece(null);
         }}
       >
-        {/* Layer 1: fabric background bounds + grain direction indicator */}
+        {/* Layer 1: fabric background bounds + marker length indicator.
+            Both layers wrap content in a Group rotated 90° CCW so the fabric
+            visually extends to the right (X = length axis, minimize) and the
+            grain naturally points right. Engine math stays in engine coords;
+            this is a pure visual transform. */}
         <Layer listening={false}>
-          <Rect
-            x={0}
-            y={0}
-            width={fabricWidthMm}
-            height={FABRIC_HEIGHT_MM}
-            fill="rgba(255,255,255,0.04)"
-            stroke="#333"
-            strokeWidth={1}
-          />
-          <Line
-            points={[fabricWidthMm, 0, fabricWidthMm, FABRIC_HEIGHT_MM]}
-            stroke="#555"
-            strokeWidth={1}
-          />
-          {markerLengthMm > 0 && (
-            <Line
-              points={[0, markerLengthMm, fabricWidthMm, markerLengthMm]}
-              stroke="#facc15"
-              strokeWidth={1.5}
-              strokeScaleEnabled={false}
-              dash={[8, 6]}
+          <Group rotation={-90} y={fabricWidthMm}>
+            <Rect
+              x={0}
+              y={0}
+              width={fabricWidthMm}
+              height={FABRIC_HEIGHT_MM}
+              fill="rgba(255,255,255,0.04)"
+              stroke="#333"
+              strokeWidth={1}
             />
-          )}
+            <Line
+              points={[fabricWidthMm, 0, fabricWidthMm, FABRIC_HEIGHT_MM]}
+              stroke="#555"
+              strokeWidth={1}
+            />
+            {markerLengthMm > 0 && (
+              <Line
+                points={[0, markerLengthMm, fabricWidthMm, markerLengthMm]}
+                stroke="#facc15"
+                strokeWidth={1.5}
+                strokeScaleEnabled={false}
+                dash={[8, 6]}
+              />
+            )}
+          </Group>
         </Layer>
 
-        {/* Layer 2: piece outlines + rotation handle */}
+        {/* Layer 2: piece outlines + rotation handle, inside the same rotation transform */}
         <Layer ref={layer2Ref}>
+          <Group rotation={-90} y={fabricWidthMm}>
           {placements.map((pl) => {
             const piece = pieces.find((p) => p.id === pl.pieceId);
             if (!piece) return null;
@@ -294,6 +338,7 @@ export function CanvasWorkspace({
               />
             </>
           )}
+          </Group>
         </Layer>
       </Stage>
 
