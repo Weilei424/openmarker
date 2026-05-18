@@ -17,6 +17,9 @@ interface Props {
   onDragEnd: (id: string, pos: { x: number; y: number }) => void;
   grainMode: GrainMode;
   scale: number;
+  baseStroke: string;
+  baseFill: string;
+  editable: boolean;
 }
 
 export function PieceShape({
@@ -28,13 +31,16 @@ export function PieceShape({
   onDragEnd,
   grainMode,
   scale,
+  baseStroke,
+  baseFill,
+  editable,
 }: Props) {
-  const stroke = isColliding ? "#e53935" : isSelected ? "#ff9800" : "#4a9eff";
+  const stroke = isColliding ? "#e53935" : isSelected ? "#ff9800" : baseStroke;
   const fill = isColliding
     ? "rgba(229, 57, 53, 0.25)"
     : isSelected
     ? "rgba(255, 152, 0, 0.12)"
-    : "rgba(74, 158, 255, 0.08)";
+    : baseFill;
 
   // Polygon points in Group-local coordinates (piece is at origin)
   const flatPoints = piece.polygon.flatMap(([x, y]) => [x, y]);
@@ -77,14 +83,14 @@ export function PieceShape({
       offsetX={cx}
       offsetY={cy}
       rotation={placement.rotationDeg}
-      draggable
-      onClick={onSelect}
-      onTap={onSelect}
-      onMouseDown={(e) => { e.cancelBubble = true; }}
-      onDragStart={handleDragStart}
-      onDragEnd={handleDragEnd}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
+      draggable={editable}
+      onClick={editable ? onSelect : undefined}
+      onTap={editable ? onSelect : undefined}
+      onMouseDown={editable ? (e) => { e.cancelBubble = true; } : undefined}
+      onDragStart={editable ? handleDragStart : undefined}
+      onDragEnd={editable ? handleDragEnd : undefined}
+      onMouseEnter={editable ? handleMouseEnter : undefined}
+      onMouseLeave={editable ? handleMouseLeave : undefined}
     >
       <Line
         points={flatPoints}
