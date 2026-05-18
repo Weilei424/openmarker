@@ -8,6 +8,7 @@ import { useImportDxf, type ImportOutcome } from "../hooks/useImportDxf";
 import { usePlacements } from "../hooks/usePlacements";
 import { useAutoLayout } from "../hooks/useAutoLayout";
 import { PieceList } from "../components/pieces/PieceList";
+import { PieceLibrary } from "../components/PieceLibrary";
 import { CanvasWorkspace } from "../components/canvas/CanvasWorkspace";
 import { FabricPanel } from "../components/sidebar/FabricPanel";
 import { GrainPanel } from "../components/sidebar/GrainPanel";
@@ -142,6 +143,13 @@ export default function App() {
       <div style={styles.topBar}>
         <span style={styles.appTitle}>OpenMarker</span>
       </div>
+
+      {/* Piece library strip (one entry per imported piece, base id) */}
+      <PieceLibrary
+        pieces={pieces}
+        selectedPieceId={selectedPieceId}
+        onSelect={setSelectedPieceId}
+      />
 
       {/* Body: sidebar + workspace */}
       <div style={styles.body}>
