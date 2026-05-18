@@ -2,7 +2,7 @@
 // Layout: top bar | sidebar + canvas workspace | status bar.
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import type { EngineStatus, PingResponse, GrainMode, AutoLayoutPlacement } from "../types/engine";
+import type { EngineStatus, PingResponse, GrainMode, AutoLayoutPlacement, Piece } from "../types/engine";
 import type { Placement } from "../types/canvas";
 import { useImportDxf, type ImportOutcome } from "../hooks/useImportDxf";
 import { usePlacements } from "../hooks/usePlacements";
@@ -25,16 +25,33 @@ export default function App() {
   const [fabricWidthMm, setFabricWidthMm] = useState<number>(1500);
 
   const { status: importStatus, pieces, warnings, errorMessage, handleFileSelected } = useImportDxf();
-  const { placements, updatePlacement, resetPlacements, setAllPlacements } = usePlacements(pieces);
 
   const [grainMode, setGrainMode] = useState<GrainMode>("none");
   const [fastMode, setFastMode] = useState<boolean>(false);
+  const [copies, setCopies] = useState<number>(1);
+  const [manualEditEnabled, setManualEditEnabled] = useState<boolean>(false);
 
-  const { runAutoLayout, status: autoStatus, errorMessage: autoError } = useAutoLayout();
+  const { runAutoLayout, abort: abortAutoLayout, status: autoStatus, errorMessage: autoError } = useAutoLayout();
+
+  // Expand the imported pieces by `copies` so the canvas / engine / metrics
+  // operate on the multi-set layout. setIndex tags each copy for coloring.
+  const expandedPieces = useMemo<Piece[]>(() => {
+    if (pieces.length === 0) return [];
+    const safeCopies = Math.max(1, Math.min(20, Math.floor(copies)));
+    const out: Piece[] = [];
+    for (let setIdx = 0; setIdx < safeCopies; setIdx++) {
+      for (const p of pieces) {
+        out.push({ ...p, id: `${p.id}__c${setIdx}`, setIndex: setIdx });
+      }
+    }
+    return out;
+  }, [pieces, copies]);
+
+  const { placements, updatePlacement, resetPlacements, setAllPlacements } = usePlacements(expandedPieces);
 
   const metrics = useMemo(
-    () => computeMarkerMetrics(placements, pieces, fabricWidthMm),
-    [placements, pieces, fabricWidthMm]
+    () => computeMarkerMetrics(placements, expandedPieces, fabricWidthMm),
+    [placements, expandedPieces, fabricWidthMm]
   );
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -80,23 +97,27 @@ export default function App() {
   );
 
   const handleAutoLayout = useCallback(async () => {
-    if (pieces.length === 0) return;
-    const result = await runAutoLayout(pieces, fabricWidthMm, grainMode, FABRIC_GRAIN_DEG, fastMode);
-    if (result) {
-      const pieceMap = new Map(pieces.map((p) => [p.id, p]));
-      const mapped: Placement[] = result.placements.map((pl: AutoLayoutPlacement) =>
+    if (expandedPieces.length === 0) return;
+    const outcome = await runAutoLayout(
+      expandedPieces, fabricWidthMm, grainMode, FABRIC_GRAIN_DEG, fastMode,
+    );
+    if (outcome.ok) {
+      const pieceMap = new Map(expandedPieces.map((p) => [p.id, p]));
+      const mapped: Placement[] = outcome.data.placements.map((pl: AutoLayoutPlacement) =>
         engineToFrontendPlacement(pieceMap.get(pl.piece_id)!, pl.x, pl.y, pl.rotation_deg)
       );
       setAllPlacements(mapped);
       setStatusMessage(
-        `Auto layout: ${result.placements.length} piece${result.placements.length !== 1 ? "s" : ""} · ` +
-        `Marker: ${Math.round(result.marker_length_mm)} mm · ` +
-        `Utilization: ${result.utilization_pct}%`
+        `Auto layout: ${outcome.data.placements.length} piece${outcome.data.placements.length !== 1 ? "s" : ""} · ` +
+        `Marker: ${Math.round(outcome.data.marker_length_mm)} mm · ` +
+        `Utilization: ${outcome.data.utilization_pct}%`
       );
+    } else if (outcome.aborted) {
+      setStatusMessage("Auto layout stopped.");
     } else {
-      setStatusMessage(`Auto layout failed: ${autoError ?? "unknown error"}`);
+      setStatusMessage(`Auto layout failed: ${outcome.errorMessage}`);
     }
-  }, [pieces, fabricWidthMm, grainMode, fastMode, runAutoLayout, setAllPlacements, autoError]);
+  }, [expandedPieces, fabricWidthMm, grainMode, fastMode, runAutoLayout, setAllPlacements]);
 
   const importButtonLabel =
     importStatus === "loading" ? "Importing..." : "Import DXF";
@@ -132,10 +153,36 @@ export default function App() {
             />
           </Section>
 
+          <Section title="Settings">
+            <label style={styles.settingRow}>
+              <span style={styles.settingLabel}>Copies (1–20)</span>
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={copies}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (Number.isFinite(v)) setCopies(Math.max(1, Math.min(20, Math.floor(v))));
+                }}
+                style={styles.numberInput}
+              />
+            </label>
+            <label style={styles.checkRow}>
+              <input
+                type="checkbox"
+                checked={manualEditEnabled}
+                onChange={(e) => setManualEditEnabled(e.target.checked)}
+              />
+              <span style={{ fontSize: 12 }}>Enable manual edit on canvas</span>
+            </label>
+          </Section>
+
           <Section title="Metrics">
             <MetricsPanel
               length={metrics.length}
               utilization={metrics.utilization}
+              overflowsFabric={metrics.overflowsFabric}
               hasPlacements={placements.length > 0}
             />
           </Section>
@@ -164,6 +211,15 @@ export default function App() {
               {autoStatus === "loading" ? "Running..." : "Auto Layout"}
             </button>
 
+            {autoStatus === "loading" && (
+              <button
+                onClick={abortAutoLayout}
+                style={{ fontSize: 12, background: "var(--color-error, #b91c1c)", color: "#fff" }}
+              >
+                Stop
+              </button>
+            )}
+
             <button
               onClick={resetPlacements}
               disabled={pieces.length === 0}
@@ -171,6 +227,10 @@ export default function App() {
             >
               Reset Layout
             </button>
+
+            {autoStatus === "error" && autoError && (
+              <p style={styles.errorText}>{autoError}</p>
+            )}
 
             {importStatus === "error" && (
               <p style={styles.errorText}>{errorMessage}</p>
@@ -203,7 +263,7 @@ export default function App() {
         {/* Canvas workspace */}
         <div style={styles.canvas}>
           <CanvasWorkspace
-            pieces={pieces}
+            pieces={expandedPieces}
             placements={placements}
             updatePlacement={updatePlacement}
             selectedPieceId={selectedPieceId}
@@ -211,6 +271,7 @@ export default function App() {
             fabricWidthMm={fabricWidthMm}
             grainMode={grainMode}
             markerLengthMm={metrics.length}
+            manualEditEnabled={manualEditEnabled}
           />
         </div>
       </div>
@@ -235,10 +296,12 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function MetricsPanel({
   length,
   utilization,
+  overflowsFabric,
   hasPlacements,
 }: {
   length: number;
   utilization: number;
+  overflowsFabric: boolean;
   hasPlacements: boolean;
 }) {
   if (!hasPlacements) {
@@ -254,11 +317,18 @@ function MetricsPanel({
       </div>
       <div style={styles.metricRow}>
         <span style={styles.metricLabel}>Utilization</span>
-        <span style={{ ...styles.metricValue, color: utilColor, fontSize: 14 }}>{utilization.toFixed(1)}%</span>
+        <span style={{ ...styles.metricValue, color: utilColor, fontSize: 14 }}>
+          {overflowsFabric ? "—" : `${utilization.toFixed(1)}%`}
+        </span>
       </div>
-      <div style={styles.utilBarTrack}>
-        <div style={{ ...styles.utilBarFill, width: `${Math.min(100, utilization)}%`, background: utilColor }} />
-      </div>
+      {!overflowsFabric && (
+        <div style={styles.utilBarTrack}>
+          <div style={{ ...styles.utilBarFill, width: `${Math.min(100, utilization)}%`, background: utilColor }} />
+        </div>
+      )}
+      {overflowsFabric && (
+        <p style={styles.warningText}>Pieces overflow fabric — run Auto Layout to fit.</p>
+      )}
     </div>
   );
 }
@@ -407,5 +477,32 @@ const styles = {
   utilBarFill: {
     height: "100%",
     transition: "width 0.2s ease",
+  },
+  settingRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between" as const,
+    gap: 8,
+    fontSize: 12,
+  },
+  settingLabel: {
+    color: "var(--color-text-muted)",
+  },
+  numberInput: {
+    width: 60,
+    padding: "2px 6px",
+    background: "var(--color-surface)",
+    color: "var(--color-text)",
+    border: "1px solid var(--color-border)",
+    borderRadius: 3,
+    fontSize: 12,
+    textAlign: "right" as const,
+  },
+  checkRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    cursor: "pointer",
+    marginTop: 6,
   },
 } as const;
