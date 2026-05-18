@@ -65,11 +65,14 @@ def _polygon_dims(piece: Piece, rotation_deg: float) -> tuple[float, float]:
     return maxx - minx, maxy - miny
 
 
-def _has_area_overlap(a: ShapelyPolygon, b: ShapelyPolygon, eps: float = 1e-3) -> bool:
-    """Return True only if polygons overlap with positive area.
+def _has_area_overlap(a: ShapelyPolygon, b: ShapelyPolygon, eps: float = 0.5) -> bool:
+    """Return True only if polygons overlap with positive area > eps mm².
 
-    Touching at a shared edge or vertex produces intersection area == 0,
-    so this correctly treats touching as non-collision per the cutting-room rule.
+    eps is intentionally generous (0.5 mm²) — it matches the frontend's
+    SAT_OVERLAP_TOLERANCE_MM so what the engine accepts as "touching" the
+    frontend also renders without a red collision highlight. Slivers below
+    0.5 mm² come from NFP polygon rounding and Konva render float noise,
+    not real piece overlap.
     """
     if not a.intersects(b):
         return False
