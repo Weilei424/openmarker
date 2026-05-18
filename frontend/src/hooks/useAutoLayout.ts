@@ -1,11 +1,17 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import type { Piece, GrainMode, AutoLayoutResponse } from "../types/engine";
 
 const ENGINE_URL = "http://127.0.0.1:8765";
 
+export type AutoLayoutOutcome =
+  | { ok: true; data: AutoLayoutResponse }
+  | { ok: false; aborted: true }
+  | { ok: false; aborted: false; errorMessage: string };
+
 export function useAutoLayout() {
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const runAutoLayout = useCallback(
     async (
@@ -14,7 +20,12 @@ export function useAutoLayout() {
       grainMode: GrainMode,
       grainDirectionDeg: number,
       fastMode: boolean
-    ): Promise<AutoLayoutResponse | null> => {
+    ): Promise<AutoLayoutOutcome> => {
+      // Cancel any in-flight request before starting a new one.
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+
       setStatus("loading");
       setErrorMessage(null);
       try {
@@ -28,6 +39,7 @@ export function useAutoLayout() {
             grain_direction_deg: grainDirectionDeg,
             fast_mode: fastMode,
           }),
+          signal: controller.signal,
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
@@ -35,15 +47,30 @@ export function useAutoLayout() {
         }
         const data = (await res.json()) as AutoLayoutResponse;
         setStatus("idle");
-        return data;
+        return { ok: true, data };
       } catch (e) {
+        // Abort throws a DOMException with name "AbortError" in browsers / undici.
+        if (e instanceof Error && (e.name === "AbortError" || /aborted/i.test(e.message))) {
+          setStatus("idle");
+          setErrorMessage(null);
+          return { ok: false, aborted: true };
+        }
+        const msg = e instanceof Error ? e.message : "Auto layout failed";
         setStatus("error");
-        setErrorMessage(e instanceof Error ? e.message : "Auto layout failed");
-        return null;
+        setErrorMessage(msg);
+        return { ok: false, aborted: false, errorMessage: msg };
+      } finally {
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+        }
       }
     },
     []
   );
 
-  return { runAutoLayout, status, errorMessage };
+  const abort = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
+
+  return { runAutoLayout, abort, status, errorMessage };
 }
