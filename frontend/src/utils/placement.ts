@@ -26,6 +26,37 @@ export function computePlacements(pieces: Piece[]): Placement[] {
 }
 
 /**
+ * Compute a viewport transform that fits a rectangular region of WORLD-space
+ * (after the canvas's 90° CCW rotation) into the stage with 10% padding.
+ *
+ * Use this when the canvas content is rendered inside the rotation Group:
+ * pass the world-space bbox directly. For unrotated canvases, use
+ * `computeFitViewport` instead.
+ */
+export function computeFitViewportFromWorldBbox(
+  worldMinX: number,
+  worldMinY: number,
+  worldMaxX: number,
+  worldMaxY: number,
+  stageW: number,
+  stageH: number,
+): ViewportTransform {
+  const totalW = worldMaxX - worldMinX;
+  const totalH = worldMaxY - worldMinY;
+  if (totalW <= 0 || totalH <= 0 || stageW <= 0 || stageH <= 0) {
+    return { scale: 1, x: 0, y: 0 };
+  }
+  const scale = Math.min((stageW * 0.85) / totalW, (stageH * 0.85) / totalH);
+  const contentPxW = totalW * scale;
+  const contentPxH = totalH * scale;
+  return {
+    scale,
+    x: (stageW - contentPxW) / 2 - worldMinX * scale,
+    y: (stageH - contentPxH) / 2 - worldMinY * scale,
+  };
+}
+
+/**
  * Compute a scale + offset so all placed pieces fit within the stage with
  * 10% padding on each side.
  */
