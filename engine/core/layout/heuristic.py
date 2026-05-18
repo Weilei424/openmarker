@@ -348,31 +348,38 @@ def _compute_nfp_polygons(
     return result
 
 
-def _lowest_leftmost_vertex(region) -> tuple[float, float] | None:
-    """Return the (smallest y, then smallest x) boundary vertex of a polygon region.
+def _sorted_vertices(region) -> list[tuple[float, float]]:
+    """Return all boundary vertices of a polygon region sorted by (y, x).
 
-    Works on Polygon or MultiPolygon. Returns None for other geometry types
+    Works on Polygon or MultiPolygon. Returns [] for other geometry types
     (LineString, GeometryCollection) — those indicate a degenerate valid region.
     """
     if region.is_empty:
-        return None
+        return []
     if region.geom_type == "Polygon":
         polys = [region]
     elif region.geom_type == "MultiPolygon":
         polys = list(region.geoms)
     else:
-        return None
+        return []
 
-    best: tuple[float, float] | None = None
+    seen: set[tuple[float, float]] = set()
+    verts: list[tuple[float, float]] = []
     for poly in polys:
         for vx, vy in poly.exterior.coords:
-            if best is None or (vy, vx) < (best[1], best[0]):
-                best = (vx, vy)
+            key = (round(vx, 4), round(vy, 4))
+            if key not in seen:
+                seen.add(key)
+                verts.append((vx, vy))
         for interior in poly.interiors:
             for vx, vy in interior.coords:
-                if best is None or (vy, vx) < (best[1], best[0]):
-                    best = (vx, vy)
-    return best
+                key = (round(vx, 4), round(vy, 4))
+                if key not in seen:
+                    seen.add(key)
+                    verts.append((vx, vy))
+
+    verts.sort(key=lambda p: (p[1], p[0]))
+    return verts
 
 
 def _blf_pack_nfp(
@@ -452,34 +459,51 @@ def _blf_pack_nfp(
             if valid_region.is_empty:
                 continue
 
-            ref_point = _lowest_leftmost_vertex(valid_region)
-            if ref_point is None:
-                continue
+            # Try ALL boundary vertices, not just the first — numerical noise can
+            # put a vertex on the wrong side of an NFP, so we walk down the list.
+            for nfx, nfy in _sorted_vertices(valid_region):
+                bbox_tl_x = nfx + minx
+                bbox_tl_y = nfy + miny
 
-            nfx, nfy = ref_point
-            bbox_tl_x = nfx + minx
-            bbox_tl_y = nfy + miny
+                # Cross-rotation pruning.
+                if best is not None:
+                    if bbox_tl_y > best[0] + 1e-6:
+                        break  # later vertices have even larger y
+                    if abs(bbox_tl_y - best[0]) < 1e-6 and bbox_tl_x >= best[1] - 1e-6:
+                        continue
 
-            # Cross-rotation pruning.
-            if best is not None:
-                if bbox_tl_y > best[0] + 1e-6:
+                candidate_poly = _placed_polygon(piece, bbox_tl_x, bbox_tl_y, rot)
+
+                # Sanity guards.
+                if candidate_poly.bounds[2] > fabric_width_mm - EDGE_GAP + 1e-3:
                     continue
-                if abs(bbox_tl_y - best[0]) < 1e-6 and bbox_tl_x >= best[1] - 1e-6:
+                if candidate_poly.bounds[0] < EDGE_GAP - 1e-3:
+                    continue
+                if candidate_poly.bounds[1] < EDGE_GAP - 1e-3:
+                    continue
+                if any(_has_area_overlap(candidate_poly, pp) for pp in placed_polys):
                     continue
 
-            candidate_poly = _placed_polygon(piece, bbox_tl_x, bbox_tl_y, rot)
+                best = (bbox_tl_y, bbox_tl_x, rot, candidate_poly)
+                break  # vertices sorted ascending; first valid is best at this rotation
 
-            # Sanity guards (NFP correctness should make these redundant).
-            if candidate_poly.bounds[2] > fabric_width_mm - EDGE_GAP + 1e-3:
-                continue
-            if candidate_poly.bounds[0] < EDGE_GAP - 1e-3:
-                continue
-            if candidate_poly.bounds[1] < EDGE_GAP - 1e-3:
-                continue
-            if any(_has_area_overlap(candidate_poly, pp) for pp in placed_polys):
-                continue
-
-            best = (bbox_tl_y, bbox_tl_x, rot, candidate_poly)
+        # Fallback: if NFP found nothing usable, force a "new shelf" placement
+        # below every placed piece at the first rotation that fits the width.
+        if best is None:
+            max_placed_bottom = (
+                max((pp.bounds[3] for pp in placed_polys), default=EDGE_GAP)
+            )
+            fallback_y = max_placed_bottom + EDGE_GAP
+            for rot in rotations:
+                new_coords = _polygon_at_origin(piece, rot)
+                pw, ph = _polygon_dims(piece, rot)
+                if pw + 2 * EDGE_GAP > fabric_width_mm:
+                    continue
+                candidate_poly = _placed_polygon(piece, EDGE_GAP, fallback_y, rot)
+                if any(_has_area_overlap(candidate_poly, pp) for pp in placed_polys):
+                    continue  # extremely unlikely below all placed
+                best = (fallback_y, EDGE_GAP, rot, candidate_poly)
+                break
 
         if best is None:
             raise ValueError(
