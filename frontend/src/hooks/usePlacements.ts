@@ -1,16 +1,24 @@
 import { useState, useEffect, useCallback } from "react";
 import type { Piece } from "../types/engine";
 import type { Placement } from "../types/canvas";
-import { computePlacements } from "../utils/placement";
 
+/**
+ * Placement state for the marker canvas.
+ *
+ * Starts EMPTY and stays empty until something (typically the Auto Layout
+ * result) calls setAllPlacements. The pre-Phase-5-optimization behaviour of
+ * pre-laying out pieces in a single row on import was removed — it produced
+ * misleading >100% utilisation and a confusing "is this auto-layout or just a
+ * preview?" state.
+ *
+ * `pieces` is observed only to clear placements when the imported set
+ * changes (so stale placements for unloaded piece ids don't linger).
+ */
 export function usePlacements(pieces: Piece[]) {
-  const [placements, setPlacements] = useState<Placement[]>(() =>
-    computePlacements(pieces)
-  );
+  const [placements, setPlacements] = useState<Placement[]>([]);
 
-  // Re-initialise whenever a new set of pieces arrives.
   useEffect(() => {
-    setPlacements(computePlacements(pieces));
+    setPlacements([]);
   }, [pieces]);
 
   const updatePlacement = useCallback(
@@ -27,7 +35,7 @@ export function usePlacements(pieces: Piece[]) {
   }, []);
 
   function resetPlacements() {
-    setPlacements(computePlacements(pieces));
+    setPlacements([]);
   }
 
   return { placements, updatePlacement, resetPlacements, setAllPlacements };
