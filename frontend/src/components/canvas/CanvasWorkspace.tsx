@@ -235,14 +235,20 @@ export function CanvasWorkspace({
             const piece = pieces.find((p) => p.id === pl.pieceId);
             if (!piece) return null;
             const setIdx = piece.setIndex ?? 0;
+            // Match selection by exact id or by base id (PieceList sends base ids
+            // — they refer to all copies; canvas clicks send specific copy ids).
+            const baseId = piece.id.replace(/__c\d+$/, "");
+            const isSelected =
+              piece.id === selectedPieceId || baseId === selectedPieceId;
             return (
               <PieceShape
                 key={piece.id}
                 piece={piece}
                 placement={pl}
-                isSelected={piece.id === selectedPieceId}
+                isSelected={isSelected}
                 isColliding={collidingIds.has(piece.id)}
-                onSelect={() => onSelectPiece(piece.id)}
+                // Toggle: re-clicking the selected piece deselects.
+                onSelect={() => onSelectPiece(isSelected ? null : piece.id)}
                 onDragEnd={(id, pos) => updatePlacement(id, pos)}
                 grainMode={grainMode}
                 scale={transform.scale}
