@@ -28,18 +28,26 @@ export default function App() {
 
   const [grainMode, setGrainMode] = useState<GrainMode>("none");
   const [fastMode, setFastMode] = useState<boolean>(false);
-  const [copies, setCopies] = useState<number>(1);
+  const [copiesInput, setCopiesInput] = useState<string>("");
   const [manualEditEnabled, setManualEditEnabled] = useState<boolean>(false);
 
   const { runAutoLayout, abort: abortAutoLayout, status: autoStatus, errorMessage: autoError } = useAutoLayout();
+
+  // Effective copy count: 1 when input is empty/invalid, otherwise clamped to [1, 20].
+  const copies = useMemo(() => {
+    const trimmed = copiesInput.trim();
+    if (trimmed === "") return 1;
+    const v = parseInt(trimmed, 10);
+    if (!Number.isFinite(v) || v < 1) return 1;
+    return Math.min(20, Math.floor(v));
+  }, [copiesInput]);
 
   // Expand the imported pieces by `copies` so the canvas / engine / metrics
   // operate on the multi-set layout. setIndex tags each copy for coloring.
   const expandedPieces = useMemo<Piece[]>(() => {
     if (pieces.length === 0) return [];
-    const safeCopies = Math.max(1, Math.min(20, Math.floor(copies)));
     const out: Piece[] = [];
-    for (let setIdx = 0; setIdx < safeCopies; setIdx++) {
+    for (let setIdx = 0; setIdx < copies; setIdx++) {
       for (const p of pieces) {
         out.push({ ...p, id: `${p.id}__c${setIdx}`, setIndex: setIdx });
       }
@@ -98,6 +106,12 @@ export default function App() {
 
   const handleAutoLayout = useCallback(async () => {
     if (expandedPieces.length === 0) return;
+    // Normalize the copies input so the user sees the effective value
+    // (empty → "1", out-of-range → clamped).
+    const canonical = String(copies);
+    if (copiesInput.trim() !== canonical) {
+      setCopiesInput(canonical);
+    }
     const outcome = await runAutoLayout(
       expandedPieces, fabricWidthMm, grainMode, FABRIC_GRAIN_DEG, fastMode,
     );
@@ -117,7 +131,7 @@ export default function App() {
     } else {
       setStatusMessage(`Auto layout failed: ${outcome.errorMessage}`);
     }
-  }, [expandedPieces, fabricWidthMm, grainMode, fastMode, runAutoLayout, setAllPlacements]);
+  }, [expandedPieces, fabricWidthMm, grainMode, fastMode, runAutoLayout, setAllPlacements, copies, copiesInput]);
 
   const importButtonLabel =
     importStatus === "loading" ? "Importing..." : "Import DXF";
@@ -160,11 +174,9 @@ export default function App() {
                 type="number"
                 min={1}
                 max={20}
-                value={copies}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  if (Number.isFinite(v)) setCopies(Math.max(1, Math.min(20, Math.floor(v))));
-                }}
+                value={copiesInput}
+                placeholder="1"
+                onChange={(e) => setCopiesInput(e.target.value)}
                 style={styles.numberInput}
               />
             </label>
