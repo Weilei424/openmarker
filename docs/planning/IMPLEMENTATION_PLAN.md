@@ -48,19 +48,21 @@ OpenMarker is a Windows-first, offline-first desktop fabric layout tool for non-
 
 ---
 
-### Phase 4 — Manual editing
+### Phase 4 — Manual editing  *(shipped, then removed in Phase 5 optimization)*
 
-**Goal:** User can drag and rotate pieces on the canvas; placement state is tracked; collision zones are highlighted.
+**Original goal:** User can drag and rotate pieces on the canvas; placement state is tracked; collision zones are highlighted.
 
-**Planned additions:**
+**Shipped during Phase 4:**
 - Konva `draggable` on `PieceShape`; commit drag end to placement state
-- Rotation via `R` key or on-canvas handle; snap to 15° increments (optional)
-- Engine endpoint `POST /check-collisions` → returns overlapping pair ids
-- Placement state model: `Record<pieceId, { x, y, rotationDeg }>`
-- Collision highlight: red fill overlay on overlapping pieces
-- Tests: drag transform math, rotation clamp, collision detection
+- Rotation via `R` key + on-canvas rotation handle; 1° snap on drag end
+- Frontend SAT-based collision detection in `useCollisions` (no engine endpoint — done in browser)
+- Placement state model: `Placement[]` in `usePlacements` with `updatePlacement(id, delta)`
+- Collision highlight: red stroke + translucent red fill on overlapping or out-of-bounds pieces
 
-**Success criteria:** Non-technical user can rearrange pieces without confusion; collision zones are visually obvious.
+**Removed in Phase 5 optimization round (PR #5):**
+After the engine became authoritative for placement (NFP-BLF), the frontend's SAT-based duplicate collision check kept disagreeing with the engine on touching / edge-case placements and producing visible false positives. Rather than tune the two layers to agree, we deleted the frontend collision layer and the entire manual-editing surface (drag, rotation handle, R-key, edit checkbox, `updatePlacement`, `isColliding` / `editable` props). The app is now read-only after Auto Layout. Click-to-select / deselect is the only canvas interaction.
+
+See `docs/superpowers/plans/2026-05-18-phase5-auto-layout-optimization.md` ("What actually shipped" section) for the deletion list.
 
 ---
 

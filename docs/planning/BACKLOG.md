@@ -43,7 +43,10 @@
 - [x] FabricPanel (fabric width input)
 - [ ] Viewport regression tests
 
-### Phase 4 — Manual editing ✓
+### Phase 4 — Manual editing ✓ (later REMOVED in Phase 5 optimization round)
+> All of the items below shipped during Phase 4 but were removed in the Phase 5
+> optimization round in favour of an engine-driven, read-only workflow. See
+> "Phase 5 (optimization round)" below for the removal commits.
 - [x] Drag pieces on canvas
 - [x] Rotate pieces (R key + handle)
 - [x] Snap behavior (10 mm grid drag-end; 1° rotation drag-end)
@@ -80,14 +83,18 @@
 - [x] Live metrics panel + dotted marker-length line on canvas
 - [x] Fabric/piece grain arrows when grain mode != none
 
-### Phase 5 (optimization round) — UX redesign & remaining bugs
+### Phase 5 (optimization round) — UX redesign & remaining bugs ✓
 See `docs/superpowers/plans/2026-05-18-phase5-auto-layout-optimization.md`.
-- [ ] Top piece-library panel (always-visible horizontal strip of imported pieces with names)
-- [ ] Don't render pieces on canvas until auto-layout completes (no initial single-row preview)
-- [ ] Rotate canvas 90° CCW (fabric extends right; grain arrow points right; marker-length line vertical)
-- [ ] Selection (click) decoupled from manual-edit; click empty / re-click to deselect
-- [ ] Touching-still-flagged-red on irregular pieces — placement verify step + larger overlap eps
-- [ ] Optional: better error diagnostics when fallback rejects (piece + rotation + dim)
+- [x] Top preview panel — always-visible horizontal strip of imported pieces with names (outline-only thumbnails, no fill)
+- [x] Don't render pieces on canvas until auto-layout completes (no initial single-row preview)
+- [x] Rotate canvas 90° CCW (fabric extends right; grain arrow points right; marker-length line vertical)
+- [x] Selection by click works without enabling editing; re-click / empty-stage click deselects
+- [x] Engine overlap eps raised from 1e-3 → 0.5 mm² to match frontend SAT tolerance
+- [x] **Removed** frontend collision detection (`useCollisions`, `collisions.ts`, `geometry.ts` + tests) — engine is now authoritative for placement validity
+- [x] **Removed** manual editing entirely (drag, rotate handle, R-key, "Enable manual edit on canvas" checkbox, `updatePlacement`) — too risky to maintain alongside engine-driven layout
+- [x] Fabric width default = 1500 mm, resets on each import (no auto-fit to pieces)
+- [x] Bi-direction never worse than single-direction — engine runs both modes when bi is selected and keeps the shorter result
+- [x] Topbar shows current import filename ("OpenMarker — Working on sample_1.dxf")
 
 ### Phase 6 — Export
 - [ ] Export layout as DXF or PNG

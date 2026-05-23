@@ -1,34 +1,32 @@
 import { useState, useEffect, useCallback } from "react";
 import type { Piece } from "../types/engine";
 import type { Placement } from "../types/canvas";
-import { computePlacements } from "../utils/placement";
 
+/**
+ * Placement state for the marker canvas.
+ *
+ * Starts EMPTY and stays empty until `setAllPlacements` is called (typically
+ * with the Auto Layout result). `pieces` is observed only to clear placements
+ * when the imported set changes, so stale placements for unloaded piece ids
+ * don't linger.
+ *
+ * Manual editing was removed in the optimization round, so this hook no
+ * longer exposes a per-piece update method.
+ */
 export function usePlacements(pieces: Piece[]) {
-  const [placements, setPlacements] = useState<Placement[]>(() =>
-    computePlacements(pieces)
-  );
+  const [placements, setPlacements] = useState<Placement[]>([]);
 
-  // Re-initialise whenever a new set of pieces arrives.
   useEffect(() => {
-    setPlacements(computePlacements(pieces));
+    setPlacements([]);
   }, [pieces]);
-
-  const updatePlacement = useCallback(
-    (id: string, delta: Partial<Omit<Placement, "pieceId">>) => {
-      setPlacements((prev) =>
-        prev.map((p) => (p.pieceId === id ? { ...p, ...delta } : p))
-      );
-    },
-    []
-  );
 
   const setAllPlacements = useCallback((newPlacements: Placement[]) => {
     setPlacements(newPlacements);
   }, []);
 
-  function resetPlacements() {
-    setPlacements(computePlacements(pieces));
-  }
+  const resetPlacements = useCallback(() => {
+    setPlacements([]);
+  }, []);
 
-  return { placements, updatePlacement, resetPlacements, setAllPlacements };
+  return { placements, setAllPlacements, resetPlacements };
 }

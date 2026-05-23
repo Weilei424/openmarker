@@ -1,48 +1,40 @@
-// Renders a single pattern piece as a draggable Konva Group.
-// Drag repositions the piece (snapped to 10 mm grid).
-// Selected pieces show an orange outline; colliding pieces show red.
+// Renders a single placed piece as a Konva Group with the piece polygon,
+// optional set color, and optional grain arrow.
+//
+// No drag, no rotate, no collision highlight — manual editing and frontend
+// collision detection were removed in the optimization round (the engine is
+// authoritative for placement validity).
+// Click selects (toggles) the piece — that's the only interaction here.
 
 import { Group, Line, Arrow } from "react-konva";
 import type { KonvaEventObject } from "konva/lib/Node";
 import type { Piece, GrainMode } from "../../types/engine";
 import type { Placement } from "../../types/canvas";
-import { snapToGrid } from "../../utils/placement";
 
 interface Props {
   piece: Piece;
   placement: Placement;
   isSelected: boolean;
-  isColliding: boolean;
   onSelect: () => void;
-  onDragEnd: (id: string, pos: { x: number; y: number }) => void;
   grainMode: GrainMode;
   scale: number;
   baseStroke: string;
   baseFill: string;
-  editable: boolean;
 }
 
 export function PieceShape({
   piece,
   placement,
   isSelected,
-  isColliding,
   onSelect,
-  onDragEnd,
   grainMode,
   scale,
   baseStroke,
   baseFill,
-  editable,
 }: Props) {
-  const stroke = isColliding ? "#e53935" : isSelected ? "#ff9800" : baseStroke;
-  const fill = isColliding
-    ? "rgba(229, 57, 53, 0.25)"
-    : isSelected
-    ? "rgba(255, 152, 0, 0.12)"
-    : baseFill;
+  const stroke = isSelected ? "#ff9800" : baseStroke;
+  const fill = isSelected ? "rgba(255, 152, 0, 0.12)" : baseFill;
 
-  // Polygon points in Group-local coordinates (piece is at origin)
   const flatPoints = piece.polygon.flatMap(([x, y]) => [x, y]);
 
   // Group is placed at the bbox center with offsetX/offsetY so rotation
@@ -50,24 +42,9 @@ export function PieceShape({
   const cx = piece.bbox.width / 2;
   const cy = piece.bbox.height / 2;
 
-  const handleDragStart = (e: KonvaEventObject<DragEvent>) => {
-    const container = e.target.getStage()?.container();
-    if (container) container.style.cursor = "grabbing";
-  };
-
-  const handleDragEnd = (e: KonvaEventObject<DragEvent>) => {
-    const container = e.target.getStage()?.container();
-    if (container) container.style.cursor = "grab";
-    // Group position after drag: (placement.x + cx + drag_delta_x, placement.y + cy + drag_delta_y)
-    // Recover top-left: subtract cx/cy, then snap.
-    const rawX = e.target.x() - cx;
-    const rawY = e.target.y() - cy;
-    onDragEnd(piece.id, { x: snapToGrid(rawX), y: snapToGrid(rawY) });
-  };
-
   const handleMouseEnter = (e: KonvaEventObject<MouseEvent>) => {
     const container = e.target.getStage()?.container();
-    if (container) container.style.cursor = "grab";
+    if (container) container.style.cursor = "pointer";
   };
 
   const handleMouseLeave = (e: KonvaEventObject<MouseEvent>) => {
@@ -83,14 +60,11 @@ export function PieceShape({
       offsetX={cx}
       offsetY={cy}
       rotation={placement.rotationDeg}
-      draggable={editable}
-      onClick={editable ? onSelect : undefined}
-      onTap={editable ? onSelect : undefined}
-      onMouseDown={editable ? (e) => { e.cancelBubble = true; } : undefined}
-      onDragStart={editable ? handleDragStart : undefined}
-      onDragEnd={editable ? handleDragEnd : undefined}
-      onMouseEnter={editable ? handleMouseEnter : undefined}
-      onMouseLeave={editable ? handleMouseLeave : undefined}
+      onClick={onSelect}
+      onTap={onSelect}
+      onMouseDown={(e) => { e.cancelBubble = true; }}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
     >
       <Line
         points={flatPoints}

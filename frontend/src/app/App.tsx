@@ -8,6 +8,7 @@ import { useImportDxf, type ImportOutcome } from "../hooks/useImportDxf";
 import { usePlacements } from "../hooks/usePlacements";
 import { useAutoLayout } from "../hooks/useAutoLayout";
 import { PieceList } from "../components/pieces/PieceList";
+import { PreviewPanel } from "../components/PreviewPanel";
 import { CanvasWorkspace } from "../components/canvas/CanvasWorkspace";
 import { FabricPanel } from "../components/sidebar/FabricPanel";
 import { GrainPanel } from "../components/sidebar/GrainPanel";
@@ -23,13 +24,13 @@ export default function App() {
   const [statusMessage, setStatusMessage] = useState("Engine not connected");
   const [selectedPieceId, setSelectedPieceId] = useState<string | null>(null);
   const [fabricWidthMm, setFabricWidthMm] = useState<number>(1500);
+  const [currentFileName, setCurrentFileName] = useState<string | null>(null);
 
   const { status: importStatus, pieces, warnings, errorMessage, handleFileSelected } = useImportDxf();
 
   const [grainMode, setGrainMode] = useState<GrainMode>("none");
   const [fastMode, setFastMode] = useState<boolean>(false);
   const [copiesInput, setCopiesInput] = useState<string>("");
-  const [manualEditEnabled, setManualEditEnabled] = useState<boolean>(false);
 
   const { runAutoLayout, abort: abortAutoLayout, status: autoStatus, errorMessage: autoError } = useAutoLayout();
 
@@ -55,7 +56,7 @@ export default function App() {
     return out;
   }, [pieces, copies]);
 
-  const { placements, updatePlacement, resetPlacements, setAllPlacements } = usePlacements(expandedPieces);
+  const { placements, resetPlacements, setAllPlacements } = usePlacements(expandedPieces);
 
   const metrics = useMemo(
     () => computeMarkerMetrics(placements, expandedPieces, fabricWidthMm),
@@ -94,9 +95,10 @@ export default function App() {
       const outcome: ImportOutcome = await handleFileSelected(file);
       if (outcome.ok) {
         setStatusMessage(`${outcome.pieces.length} piece${outcome.pieces.length !== 1 ? "s" : ""} imported from ${file.name}`);
-        // Auto-size fabric width to contain the initial single-row layout (10 mm gap between pieces).
-        const totalW = outcome.pieces.reduce((sum, p) => sum + p.bbox.width + 10, 10);
-        setFabricWidthMm(Math.ceil(totalW / 10) * 10);
+        setCurrentFileName(file.name);
+        // Reset fabric width to default on each import. The user can manually
+        // change it after — we don't auto-fit it to the imported pieces.
+        setFabricWidthMm(1500);
       } else {
         setStatusMessage(`Import failed: ${outcome.errorMessage}`);
       }
@@ -140,8 +142,20 @@ export default function App() {
     <div style={styles.root}>
       {/* Top bar */}
       <div style={styles.topBar}>
-        <span style={styles.appTitle}>OpenMarker</span>
+        <span style={styles.appTitle}>
+          OpenMarker
+          {currentFileName && (
+            <span style={styles.appSubtitle}> — Working on {currentFileName}</span>
+          )}
+        </span>
       </div>
+
+      {/* Preview panel: one thumbnail per imported piece (outline only) */}
+      <PreviewPanel
+        pieces={pieces}
+        selectedPieceId={selectedPieceId}
+        onSelect={setSelectedPieceId}
+      />
 
       {/* Body: sidebar + workspace */}
       <div style={styles.body}>
@@ -179,14 +193,6 @@ export default function App() {
                 onChange={(e) => setCopiesInput(e.target.value)}
                 style={styles.numberInput}
               />
-            </label>
-            <label style={styles.checkRow}>
-              <input
-                type="checkbox"
-                checked={manualEditEnabled}
-                onChange={(e) => setManualEditEnabled(e.target.checked)}
-              />
-              <span style={{ fontSize: 12 }}>Enable manual edit on canvas</span>
             </label>
           </Section>
 
@@ -254,7 +260,7 @@ export default function App() {
                 <PieceList
                   pieces={pieces}
                   selectedPieceId={selectedPieceId}
-                  onSelect={setSelectedPieceId}
+                  onSelect={(id) => setSelectedPieceId(id === selectedPieceId ? null : id)}
                 />
                 {warnings.length > 0 && (
                   <div style={styles.warningBlock}>
@@ -277,13 +283,11 @@ export default function App() {
           <CanvasWorkspace
             pieces={expandedPieces}
             placements={placements}
-            updatePlacement={updatePlacement}
             selectedPieceId={selectedPieceId}
             onSelectPiece={setSelectedPieceId}
             fabricWidthMm={fabricWidthMm}
             grainMode={grainMode}
             markerLengthMm={metrics.length}
-            manualEditEnabled={manualEditEnabled}
           />
         </div>
       </div>
@@ -387,6 +391,11 @@ const styles = {
     fontSize: 14,
     letterSpacing: "0.02em",
     color: "var(--color-text)",
+  },
+  appSubtitle: {
+    fontWeight: 400,
+    color: "var(--color-text-muted)",
+    marginLeft: 4,
   },
   body: {
     flex: 1,

@@ -16,8 +16,7 @@ The app should feel like a normal Windows desktop tool:
 - open from desktop shortcut
 - import DXF exported from ET CAD
 - view pattern pieces in a visual workspace
-- drag, rotate, and arrange pieces manually
-- run simple auto layout locally
+- run auto layout (NFP-based BLF) locally; pick fabric width, grain mode, and how many copies of the set to nest
 - export layout results locally
 
 ## Product goals
@@ -147,18 +146,20 @@ Contains developer helper scripts for local setup, linting, packaging, and relea
 - normalize coordinates
 - render pieces on canvas
 
-### Milestone 3: manual editing
+### Milestone 3: visual workspace
 
-- drag pieces
-- rotate pieces
+- preview panel of imported pieces (outline-only thumbnails with names)
+- canvas with rotated fabric strip (grain runs left-to-right)
 - zoom and pan
-- show bounds and collision warnings
+- click-to-select pieces (no manual drag/rotate — the app is read-only after auto layout)
 
-### Milestone 4: simple auto layout
+### Milestone 4: auto layout
 
-- define fabric width
-- run basic placement algorithm
-- compute layout length and utilization
+- define fabric width and number of copies of the imported set to nest
+- pick grain mode (none / single / bi-directional)
+- run NFP-based Bottom-Left-Fill (or fast bbox-shelf "fast mode")
+- compute marker length and fabric utilization, with live overflow detection
+- stop button cancels long-running layouts mid-piece
 
 ### Milestone 5: export and packaging
 
@@ -195,7 +196,7 @@ Contains developer helper scripts for local setup, linting, packaging, and relea
 
 - DXF parsing correctness
 - polygon normalization correctness
-- layout collision correctness
+- NFP / placement correctness (no overlaps beyond the engine's mm² tolerance, no out-of-bounds pieces)
 - export correctness
 - Windows packaging reliability
 - usability testing with non-technical users
@@ -206,7 +207,7 @@ Contains developer helper scripts for local setup, linting, packaging, and relea
 2. Add DXF upload flow
 3. Parse simple piece outlines
 4. Render pieces on canvas
-5. Support manual drag and rotate
+5. Run auto layout and display results read-only
 6. Show simple utilization metrics
 
 ## License

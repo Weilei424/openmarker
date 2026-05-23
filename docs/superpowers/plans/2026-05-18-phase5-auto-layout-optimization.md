@@ -151,3 +151,83 @@ Currently disabling manual edit also disables `onClick` on PieceShape. New:
 The new work uses no third-party code. Algorithms continue to come from
 Burke 2006 (BLF / NFP) — academic and uncopyrightable. `pyclipper` (MIT) and
 Shapely (BSD) remain the only external geometry libs, already attributed.
+
+---
+
+## What actually shipped (post-mortem)
+
+The original plan above held for the first half of PR #5. Subsequent
+user-test rounds added scope and dropped scope. Final state:
+
+### Delivered as planned
+
+- Top panel (renamed `PreviewPanel`, was `PieceLibrary`) — outline-only SVG
+  thumbnails so the shape is unambiguous (the first attempt filled the
+  polygon, which looked like a separate "blue background shape" behind the
+  outline).
+- `usePlacements` starts empty; Reset Layout clears.
+- Canvas rotated 90° CCW via `<Group rotation={-90} y={fabricWidthMm}>`. Engine
+  math unchanged. New helper `computeFitViewportFromWorldBbox` for the
+  Fit button and auto-fit on import / new layout.
+- Click-to-select decoupled from edit. Re-click + empty-stage click both
+  deselect. PieceList ↔ canvas selection sync by base id.
+- Engine overlap eps raised from `1e-3` → `0.5` mm² (test `test_polygon_no_overlaps`
+  updated to match).
+
+### Added during the round
+
+- **Bi-direction never worse than single.** Greedy NFP-BLF can produce a worse
+  bi-mode layout than single-mode even though bi's rotation set is a strict
+  superset of single's (a locally-good `target+180°` rotation can leave a worse
+  global gap). `_modes_to_try("bi") → ["bi", "single"]` runs both and keeps
+  the shorter marker. Same wrapper applied to bbox mode.
+- **Topbar shows current import filename:** "OpenMarker — Working on
+  sample_1.dxf".
+- **Fabric width defaults to 1500 mm** and resets on every import (was
+  auto-sizing to the initial single-row layout, which had no meaning after the
+  "hide pieces until auto-layout" change).
+- **PreviewPanel `fill="none"`** (was a translucent blue fill that, on irregular
+  pieces, looked like a separate shape behind the outline).
+
+### Removed during the round (originally planned to keep)
+
+- **Frontend collision detection (entirely).** `useCollisions.ts`, `collisions.ts`,
+  `collisions.test.ts`, `geometry.ts`, `geometry.test.ts` deleted. SAT was still
+  flagging engine-placed pieces as colliding on edge cases (NFP slivers,
+  conversion drift on pieces with many vertices at large coords). The engine
+  owns placement validity; duplicating overlap detection on the frontend just
+  produced false positives that contradicted the truth.
+- **Manual editing (entirely).** Drag handlers, rotation handle, R-key
+  rotation, "Enable manual edit on canvas" checkbox, `manualEditEnabled` state,
+  `updatePlacement` from `usePlacements`, the `editable` prop on `PieceShape`,
+  and the `isColliding` prop. Selection (click-to-highlight) is kept because it
+  is not editing. ~270 lines deleted; ~9 lines added.
+
+### Deferred / not done
+
+- Placement-verify step inside `_blf_pack_nfp` (snap to grid + re-check
+  Shapely intersection). Wasn't needed once collision detection was removed
+  from the frontend — touching-flagged-red is gone because nothing flags
+  touching anymore.
+- NFP inward-buffer trick before differencing. Same reason.
+- Multi-process engine. Not required for our piece counts.
+
+### File map (final)
+
+| File | Status | Notes |
+|---|---|---|
+| `frontend/src/components/PreviewPanel.tsx` | new (renamed from `PieceLibrary.tsx` via `git mv`) | Outline only |
+| `frontend/src/utils/setColors.ts` | (existing, no change this round) | 20-color palette |
+| `frontend/src/utils/placement.ts` | + `computeFitViewportFromWorldBbox` | For rotated canvas fit |
+| `frontend/src/hooks/usePlacements.ts` | rewritten | Starts empty; no `updatePlacement` |
+| `frontend/src/hooks/useCollisions.ts` | DELETED | |
+| `frontend/src/utils/collisions.ts` | DELETED | |
+| `frontend/src/utils/collisions.test.ts` | DELETED | |
+| `frontend/src/utils/geometry.ts` | DELETED | Only consumer was `collisions.ts` |
+| `frontend/src/utils/geometry.test.ts` | DELETED | |
+| `frontend/src/components/canvas/PieceShape.tsx` | rewritten | No drag, no `isColliding`, no `editable` |
+| `frontend/src/components/canvas/CanvasWorkspace.tsx` | rewritten | No drag/R-key/rotation-handle/useCollisions; layers wrapped in rotated Group |
+| `frontend/src/app/App.tsx` | modified | No manual-edit UI; fabric default reset; topbar filename |
+| `engine/core/layout/heuristic.py` | modified | overlap eps; `_modes_to_try` + `_shorter` for bi-fallback |
+| `engine/tests/unit/test_heuristic.py` | modified | overlap assertion eps loosened to 0.5 mm² |
+| `docs/planning/BACKLOG.md` | modified | Phase 4 marked as later-removed; Phase 5 optimization marked complete |
