@@ -1,0 +1,62 @@
+import time
+import pytest
+from core.layout.cache import CachedLayout, LayoutCache
+
+
+def _make_entry(id_: str, created_at: float | None = None) -> CachedLayout:
+    return CachedLayout(
+        id=id_,
+        filename="sample.dxf",
+        timestamp="20260523140000",
+        grain_mode="single",
+        copies=1,
+        fabric_width_mm=1500.0,
+        placements=[{"piece_id": "p0", "x": 10, "y": 10, "rotation_deg": 0}],
+        marker_length_mm=500.0,
+        utilization_pct=82.4,
+        duration_ms=1234,
+        created_at=created_at if created_at is not None else time.time(),
+    )
+
+
+def test_insert_then_get_roundtrip():
+    cache = LayoutCache()
+    entry = _make_entry("a")
+    cache.insert(entry)
+    assert cache.get("a") is entry
+
+
+def test_get_missing_returns_none():
+    cache = LayoutCache()
+    assert cache.get("missing") is None
+
+
+def test_list_newest_first():
+    cache = LayoutCache()
+    cache.insert(_make_entry("a", created_at=100.0))
+    cache.insert(_make_entry("b", created_at=200.0))
+    cache.insert(_make_entry("c", created_at=150.0))
+    ids = [e.id for e in cache.list()]
+    assert ids == ["b", "c", "a"]
+
+
+def test_insert_beyond_max_evicts_oldest():
+    cache = LayoutCache()
+    for i in range(5):
+        cache.insert(_make_entry(f"e{i}", created_at=float(i)))
+    cache.insert(_make_entry("e5", created_at=5.0))
+    ids = {e.id for e in cache.list()}
+    assert ids == {"e1", "e2", "e3", "e4", "e5"}
+    assert cache.get("e0") is None
+
+
+def test_delete_returns_true_when_present():
+    cache = LayoutCache()
+    cache.insert(_make_entry("a"))
+    assert cache.delete("a") is True
+    assert cache.get("a") is None
+
+
+def test_delete_returns_false_when_missing():
+    cache = LayoutCache()
+    assert cache.delete("missing") is False
