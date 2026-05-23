@@ -1,11 +1,10 @@
-// Top-of-screen horizontal strip showing every imported piece exactly once,
-// independent of copies and canvas placements. Acts as the source-of-truth
-// "library" view (mirror of the ET-Mark reference UI).
+// Top-of-screen "preview panel": one thumbnail per imported piece. Independent
+// of copies and canvas placements. Acts as the source-of-truth visual index.
 //
-// SVG (not Konva) — these are tiny static thumbnails, the Konva runtime cost
-// would be wasted here. Selection is toggleable and shares state with the
-// canvas: clicking a thumbnail lights all copies of that piece on the canvas
-// (CanvasWorkspace matches by base id).
+// Renders only the polygon OUTLINE (no fill) so the shape is unambiguous —
+// the previous semi-transparent fill produced a confusing "blue background
+// with a darker shape inside" look (the fill is the polygon, the stroke is
+// the same polygon — together they look like two shapes).
 
 import type { Piece } from "../types/engine";
 
@@ -19,11 +18,11 @@ interface Props {
   onSelect: (id: string | null) => void;
 }
 
-export function PieceLibrary({ pieces, selectedPieceId, onSelect }: Props) {
+export function PreviewPanel({ pieces, selectedPieceId, onSelect }: Props) {
   if (pieces.length === 0) {
     return (
       <div style={styles.strip}>
-        <span style={styles.placeholder}>Import a DXF to populate the piece library.</span>
+        <span style={styles.placeholder}>Import a DXF to populate the preview panel.</span>
       </div>
     );
   }
@@ -32,7 +31,7 @@ export function PieceLibrary({ pieces, selectedPieceId, onSelect }: Props) {
     <div style={styles.strip}>
       {pieces.map((piece) => {
         // Selected if the user clicked this thumbnail OR an expanded copy on the canvas
-        // (canvas piece ids look like `${base}__c${n}` and PieceLibrary uses the base id).
+        // (canvas piece ids look like `${base}__c${n}` and PreviewPanel uses the base id).
         const isSelected =
           selectedPieceId === piece.id ||
           (selectedPieceId !== null &&
@@ -63,9 +62,10 @@ export function PieceLibrary({ pieces, selectedPieceId, onSelect }: Props) {
             >
               <polygon
                 points={points}
-                fill="rgba(74, 158, 255, 0.15)"
+                fill="none"
                 stroke={isSelected ? "#ff9800" : "#4a9eff"}
-                strokeWidth={piece.bbox.height / 40}
+                strokeWidth={1.5}
+                strokeLinejoin="round"
                 vectorEffect="non-scaling-stroke"
               />
             </svg>
