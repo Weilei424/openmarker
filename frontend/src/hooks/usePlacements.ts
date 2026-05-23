@@ -5,14 +5,13 @@ import type { Placement } from "../types/canvas";
 /**
  * Placement state for the marker canvas.
  *
- * Starts EMPTY and stays empty until something (typically the Auto Layout
- * result) calls setAllPlacements. The pre-Phase-5-optimization behaviour of
- * pre-laying out pieces in a single row on import was removed — it produced
- * misleading >100% utilisation and a confusing "is this auto-layout or just a
- * preview?" state.
+ * Starts EMPTY and stays empty until `setAllPlacements` is called (typically
+ * with the Auto Layout result). `pieces` is observed only to clear placements
+ * when the imported set changes, so stale placements for unloaded piece ids
+ * don't linger.
  *
- * `pieces` is observed only to clear placements when the imported set
- * changes (so stale placements for unloaded piece ids don't linger).
+ * Manual editing was removed in the optimization round, so this hook no
+ * longer exposes a per-piece update method.
  */
 export function usePlacements(pieces: Piece[]) {
   const [placements, setPlacements] = useState<Placement[]>([]);
@@ -21,22 +20,13 @@ export function usePlacements(pieces: Piece[]) {
     setPlacements([]);
   }, [pieces]);
 
-  const updatePlacement = useCallback(
-    (id: string, delta: Partial<Omit<Placement, "pieceId">>) => {
-      setPlacements((prev) =>
-        prev.map((p) => (p.pieceId === id ? { ...p, ...delta } : p))
-      );
-    },
-    []
-  );
-
   const setAllPlacements = useCallback((newPlacements: Placement[]) => {
     setPlacements(newPlacements);
   }, []);
 
-  function resetPlacements() {
+  const resetPlacements = useCallback(() => {
     setPlacements([]);
-  }
+  }, []);
 
-  return { placements, updatePlacement, resetPlacements, setAllPlacements };
+  return { placements, setAllPlacements, resetPlacements };
 }

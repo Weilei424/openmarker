@@ -33,45 +33,6 @@ describe("usePlacements", () => {
     expect(result.current.placements[0].pieceId).toBe("A");
   });
 
-  it("updatePlacement merges x and y into an existing placement", () => {
-    const pieces = [makePiece("A", 100, 200)];
-    const { result } = renderHook(() => usePlacements(pieces));
-    act(() => {
-      result.current.setAllPlacements([{ pieceId: "A", x: 10, y: 10, rotationDeg: 0 }]);
-    });
-    act(() => {
-      result.current.updatePlacement("A", { x: 300, y: 50 });
-    });
-    expect(result.current.placements[0].x).toBe(300);
-    expect(result.current.placements[0].y).toBe(50);
-    expect(result.current.placements[0].rotationDeg).toBe(0);
-  });
-
-  it("updatePlacement merges rotationDeg", () => {
-    const pieces = [makePiece("A", 100, 200)];
-    const { result } = renderHook(() => usePlacements(pieces));
-    act(() => {
-      result.current.setAllPlacements([{ pieceId: "A", x: 10, y: 10, rotationDeg: 0 }]);
-    });
-    act(() => {
-      result.current.updatePlacement("A", { rotationDeg: 90 });
-    });
-    expect(result.current.placements[0].rotationDeg).toBe(90);
-    expect(result.current.placements[0].x).toBe(10);
-  });
-
-  it("updatePlacement ignores unknown pieceId", () => {
-    const pieces = [makePiece("A", 100, 200)];
-    const { result } = renderHook(() => usePlacements(pieces));
-    act(() => {
-      result.current.setAllPlacements([{ pieceId: "A", x: 10, y: 10, rotationDeg: 0 }]);
-    });
-    act(() => {
-      result.current.updatePlacement("Z", { x: 999 });
-    });
-    expect(result.current.placements[0].x).toBe(10);
-  });
-
   it("clears placements when pieces reference changes", () => {
     const piecesV1 = [makePiece("A", 100, 200)];
     const { result, rerender } = renderHook(({ pieces }) => usePlacements(pieces), {
@@ -82,7 +43,6 @@ describe("usePlacements", () => {
     });
     expect(result.current.placements[0].x).toBe(999);
 
-    // New pieces reference clears placements (new import = empty canvas).
     const piecesV2 = [makePiece("A", 100, 200)];
     rerender({ pieces: piecesV2 });
     expect(result.current.placements).toEqual([]);
