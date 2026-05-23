@@ -94,15 +94,20 @@ async def auto_layout_endpoint(request: Request) -> dict:
 
     Request JSON:
     {
-        "pieces": [...],           // Piece objects from /import-dxf
+        "pieces": [...],            // Piece objects from /import-dxf
         "fabric_width_mm": 1500,
-        "grain_mode": "none",      // "none" | "single" | "bi"
-        "grain_direction_deg": 0,  // 0 | 45 | 90 | 135
-        "fast_mode": false         // true = bbox mode; false = polygon mode
+        "grain_mode": "none",       // "none" | "single" | "bi" (Phase 6: "none" removed in T17)
+        "grain_direction_deg": 0,
+        "fast_mode": false,         // Phase 6: removed in T17
+        "filename": "...",          // Phase 6: required after T17
+        "copies": 1                 // Phase 6: required after T17
     }
 
     Response JSON:
     {
+        "id": "...",                // Phase 6: cache entry id (UUID hex)
+        "timestamp": "...",         // Phase 6: YYYYMMDDHHMMSS
+        "duration_ms": 1234,        // Phase 6: layout duration
         "placements": [{"piece_id": "...", "x": 0, "y": 0, "rotation_deg": 0}],
         "marker_length_mm": 1234.5,
         "utilization_pct": 82.4
@@ -174,6 +179,9 @@ async def auto_layout_endpoint(request: Request) -> dict:
         id=uuid.uuid4().hex,
         filename=filename,
         timestamp=datetime.fromtimestamp(now).strftime("%Y%m%d%H%M%S"),
+        # Phase 6 transitional: cache only stores "single"/"bi" per CachedLayout's
+        # type. Until Task 17 removes "none" from the request schema, fall back
+        # to "single" to avoid a TypeError. After T17 this coercion is dead.
         grain_mode=grain_mode if grain_mode in ("single", "bi") else "single",
         copies=copies,
         fabric_width_mm=fabric_width_mm,
