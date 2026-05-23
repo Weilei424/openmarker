@@ -8,7 +8,7 @@ import { useImportDxf, type ImportOutcome } from "../hooks/useImportDxf";
 import { usePlacements } from "../hooks/usePlacements";
 import { useAutoLayout } from "../hooks/useAutoLayout";
 import { PieceList } from "../components/pieces/PieceList";
-import { PieceLibrary } from "../components/PieceLibrary";
+import { PreviewPanel } from "../components/PreviewPanel";
 import { CanvasWorkspace } from "../components/canvas/CanvasWorkspace";
 import { FabricPanel } from "../components/sidebar/FabricPanel";
 import { GrainPanel } from "../components/sidebar/GrainPanel";
@@ -30,7 +30,6 @@ export default function App() {
   const [grainMode, setGrainMode] = useState<GrainMode>("none");
   const [fastMode, setFastMode] = useState<boolean>(false);
   const [copiesInput, setCopiesInput] = useState<string>("");
-  const [manualEditEnabled, setManualEditEnabled] = useState<boolean>(false);
 
   const { runAutoLayout, abort: abortAutoLayout, status: autoStatus, errorMessage: autoError } = useAutoLayout();
 
@@ -56,7 +55,7 @@ export default function App() {
     return out;
   }, [pieces, copies]);
 
-  const { placements, updatePlacement, resetPlacements, setAllPlacements } = usePlacements(expandedPieces);
+  const { placements, resetPlacements, setAllPlacements } = usePlacements(expandedPieces);
 
   const metrics = useMemo(
     () => computeMarkerMetrics(placements, expandedPieces, fabricWidthMm),
@@ -95,9 +94,9 @@ export default function App() {
       const outcome: ImportOutcome = await handleFileSelected(file);
       if (outcome.ok) {
         setStatusMessage(`${outcome.pieces.length} piece${outcome.pieces.length !== 1 ? "s" : ""} imported from ${file.name}`);
-        // Auto-size fabric width to contain the initial single-row layout (10 mm gap between pieces).
-        const totalW = outcome.pieces.reduce((sum, p) => sum + p.bbox.width + 10, 10);
-        setFabricWidthMm(Math.ceil(totalW / 10) * 10);
+        // Reset fabric width to default on each import. The user can manually
+        // change it after — we don't auto-fit it to the imported pieces.
+        setFabricWidthMm(1500);
       } else {
         setStatusMessage(`Import failed: ${outcome.errorMessage}`);
       }
@@ -144,8 +143,8 @@ export default function App() {
         <span style={styles.appTitle}>OpenMarker</span>
       </div>
 
-      {/* Piece library strip (one entry per imported piece, base id) */}
-      <PieceLibrary
+      {/* Preview panel: one thumbnail per imported piece (outline only) */}
+      <PreviewPanel
         pieces={pieces}
         selectedPieceId={selectedPieceId}
         onSelect={setSelectedPieceId}
@@ -187,14 +186,6 @@ export default function App() {
                 onChange={(e) => setCopiesInput(e.target.value)}
                 style={styles.numberInput}
               />
-            </label>
-            <label style={styles.checkRow}>
-              <input
-                type="checkbox"
-                checked={manualEditEnabled}
-                onChange={(e) => setManualEditEnabled(e.target.checked)}
-              />
-              <span style={{ fontSize: 12 }}>Enable manual edit on canvas</span>
             </label>
           </Section>
 
@@ -285,13 +276,11 @@ export default function App() {
           <CanvasWorkspace
             pieces={expandedPieces}
             placements={placements}
-            updatePlacement={updatePlacement}
             selectedPieceId={selectedPieceId}
             onSelectPiece={setSelectedPieceId}
             fabricWidthMm={fabricWidthMm}
             grainMode={grainMode}
             markerLengthMm={metrics.length}
-            manualEditEnabled={manualEditEnabled}
           />
         </div>
       </div>
