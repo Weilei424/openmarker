@@ -24,6 +24,7 @@ export default function App() {
   const [statusMessage, setStatusMessage] = useState("Engine not connected");
   const [selectedPieceId, setSelectedPieceId] = useState<string | null>(null);
   const [fabricWidthMm, setFabricWidthMm] = useState<number>(1500);
+  const [currentFileName, setCurrentFileName] = useState<string | null>(null);
 
   const { status: importStatus, pieces, warnings, errorMessage, handleFileSelected } = useImportDxf();
 
@@ -94,6 +95,7 @@ export default function App() {
       const outcome: ImportOutcome = await handleFileSelected(file);
       if (outcome.ok) {
         setStatusMessage(`${outcome.pieces.length} piece${outcome.pieces.length !== 1 ? "s" : ""} imported from ${file.name}`);
+        setCurrentFileName(file.name);
         // Reset fabric width to default on each import. The user can manually
         // change it after — we don't auto-fit it to the imported pieces.
         setFabricWidthMm(1500);
@@ -140,7 +142,12 @@ export default function App() {
     <div style={styles.root}>
       {/* Top bar */}
       <div style={styles.topBar}>
-        <span style={styles.appTitle}>OpenMarker</span>
+        <span style={styles.appTitle}>
+          OpenMarker
+          {currentFileName && (
+            <span style={styles.appSubtitle}> — Working on {currentFileName}</span>
+          )}
+        </span>
       </div>
 
       {/* Preview panel: one thumbnail per imported piece (outline only) */}
@@ -384,6 +391,11 @@ const styles = {
     fontSize: 14,
     letterSpacing: "0.02em",
     color: "var(--color-text)",
+  },
+  appSubtitle: {
+    fontWeight: 400,
+    color: "var(--color-text-muted)",
+    marginLeft: 4,
   },
   body: {
     flex: 1,
