@@ -555,6 +555,26 @@ def _best_of_strategies(run_one) -> tuple[list[Placement], float, float]:
 # Public API
 # ---------------------------------------------------------------------------
 
+def _shorter(a: tuple[list[Placement], float, float] | None,
+             b: tuple[list[Placement], float, float]) -> tuple[list[Placement], float, float]:
+    """Return whichever layout has the shorter marker length."""
+    if a is None or b[1] < a[1]:
+        return b
+    return a
+
+
+def _modes_to_try(grain_mode: str) -> list[str]:
+    """Bi mode's rotation set is a strict superset of single's. A greedy BLF
+    can therefore produce a worse bi layout than single (a locally-good rotation
+    leaves a worse global gap). To guarantee bi >= single, run both and keep
+    the shorter result. Same idea for none → bi → single as superset chain."""
+    if grain_mode == "bi":
+        return ["bi", "single"]
+    if grain_mode == "none":
+        return ["none"]
+    return [grain_mode]
+
+
 def auto_layout_bbox(
     pieces: list[Piece],
     fabric_width_mm: float,
@@ -569,15 +589,18 @@ def auto_layout_bbox(
     def fits_bbox(piece, x, y, rot, w):
         return True
 
-    def run_one(sort_key):
-        return _strip_pack(
-            pieces, fabric_width_mm, grain_mode, fabric_grain_deg,
-            dim_fn=_rotated_bbox_dims,
-            fits_fn=fits_bbox,
-            sort_key=sort_key,
-        )
-
-    return _best_of_strategies(run_one)
+    best: tuple[list[Placement], float, float] | None = None
+    for mode in _modes_to_try(grain_mode):
+        def run_one(sort_key, _mode=mode):
+            return _strip_pack(
+                pieces, fabric_width_mm, _mode, fabric_grain_deg,
+                dim_fn=_rotated_bbox_dims,
+                fits_fn=fits_bbox,
+                sort_key=sort_key,
+            )
+        best = _shorter(best, _best_of_strategies(run_one))
+    assert best is not None
+    return best
 
 
 def auto_layout_polygon(
@@ -596,10 +619,13 @@ def auto_layout_polygon(
     Returns (placements, marker_length_mm, utilization_pct).
     Raises ValueError if any piece cannot fit at any allowed rotation.
     """
-    def run_one(sort_key):
-        return _blf_pack_nfp(
-            pieces, fabric_width_mm, grain_mode, fabric_grain_deg,
-            sort_key=sort_key,
-        )
-
-    return _best_of_strategies(run_one)
+    best: tuple[list[Placement], float, float] | None = None
+    for mode in _modes_to_try(grain_mode):
+        def run_one(sort_key, _mode=mode):
+            return _blf_pack_nfp(
+                pieces, fabric_width_mm, _mode, fabric_grain_deg,
+                sort_key=sort_key,
+            )
+        best = _shorter(best, _best_of_strategies(run_one))
+    assert best is not None
+    return best
