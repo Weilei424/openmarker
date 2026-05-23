@@ -96,12 +96,30 @@ See `docs/superpowers/plans/2026-05-18-phase5-auto-layout-optimization.md`.
 - [x] Bi-direction never worse than single-direction — engine runs both modes when bi is selected and keeps the shorter result
 - [x] Topbar shows current import filename ("OpenMarker — Working on sample_1.dxf")
 
-### Phase 6 — Export
-- [ ] Export layout as DXF or PNG
+### Phase 6 — Fixes, performance, and UI improvements
+
+User-visible scope (raw requirements captured from planning conversation):
+
+1. **UI — dynamic window size.** Default window starts at 70% of the monitor *height* with a 4:3 aspect ratio (width = height × 4 / 3), regardless of monitor resolution. Replace the current fixed 1280×800 default in `desktop/src-tauri/tauri.conf.json`.
+2. **UI — copies input height.** Double the height of the Settings → Copies number input. Currently too short to read comfortably.
+3. **Feature — remove grain mode "none" (free).** Drop the "none" option from `GrainPanel` and from engine `grain.allowed_rotations()`. Only `single` and `bi` remain. Default = `single`.
+4. **Feature — remove fast mode (bbox).** Drop the "Fast mode" toggle and `auto_layout_bbox` code path. Only the polygon NFP-BLF path (`auto_layout_polygon`) remains.
+5. **Feature — show/hide grainline toggle.** Add a checkbox (likely in `GrainPanel` or new view-options area) that toggles rendering of the yellow grainline arrows on pieces. Default = visible.
+6. **Feature — auto-layout result cache.** In-memory cache (engine side) keyed by `filename + timestamp (YYYYMMDDHHMMSS)` + settings `{grain_mode (single|bi), copies}`. Max 5 entries (FIFO eviction). Identical request returns the cached result instead of re-running the heuristic.
+7. **Feature — cache feeds future export.** Cached entries store the full layout result (placements + metrics) so that the Phase 7 export flow can pick any cached tab to export, not just the current one.
+8. **UI — metrics moved to bottom panel + timer.** Remove the live metrics block from the left sidebar. Add a new bottom panel showing: marker length, utilization %, overflow warning, and a layout-duration timer in `MM:SS` format (measured from auto-layout request → response).
+9. **Feature — per-tab cached metrics.** Each cached-result tab keeps its own metrics (marker length, utilization, duration). Switching tabs swaps both the canvas placements and the bottom-panel metrics.
+
+Task checklist (filled in once the planning skill produces the detailed plan):
+
+- [ ] (to be populated by the Phase 6 planning skill)
+
+### Phase 7 — Export
+- [ ] Export layout as DXF or PNG (sourced from any cached layout tab)
 - [ ] Export UI flow
 - [ ] File output tests
 
-### Phase 7 — Packaging and usability polish
+### Phase 8 — Packaging and usability polish
 - [ ] Bundle engine as PyInstaller sidecar
 - [ ] Build Windows installer (cargo tauri build)
 - [ ] Generate app icons (scripts/gen-icons.py)

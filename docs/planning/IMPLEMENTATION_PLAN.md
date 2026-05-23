@@ -2,7 +2,7 @@
 
 ## Overview
 
-OpenMarker is a Windows-first, offline-first desktop fabric layout tool for non-technical factory users. It is delivered in 8 phases (0–7), from repo setup through packaged Windows installer. The engine is a local Python/FastAPI process; the UI is React + Konva inside a Tauri shell. All communication is local HTTP.
+OpenMarker is a Windows-first, offline-first desktop fabric layout tool for non-technical factory users. It is delivered in 9 phases (0–8), from repo setup through packaged Windows installer. The engine is a local Python/FastAPI process; the UI is React + Konva inside a Tauri shell. All communication is local HTTP.
 
 ---
 
@@ -99,21 +99,67 @@ See `docs/superpowers/plans/2026-05-18-phase5-auto-layout-optimization.md` ("Wha
 
 ---
 
-### Phase 6 — Export
+### Phase 6 — Fixes, performance, and UI improvements
 
-**Goal:** User can save the current layout to a file.
+**Goal:** Clean up Phase 5 rough edges, simplify the settings surface, add a results cache that the export phase will consume, and rework the metrics UI.
 
-**Planned additions:**
-- Engine endpoint `POST /export` → accepts placements + format, returns file bytes
-- Formats: DXF (preferred for downstream CAM use) and/or PNG preview
-- UI: "Export" button opens save dialog via Tauri `save` dialog API
-- Tests: exported DXF round-trips back through parser without data loss
+**Raw user requirements (source of truth for the planning skill):**
 
-**Success criteria:** Exported file opens correctly in ET CAD or a standard DXF viewer.
+1. **Dynamic window size.** Replace the fixed 1280×800 default in `desktop/src-tauri/tauri.conf.json` with a runtime-computed size: 70% of monitor height, 4:3 aspect ratio (width = height × 4 / 3). Likely implemented in Rust (`lib.rs` / `main.rs`) using the Tauri 2.x monitor API at window creation. Keep `min_width` / `min_height` reasonable so the layout still works on smaller monitors.
+2. **Copies input height.** Double the height of the Settings → Copies number input in the sidebar (currently in `frontend/src/components/sidebar/` — likely a `CopiesPanel` or part of an existing settings panel). Pure CSS change.
+3. **Remove grain mode "none".** Drop the "none" option from `GrainPanel`, from the `GrainMode` TypeScript union, and from `engine/core/layout/grain.py::allowed_rotations()`. Update the engine endpoint to reject `"none"`. Default = `"single"`.
+4. **Remove fast mode (bbox).** Delete the Fast-mode toggle in the sidebar, the `fast_mode` field in the `/auto-layout` request, and the `auto_layout_bbox` function (+ its tests). Only `auto_layout_polygon` remains.
+5. **Show/hide grainline toggle.** Add a "Show grainline" checkbox (default = on). State lives in `App.tsx` and is passed down to `PieceShape` to gate the yellow arrow rendering. Applies to both fabric grain indicator and per-piece arrows — confirm during planning whether the toggle covers both or only the piece arrows.
+6. **Auto-layout result cache.** New module `engine/core/layout/cache.py`. In-memory cache (engine-process lifetime only), keyed by `(filename, timestamp YYYYMMDDHHMMSS, grain_mode, copies)`. Max 5 entries with FIFO eviction. The cache stores the full `AutoLayoutResponse` (placements + metrics + duration). `POST /auto-layout` checks the cache before running and returns the cached entry on hit; otherwise runs the heuristic and inserts. New endpoints likely needed: `GET /layouts` (list cached entries with their keys + metrics) and `GET /layouts/{id}` (fetch a specific cached result). Confirm endpoint shape during planning.
+7. **Cache feeds future export.** The cache stores everything Phase 7 needs (placements, fabric width, metrics) so export can target any cached entry by id, not just the active one. No export code is written in Phase 6 — just make sure the cache schema is export-ready.
+8. **Metrics moved to bottom panel + timer.** Remove the live metrics block from the left sidebar. Create `frontend/src/components/BottomPanel.tsx` displaying: marker length (mm), utilization %, overflow warning (if applicable), and a layout-duration timer in `MM:SS` (measured engine-side from request start → response, returned in the `/auto-layout` response). Top-level layout in `App.tsx` becomes `topbar | preview-panel | tabs | (sidebar + canvas) | bottom-panel | statusbar`.
+9. **Per-tab cached metrics + tab bar.** New `frontend/src/components/CachedLayoutTabs.tsx` rendered between the preview panel and the canvas. Each tab represents one cache entry (label e.g. `"sample_1.dxf · single · ×2"`). Active tab drives the canvas placements and the bottom-panel metrics. Closing/eviction UX: confirm during planning whether users can manually close tabs or only FIFO-evict.
+
+**Clarifications already collected:**
+- Window: **70% of monitor height, 4:3 aspect ratio**.
+- Cache key: **filename + timestamp (YYYYMMDDHHMMSS) + settings**, in-memory only.
+- Tab placement: **between preview panel (top) and canvas**.
+
+**Key files (likely):**
+- `desktop/src-tauri/tauri.conf.json`, `desktop/src-tauri/src/lib.rs` (or `main.rs`) — dynamic window size
+- `frontend/src/components/sidebar/GrainPanel.tsx` (remove `none`, remove fast-mode, add grainline toggle) and copies input component (double height)
+- `frontend/src/App.tsx` (new layout regions, tab/cache state, grainline toggle wiring)
+- `frontend/src/components/PreviewPanel.tsx` (unchanged, but a new `CachedLayoutTabs.tsx` will sit directly below it)
+- `frontend/src/components/BottomPanel.tsx` (new)
+- `frontend/src/components/CachedLayoutTabs.tsx` (new)
+- `frontend/src/hooks/useAutoLayout.ts` (cache-aware: surface cache hits, expose tab list)
+- `engine/core/layout/cache.py` (new)
+- `engine/api/main.py` (cache-aware `/auto-layout`; possibly `GET /layouts` + `GET /layouts/{id}`)
+- `engine/core/layout/grain.py` (drop `none`)
+- `engine/core/layout/heuristic.py` (drop `auto_layout_bbox`)
+- Tests across all of the above.
+
+**Success criteria:**
+- App window opens at 70% monitor height in 4:3 ratio on a 1080p, 1440p, and 5K monitor without manual resize.
+- Settings sidebar shows no "none" grain option and no fast-mode toggle; copies input is visibly taller.
+- Grainline arrows can be toggled on/off without re-running the layout.
+- Running auto-layout with identical filename+timestamp+settings a second time returns instantly (cache hit); 6th distinct run evicts the oldest entry.
+- Each cached run appears as a tab between the preview panel and canvas; clicking a tab swaps both the canvas and the bottom-panel metrics.
+- Bottom panel shows marker length, utilization, and an `MM:SS` duration for the active tab.
+- No metrics block remains in the left sidebar.
 
 ---
 
-### Phase 7 — Packaging and usability polish
+### Phase 7 — Export
+
+**Goal:** User can save any cached layout to a file.
+
+**Planned additions:**
+- Engine endpoint `POST /export` → accepts a cache id (or placements + format), returns file bytes
+- Formats: DXF (preferred for downstream CAM use) and/or PNG preview
+- UI: "Export" button on each cached tab (or on the bottom panel for the active tab) → Tauri `save` dialog API
+- Tests: exported DXF round-trips back through parser without data loss
+
+**Success criteria:** Exported file opens correctly in ET CAD or a standard DXF viewer; any cached tab (not just the most recent) can be exported.
+
+---
+
+### Phase 8 — Packaging and usability polish
 
 **Goal:** One-click Windows installer that works without any manual setup.
 
