@@ -4,6 +4,9 @@
 
 import dataclasses
 import io
+import time
+import uuid
+from datetime import datetime
 
 import ezdxf
 import uvicorn
@@ -14,6 +17,7 @@ from fastapi.responses import JSONResponse
 
 from core.dxf import parse_dxf
 from core.geometry import normalize_piece
+from core.layout.cache import CachedLayout, get_cache
 from core.layout.cancellation import (
     CancellationError,
     request_cancellation,
@@ -146,6 +150,7 @@ async def auto_layout_endpoint(request: Request) -> dict:
             return auto_layout_bbox(pieces, fabric_width_mm, grain_mode, grain_direction_deg)
         return auto_layout_polygon(pieces, fabric_width_mm, grain_mode, grain_direction_deg)
 
+    start = time.perf_counter()
     try:
         placements, marker_length, utilization = await run_in_threadpool(_do_layout)
     except CancellationError:
@@ -155,12 +160,36 @@ async def auto_layout_endpoint(request: Request) -> dict:
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    duration_ms = int((time.perf_counter() - start) * 1000)
+
+    placements_serialized = [
+        {"piece_id": pl.piece_id, "x": pl.x, "y": pl.y, "rotation_deg": pl.rotation_deg}
+        for pl in placements
+    ]
+
+    now = time.time()
+    filename = str(body.get("filename", "")) or "untitled.dxf"
+    copies = int(body.get("copies", 1))
+    entry = CachedLayout(
+        id=uuid.uuid4().hex,
+        filename=filename,
+        timestamp=datetime.fromtimestamp(now).strftime("%Y%m%d%H%M%S"),
+        grain_mode=grain_mode if grain_mode in ("single", "bi") else "single",
+        copies=copies,
+        fabric_width_mm=fabric_width_mm,
+        placements=placements_serialized,
+        marker_length_mm=marker_length,
+        utilization_pct=utilization,
+        duration_ms=duration_ms,
+        created_at=now,
+    )
+    get_cache().insert(entry)
 
     return {
-        "placements": [
-            {"piece_id": pl.piece_id, "x": pl.x, "y": pl.y, "rotation_deg": pl.rotation_deg}
-            for pl in placements
-        ],
+        "id": entry.id,
+        "timestamp": entry.timestamp,
+        "duration_ms": entry.duration_ms,
+        "placements": placements_serialized,
         "marker_length_mm": marker_length,
         "utilization_pct": utilization,
     }
