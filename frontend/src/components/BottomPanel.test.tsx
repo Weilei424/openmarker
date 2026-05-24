@@ -24,29 +24,15 @@ describe("BottomPanel", () => {
         markerLengthMm={1234.5}
         utilizationPct={82.4}
         durationMs={3500}
-        overflow={false}
       />
     );
     expect(screen.getByText(/1235 mm/)).toBeTruthy();
     expect(screen.getByText(/82\.4%/)).toBeTruthy();
     expect(screen.getByText(/00:03/)).toBeTruthy();
-    expect(screen.queryByText(/overflow/i)).toBeNull();
-  });
-
-  it("shows overflow warning when overflow is true", () => {
-    render(
-      <BottomPanel
-        markerLengthMm={9999}
-        utilizationPct={100}
-        durationMs={1000}
-        overflow={true}
-      />
-    );
-    expect(screen.getByText(/overflow/i)).toBeTruthy();
   });
 
   it("renders an empty placeholder when no entry data is provided", () => {
-    render(<BottomPanel markerLengthMm={null} utilizationPct={null} durationMs={null} overflow={false} />);
+    render(<BottomPanel markerLengthMm={null} utilizationPct={null} durationMs={null} />);
     expect(screen.getByText(/no layout yet/i)).toBeTruthy();
   });
 });

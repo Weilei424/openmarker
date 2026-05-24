@@ -75,8 +75,6 @@ export default function App() {
   // otherwise the sidebar's current value (for the empty-fabric backdrop).
   const canvasFabricWidthMm = activeEntry?.fabric_width_mm ?? fabricWidthMm;
 
-  const overflow = (activeEntry?.marker_length_mm ?? 0) > 0 && (activeEntry?.utilization_pct ?? 0) > 100;
-
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -295,7 +293,6 @@ export default function App() {
         markerLengthMm={activeEntry?.marker_length_mm ?? null}
         utilizationPct={activeEntry?.utilization_pct ?? null}
         durationMs={activeEntry?.duration_ms ?? null}
-        overflow={overflow}
       />
 
       <div style={styles.statusBar}>

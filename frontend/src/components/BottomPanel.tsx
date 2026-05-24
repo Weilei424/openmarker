@@ -2,7 +2,6 @@ interface BottomPanelProps {
   markerLengthMm: number | null;
   utilizationPct: number | null;
   durationMs: number | null;
-  overflow: boolean;
 }
 
 export function formatDuration(ms: number): string {
@@ -16,7 +15,6 @@ export function BottomPanel({
   markerLengthMm,
   utilizationPct,
   durationMs,
-  overflow,
 }: BottomPanelProps) {
   if (markerLengthMm === null || utilizationPct === null || durationMs === null) {
     return (
@@ -40,16 +38,13 @@ export function BottomPanel({
       <div style={styles.item}>
         <span style={styles.label}>Util:</span>
         <span style={{ ...styles.value, color: utilColor }}>
-          {overflow ? "—" : `${utilizationPct.toFixed(1)}%`}
+          {`${utilizationPct.toFixed(1)}%`}
         </span>
       </div>
       <div style={styles.item}>
         <span style={styles.label}>⏱</span>
         <span style={styles.value}>{formatDuration(durationMs)}</span>
       </div>
-      {overflow && (
-        <span style={styles.warn}>Pieces overflow fabric.</span>
-      )}
     </div>
   );
 }
@@ -77,10 +72,6 @@ const styles = {
   },
   value: {
     fontWeight: 600 as const,
-  },
-  warn: {
-    marginLeft: "auto",
-    color: "var(--color-warning)",
   },
   placeholder: {
     color: "var(--color-text-muted)",
