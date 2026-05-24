@@ -1,22 +1,21 @@
-// OpenMarker — Phase 3: Visual workspace with Konva canvas.
-// Layout: top bar | sidebar + canvas workspace | status bar.
+// OpenMarker — Phase 6: cached-tabs workflow with bottom metrics panel.
+// Layout: topbar | preview-panel | (sidebar + (tabs / canvas)) | bottom-panel | statusbar.
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import type { EngineStatus, PingResponse, GrainMode, AutoLayoutPlacement, Piece } from "../types/engine";
-import type { Placement } from "../types/canvas";
+import type { EngineStatus, PingResponse, GrainMode, Piece } from "../types/engine";
 import { useImportDxf, type ImportOutcome } from "../hooks/useImportDxf";
 import { usePlacements } from "../hooks/usePlacements";
 import { useAutoLayout } from "../hooks/useAutoLayout";
+import { useLayoutCache } from "../hooks/useLayoutCache";
 import { PieceList } from "../components/pieces/PieceList";
 import { PreviewPanel } from "../components/PreviewPanel";
+import { CachedLayoutTabs } from "../components/CachedLayoutTabs";
+import { BottomPanel } from "../components/BottomPanel";
 import { CanvasWorkspace } from "../components/canvas/CanvasWorkspace";
 import { FabricPanel } from "../components/sidebar/FabricPanel";
 import { GrainPanel } from "../components/sidebar/GrainPanel";
-import { computeMarkerMetrics } from "../utils/metrics";
-import { engineToFrontendPlacement } from "../utils/enginePlacement";
 
-const FABRIC_GRAIN_DEG = 90; // Fabric grain runs top → bottom (fixed by design).
-
+const FABRIC_GRAIN_DEG = 90;
 const ENGINE_URL = "http://127.0.0.1:8765";
 
 export default function App() {
@@ -28,13 +27,13 @@ export default function App() {
 
   const { status: importStatus, pieces, warnings, errorMessage, handleFileSelected } = useImportDxf();
 
-  const [grainMode, setGrainMode] = useState<GrainMode>("none");
-  const [fastMode, setFastMode] = useState<boolean>(false);
+  const [grainMode, setGrainMode] = useState<GrainMode>("single");
+  const [showGrainline, setShowGrainline] = useState<boolean>(true);
   const [copiesInput, setCopiesInput] = useState<string>("");
 
   const { runAutoLayout, abort: abortAutoLayout, status: autoStatus, errorMessage: autoError } = useAutoLayout();
+  const { entries, activeId, activeEntry, setActiveId, closeTab, refresh: refreshCache } = useLayoutCache();
 
-  // Effective copy count: 1 when input is empty/invalid, otherwise clamped to [1, 20].
   const copies = useMemo(() => {
     const trimmed = copiesInput.trim();
     if (trimmed === "") return 1;
@@ -43,8 +42,6 @@ export default function App() {
     return Math.min(20, Math.floor(v));
   }, [copiesInput]);
 
-  // Expand the imported pieces by `copies` so the canvas / engine / metrics
-  // operate on the multi-set layout. setIndex tags each copy for coloring.
   const expandedPieces = useMemo<Piece[]>(() => {
     if (pieces.length === 0) return [];
     const out: Piece[] = [];
@@ -56,16 +53,12 @@ export default function App() {
     return out;
   }, [pieces, copies]);
 
-  const { placements, resetPlacements, setAllPlacements } = usePlacements(expandedPieces);
+  const { placements } = usePlacements(expandedPieces, activeEntry?.placements ?? null);
 
-  const metrics = useMemo(
-    () => computeMarkerMetrics(placements, expandedPieces, fabricWidthMm),
-    [placements, expandedPieces, fabricWidthMm]
-  );
+  const overflow = (activeEntry?.marker_length_mm ?? 0) > 0 && (activeEntry?.utilization_pct ?? 0) > 100;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Reset selection when a new set of pieces is imported.
   useEffect(() => {
     setSelectedPieceId(null);
   }, [pieces]);
@@ -89,15 +82,11 @@ export default function App() {
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
-      // Reset input so the same file can be re-selected.
       e.target.value = "";
-      // Use the returned outcome — React state is async and would be stale here.
       const outcome: ImportOutcome = await handleFileSelected(file);
       if (outcome.ok) {
         setStatusMessage(`${outcome.pieces.length} piece${outcome.pieces.length !== 1 ? "s" : ""} imported from ${file.name}`);
         setCurrentFileName(file.name);
-        // Reset fabric width to default on each import. The user can manually
-        // change it after — we don't auto-fit it to the imported pieces.
         setFabricWidthMm(1500);
       } else {
         setStatusMessage(`Import failed: ${outcome.errorMessage}`);
@@ -107,22 +96,17 @@ export default function App() {
   );
 
   const handleAutoLayout = useCallback(async () => {
-    if (expandedPieces.length === 0) return;
-    // Normalize the copies input so the user sees the effective value
-    // (empty → "1", out-of-range → clamped).
+    if (expandedPieces.length === 0 || !currentFileName) return;
     const canonical = String(copies);
     if (copiesInput.trim() !== canonical) {
       setCopiesInput(canonical);
     }
     const outcome = await runAutoLayout(
-      expandedPieces, fabricWidthMm, grainMode, FABRIC_GRAIN_DEG, fastMode,
+      currentFileName, expandedPieces, fabricWidthMm, grainMode, FABRIC_GRAIN_DEG, copies,
     );
     if (outcome.ok) {
-      const pieceMap = new Map(expandedPieces.map((p) => [p.id, p]));
-      const mapped: Placement[] = outcome.data.placements.map((pl: AutoLayoutPlacement) =>
-        engineToFrontendPlacement(pieceMap.get(pl.piece_id)!, pl.x, pl.y, pl.rotation_deg)
-      );
-      setAllPlacements(mapped);
+      await refreshCache();
+      setActiveId(outcome.data.id);
       setStatusMessage(
         `Auto layout: ${outcome.data.placements.length} piece${outcome.data.placements.length !== 1 ? "s" : ""} · ` +
         `Marker: ${Math.round(outcome.data.marker_length_mm)} mm · ` +
@@ -133,14 +117,12 @@ export default function App() {
     } else {
       setStatusMessage(`Auto layout failed: ${outcome.errorMessage}`);
     }
-  }, [expandedPieces, fabricWidthMm, grainMode, fastMode, runAutoLayout, setAllPlacements, copies, copiesInput]);
+  }, [expandedPieces, currentFileName, fabricWidthMm, grainMode, copies, copiesInput, runAutoLayout, refreshCache, setActiveId]);
 
-  const importButtonLabel =
-    importStatus === "loading" ? "Importing..." : "Import DXF";
+  const importButtonLabel = importStatus === "loading" ? "Importing..." : "Import DXF";
 
   return (
     <div style={styles.root}>
-      {/* Top bar */}
       <div style={styles.topBar}>
         <span style={styles.appTitle}>
           OpenMarker
@@ -150,16 +132,13 @@ export default function App() {
         </span>
       </div>
 
-      {/* Preview panel: one thumbnail per imported piece (outline only) */}
       <PreviewPanel
         pieces={pieces}
         selectedPieceId={selectedPieceId}
         onSelect={setSelectedPieceId}
       />
 
-      {/* Body: sidebar + workspace */}
       <div style={styles.body}>
-        {/* Sidebar */}
         <div style={styles.sidebar}>
           <Section title="Engine">
             <button onClick={pingEngine} disabled={engineStatus === "connecting"}>
@@ -175,14 +154,14 @@ export default function App() {
           <Section title="Grain">
             <GrainPanel
               grainMode={grainMode}
-              fastMode={fastMode}
+              showGrainline={showGrainline}
               onGrainModeChange={setGrainMode}
-              onFastModeChange={setFastMode}
+              onShowGrainlineChange={setShowGrainline}
             />
           </Section>
 
           <Section title="Settings">
-            <label style={styles.settingRow}>
+            <label style={styles.settingRowVertical}>
               <span style={styles.settingLabel}>Copies (1–20)</span>
               <input
                 type="number"
@@ -191,22 +170,12 @@ export default function App() {
                 value={copiesInput}
                 placeholder="1"
                 onChange={(e) => setCopiesInput(e.target.value)}
-                style={styles.numberInput}
+                style={styles.numberInputTall}
               />
             </label>
           </Section>
 
-          <Section title="Metrics">
-            <MetricsPanel
-              length={metrics.length}
-              utilization={metrics.utilization}
-              overflowsFabric={metrics.overflowsFabric}
-              hasPlacements={placements.length > 0}
-            />
-          </Section>
-
           <Section title="Layout">
-            {/* Hidden file input — triggered by the Import DXF button */}
             <input
               ref={fileInputRef}
               type="file"
@@ -237,14 +206,6 @@ export default function App() {
                 Stop
               </button>
             )}
-
-            <button
-              onClick={resetPlacements}
-              disabled={pieces.length === 0}
-              style={{ fontSize: 11, opacity: pieces.length === 0 ? 0.4 : 1 }}
-            >
-              Reset Layout
-            </button>
 
             {autoStatus === "error" && autoError && (
               <p style={styles.errorText}>{autoError}</p>
@@ -278,21 +239,35 @@ export default function App() {
           </Section>
         </div>
 
-        {/* Canvas workspace */}
-        <div style={styles.canvas}>
-          <CanvasWorkspace
-            pieces={expandedPieces}
-            placements={placements}
-            selectedPieceId={selectedPieceId}
-            onSelectPiece={setSelectedPieceId}
-            fabricWidthMm={fabricWidthMm}
-            grainMode={grainMode}
-            markerLengthMm={metrics.length}
+        {/* Canvas column: tabs strip above the canvas (sharing the canvas's left edge). */}
+        <div style={styles.canvasColumn}>
+          <CachedLayoutTabs
+            entries={entries}
+            activeId={activeId}
+            onActivate={setActiveId}
+            onClose={closeTab}
           />
+          <div style={styles.canvas}>
+            <CanvasWorkspace
+              pieces={expandedPieces}
+              placements={placements}
+              selectedPieceId={selectedPieceId}
+              onSelectPiece={setSelectedPieceId}
+              fabricWidthMm={fabricWidthMm}
+              showGrainline={showGrainline}
+              markerLengthMm={activeEntry?.marker_length_mm ?? 0}
+            />
+          </div>
         </div>
       </div>
 
-      {/* Status bar */}
+      <BottomPanel
+        markerLengthMm={activeEntry?.marker_length_mm ?? null}
+        utilizationPct={activeEntry?.utilization_pct ?? null}
+        durationMs={activeEntry?.duration_ms ?? null}
+        overflow={overflow}
+      />
+
       <div style={styles.statusBar}>
         <span>{statusMessage}</span>
       </div>
@@ -305,46 +280,6 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     <div style={styles.section}>
       <div style={styles.sectionTitle}>{title}</div>
       <div style={styles.sectionBody}>{children}</div>
-    </div>
-  );
-}
-
-function MetricsPanel({
-  length,
-  utilization,
-  overflowsFabric,
-  hasPlacements,
-}: {
-  length: number;
-  utilization: number;
-  overflowsFabric: boolean;
-  hasPlacements: boolean;
-}) {
-  if (!hasPlacements) {
-    return <p style={styles.placeholder}>No pieces placed.</p>;
-  }
-  const utilColor =
-    utilization >= 75 ? "var(--color-success)" : utilization >= 50 ? "var(--color-warning)" : "var(--color-text)";
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <div style={styles.metricRow}>
-        <span style={styles.metricLabel}>Marker length</span>
-        <span style={styles.metricValue}>{Math.round(length)} mm</span>
-      </div>
-      <div style={styles.metricRow}>
-        <span style={styles.metricLabel}>Utilization</span>
-        <span style={{ ...styles.metricValue, color: utilColor, fontSize: 14 }}>
-          {overflowsFabric ? "—" : `${utilization.toFixed(1)}%`}
-        </span>
-      </div>
-      {!overflowsFabric && (
-        <div style={styles.utilBarTrack}>
-          <div style={{ ...styles.utilBarFill, width: `${Math.min(100, utilization)}%`, background: utilColor }} />
-        </div>
-      )}
-      {overflowsFabric && (
-        <p style={styles.warningText}>Pieces overflow fabric — run Auto Layout to fit.</p>
-      )}
     </div>
   );
 }
@@ -386,22 +321,9 @@ const styles = {
     padding: "0 16px",
     flexShrink: 0,
   },
-  appTitle: {
-    fontWeight: 600,
-    fontSize: 14,
-    letterSpacing: "0.02em",
-    color: "var(--color-text)",
-  },
-  appSubtitle: {
-    fontWeight: 400,
-    color: "var(--color-text-muted)",
-    marginLeft: 4,
-  },
-  body: {
-    flex: 1,
-    display: "flex",
-    overflow: "hidden",
-  },
+  appTitle: { fontWeight: 600, fontSize: 14, letterSpacing: "0.02em", color: "var(--color-text)" },
+  appSubtitle: { fontWeight: 400, color: "var(--color-text-muted)", marginLeft: 4 },
+  body: { flex: 1, display: "flex", overflow: "hidden" },
   sidebar: {
     width: "var(--sidebar-width)",
     borderRight: "1px solid var(--color-border)",
@@ -411,9 +333,14 @@ const styles = {
     flexShrink: 0,
     overflowY: "auto" as const,
   },
-  section: {
-    borderBottom: "1px solid var(--color-border)",
+  canvasColumn: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column" as const,
+    overflow: "hidden",
   },
+  canvas: { flex: 1, overflow: "hidden" },
+  section: { borderBottom: "1px solid var(--color-border)" },
   sectionTitle: {
     padding: "8px 12px",
     fontSize: 11,
@@ -428,10 +355,6 @@ const styles = {
     flexDirection: "column" as const,
     gap: 8,
   },
-  canvas: {
-    flex: 1,
-    overflow: "hidden",
-  },
   statusBar: {
     height: "var(--statusbar-height)",
     background: "var(--color-surface)",
@@ -443,87 +366,29 @@ const styles = {
     color: "var(--color-text-muted)",
     flexShrink: 0,
   },
-  statusDot: {
+  statusDot: { display: "flex", alignItems: "center", gap: 6, fontSize: 12 },
+  dot: { width: 8, height: 8, borderRadius: "50%", display: "inline-block" },
+  placeholder: { color: "var(--color-text-muted)", fontSize: 12 },
+  errorText: { color: "var(--color-error)", fontSize: 12 },
+  successText: { color: "var(--color-success)", fontSize: 12 },
+  warningBlock: { borderTop: "1px solid var(--color-border)", paddingTop: 4 },
+  warningText: { color: "var(--color-warning)", fontSize: 11 },
+  settingRowVertical: {
     display: "flex",
-    alignItems: "center",
+    flexDirection: "column" as const,
     gap: 6,
     fontSize: 12,
   },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: "50%",
-    display: "inline-block",
-  },
-  placeholder: {
-    color: "var(--color-text-muted)",
-    fontSize: 12,
-  },
-  errorText: {
-    color: "var(--color-error)",
-    fontSize: 12,
-  },
-  successText: {
-    color: "var(--color-success)",
-    fontSize: 12,
-  },
-  warningBlock: {
-    borderTop: "1px solid var(--color-border)",
-    paddingTop: 4,
-  },
-  warningText: {
-    color: "var(--color-warning)",
-    fontSize: 11,
-  },
-  metricRow: {
-    display: "flex",
-    justifyContent: "space-between" as const,
-    alignItems: "center",
-    fontSize: 12,
-  },
-  metricLabel: {
-    color: "var(--color-text-muted)",
-  },
-  metricValue: {
-    fontWeight: 600,
-    color: "var(--color-text)",
-  },
-  utilBarTrack: {
-    height: 4,
-    background: "var(--color-border)",
-    borderRadius: 2,
-    overflow: "hidden" as const,
-    marginTop: 2,
-  },
-  utilBarFill: {
-    height: "100%",
-    transition: "width 0.2s ease",
-  },
-  settingRow: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between" as const,
-    gap: 8,
-    fontSize: 12,
-  },
-  settingLabel: {
-    color: "var(--color-text-muted)",
-  },
-  numberInput: {
-    width: 60,
-    padding: "2px 6px",
+  settingLabel: { color: "var(--color-text-muted)" },
+  numberInputTall: {
+    width: 80,
+    height: 44,
+    padding: "4px 8px",
     background: "var(--color-surface)",
     color: "var(--color-text)",
     border: "1px solid var(--color-border)",
     borderRadius: 3,
-    fontSize: 12,
+    fontSize: 18,
     textAlign: "right" as const,
-  },
-  checkRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: 6,
-    cursor: "pointer",
-    marginTop: 6,
   },
 } as const;
