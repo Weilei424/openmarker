@@ -42,6 +42,7 @@ export default function App() {
     return Math.min(20, Math.floor(v));
   }, [copiesInput]);
 
+  // Form-state expansion: used as the input to the next Auto Layout call.
   const expandedPieces = useMemo<Piece[]>(() => {
     if (pieces.length === 0) return [];
     const out: Piece[] = [];
@@ -53,7 +54,26 @@ export default function App() {
     return out;
   }, [pieces, copies]);
 
-  const { placements } = usePlacements(expandedPieces, activeEntry?.placements ?? null);
+  // Snapshot expansion: derived from the ACTIVE cached entry's `copies`, not
+  // the sidebar. Keeps the canvas frozen while the user edits sidebar values
+  // for the next run. Falls back to `expandedPieces` only when no tab is active
+  // (so the canvas can still show the empty-fabric backdrop with current width).
+  const snapshotPieces = useMemo<Piece[]>(() => {
+    if (!activeEntry || pieces.length === 0) return [];
+    const out: Piece[] = [];
+    for (let setIdx = 0; setIdx < activeEntry.copies; setIdx++) {
+      for (const p of pieces) {
+        out.push({ ...p, id: `${p.id}__c${setIdx}`, setIndex: setIdx });
+      }
+    }
+    return out;
+  }, [pieces, activeEntry?.copies]);
+
+  const { placements } = usePlacements(snapshotPieces, activeEntry?.placements ?? null);
+
+  // Canvas fabric width is the active tab's snapshot when one is active,
+  // otherwise the sidebar's current value (for the empty-fabric backdrop).
+  const canvasFabricWidthMm = activeEntry?.fabric_width_mm ?? fabricWidthMm;
 
   const overflow = (activeEntry?.marker_length_mm ?? 0) > 0 && (activeEntry?.utilization_pct ?? 0) > 100;
 
@@ -249,11 +269,11 @@ export default function App() {
           />
           <div style={styles.canvas}>
             <CanvasWorkspace
-              pieces={expandedPieces}
+              pieces={snapshotPieces.length > 0 ? snapshotPieces : expandedPieces}
               placements={placements}
               selectedPieceId={selectedPieceId}
               onSelectPiece={setSelectedPieceId}
-              fabricWidthMm={fabricWidthMm}
+              fabricWidthMm={canvasFabricWidthMm}
               showGrainline={showGrainline}
               markerLengthMm={activeEntry?.marker_length_mm ?? 0}
             />
