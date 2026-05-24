@@ -7,8 +7,8 @@ import { useImportDxf, type ImportOutcome } from "../hooks/useImportDxf";
 import { usePlacements } from "../hooks/usePlacements";
 import { useAutoLayout } from "../hooks/useAutoLayout";
 import { useLayoutCache } from "../hooks/useLayoutCache";
-import { PieceList } from "../components/pieces/PieceList";
 import { PreviewPanel } from "../components/PreviewPanel";
+import { MenuBar } from "../components/MenuBar";
 import { CachedLayoutTabs } from "../components/CachedLayoutTabs";
 import { BottomPanel } from "../components/BottomPanel";
 import { CanvasWorkspace } from "../components/canvas/CanvasWorkspace";
@@ -83,6 +83,24 @@ export default function App() {
     setSelectedPieceId(null);
   }, [pieces]);
 
+  // Reflect the current file in the OS window title (Tauri only; harmless in plain Vite dev).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        if (cancelled) return;
+        const title = currentFileName
+          ? `OpenMarker — Working on ${currentFileName}`
+          : "OpenMarker";
+        await getCurrentWindow().setTitle(title);
+      } catch {
+        // Not running in Tauri (e.g. `npm run dev` standalone) — ignore.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [currentFileName]);
+
   const pingEngine = useCallback(async () => {
     setEngineStatus("connecting");
     setStatusMessage("Connecting to engine...");
@@ -152,14 +170,7 @@ export default function App() {
 
   return (
     <div style={styles.root}>
-      <div style={styles.topBar}>
-        <span style={styles.appTitle}>
-          OpenMarker
-          {currentFileName && (
-            <span style={styles.appSubtitle}> — Working on {currentFileName}</span>
-          )}
-        </span>
-      </div>
+      <MenuBar />
 
       <PreviewPanel
         pieces={pieces}
@@ -244,22 +255,12 @@ export default function App() {
               <p style={styles.errorText}>{errorMessage}</p>
             )}
 
-            {importStatus === "success" && (
-              <>
-                <p style={styles.successText}>{pieces.length} piece{pieces.length !== 1 ? "s" : ""} imported</p>
-                <PieceList
-                  pieces={pieces}
-                  selectedPieceId={selectedPieceId}
-                  onSelect={(id) => setSelectedPieceId(id === selectedPieceId ? null : id)}
-                />
-                {warnings.length > 0 && (
-                  <div style={styles.warningBlock}>
-                    {warnings.map((w, i) => (
-                      <p key={i} style={styles.warningText}>{w}</p>
-                    ))}
-                  </div>
-                )}
-              </>
+            {importStatus === "success" && warnings.length > 0 && (
+              <div style={styles.warningBlock}>
+                {warnings.map((w, i) => (
+                  <p key={i} style={styles.warningText}>{w}</p>
+                ))}
+              </div>
             )}
 
             {importStatus === "idle" && (
@@ -341,17 +342,6 @@ const styles = {
     height: "100vh",
     background: "var(--color-bg)",
   },
-  topBar: {
-    height: "var(--topbar-height)",
-    background: "var(--color-surface)",
-    borderBottom: "1px solid var(--color-border)",
-    display: "flex",
-    alignItems: "center",
-    padding: "0 16px",
-    flexShrink: 0,
-  },
-  appTitle: { fontWeight: 600, fontSize: 14, letterSpacing: "0.02em", color: "var(--color-text)" },
-  appSubtitle: { fontWeight: 400, color: "var(--color-text-muted)", marginLeft: 4 },
   body: { flex: 1, display: "flex", overflow: "hidden" },
   sidebar: {
     width: "var(--sidebar-width)",
