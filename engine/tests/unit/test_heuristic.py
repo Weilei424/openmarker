@@ -175,3 +175,34 @@ def test_polygon_disable_nfp_cache_yields_identical_result():
         assert abs(a.x - b.x) < 1e-9
         assert abs(a.y - b.y) < 1e-9
         assert abs(a.rotation_deg - b.rotation_deg) < 1e-9
+
+
+def test_auto_layout_effort_serial_and_parallel_match():
+    """effort=1 (serial) and effort=5 (parallel) must yield identical results."""
+    # Use enough pieces to trigger the pool path (total_runs * pieces >= 20).
+    # 4 strategies × 1 mode = 4 runs; need >= 5 pieces.
+    pieces = [_make_rect(f"p{i}", 100 + i * 5, 80 + i * 3) for i in range(6)]
+    serial = auto_layout_polygon(
+        pieces, fabric_width_mm=1500, grain_mode="single",
+        fabric_grain_deg=90.0, effort=1,
+    )
+    parallel = auto_layout_polygon(
+        pieces, fabric_width_mm=1500, grain_mode="single",
+        fabric_grain_deg=90.0, effort=5,
+    )
+    # Marker length and utilization are deterministic given identical inputs;
+    # placements may differ if multiple strategies tie on length, but both
+    # are valid "best" choices.
+    assert serial[1] == parallel[1]
+    assert serial[2] == parallel[2]
+
+
+def test_auto_layout_effort_out_of_range_clamps_or_raises():
+    """Engine treats effort=10 as 'max effort' — clamps to cpu_count. We do
+    NOT raise from the heuristic; the API layer handles validation."""
+    pieces = [_make_rect(f"p{i}", 100, 80) for i in range(3)]
+    # Should not raise.
+    auto_layout_polygon(
+        pieces, fabric_width_mm=1500, grain_mode="single",
+        fabric_grain_deg=90.0, effort=10,
+    )

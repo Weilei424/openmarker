@@ -270,3 +270,33 @@ async def test_auto_layout_rejects_missing_filename():
             "grain_direction_deg": 90,
         })
     assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_auto_layout_rejects_effort_out_of_range():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        for bad in (0, -1, 6, 99):
+            res = await client.post("/auto-layout", json={
+                "filename": "sample.dxf",
+                "pieces": [_square_piece()],
+                "fabric_width_mm": 1500,
+                "grain_mode": "single",
+                "grain_direction_deg": 90,
+                "effort": bad,
+            })
+            assert res.status_code == 422, f"effort={bad} should be rejected"
+
+
+@pytest.mark.asyncio
+async def test_auto_layout_accepts_valid_effort():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        for good in (1, 2, 3, 4, 5):
+            res = await client.post("/auto-layout", json={
+                "filename": f"sample-{good}.dxf",  # distinct filenames to avoid dedup
+                "pieces": [_square_piece()],
+                "fabric_width_mm": 1500,
+                "grain_mode": "single",
+                "grain_direction_deg": 90,
+                "effort": good,
+            })
+            assert res.status_code == 200, f"effort={good} should be accepted"

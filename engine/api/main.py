@@ -99,7 +99,9 @@ async def auto_layout_endpoint(request: Request) -> dict:
         "grain_mode": "single",     // "single" | "bi"
         "grain_direction_deg": 0,
         "filename": "...",          // required
-        "copies": 1                 // optional, defaults to 1
+        "copies": 1,                // optional, defaults to 1
+        "disable_nfp_cache": false, // optional, A/B benchmark toggle
+        "effort": 1                 // optional, 1=serial..5=all cores
     }
 
     Response JSON:
@@ -125,6 +127,9 @@ async def auto_layout_endpoint(request: Request) -> dict:
     fabric_width_mm = float(body.get("fabric_width_mm", 1500))
     grain_direction_deg = float(body.get("grain_direction_deg", 0.0))
     disable_nfp_cache = bool(body.get("disable_nfp_cache", False))
+    effort = int(body.get("effort", 1))
+    if effort < 1 or effort > 5:
+        raise HTTPException(status_code=422, detail=f"`effort` must be between 1 and 5, got {effort}")
 
     pieces_data = body.get("pieces", [])
     if not pieces_data:
@@ -178,6 +183,7 @@ async def auto_layout_endpoint(request: Request) -> dict:
         return auto_layout_polygon(
             pieces, fabric_width_mm, grain_mode, grain_direction_deg,
             disable_nfp_cache=disable_nfp_cache,
+            effort=effort,
         )
 
     start = time.perf_counter()

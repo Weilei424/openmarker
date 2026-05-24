@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from typing import NamedTuple
 
@@ -454,23 +456,28 @@ def _blf_pack_nfp(
 # Sort strategies — try several orderings and keep the best.
 # ---------------------------------------------------------------------------
 
-_SORT_STRATEGIES = [
-    lambda p: p.area,                                    # largest area first
-    lambda p: max(p.bbox.width, p.bbox.height),          # longest dim first
-    lambda p: p.bbox.height,                             # tallest first
-    lambda p: p.bbox.width,                              # widest first
-]
+# Named (module-level) functions so they can be pickled and shipped to
+# ProcessPoolExecutor workers; lambdas are NOT picklable.
+def _sort_by_area(p: Piece) -> float: return p.area
+def _sort_by_max_dim(p: Piece) -> float: return max(p.bbox.width, p.bbox.height)
+def _sort_by_height(p: Piece) -> float: return p.bbox.height
+def _sort_by_width(p: Piece) -> float: return p.bbox.width
+
+_SORT_STRATEGIES = [_sort_by_area, _sort_by_max_dim, _sort_by_height, _sort_by_width]
 
 
-def _best_of_strategies(run_one) -> tuple[list[Placement], float, float]:
-    """Run the packer with each sort strategy; return the shortest-length result."""
-    best: tuple[list[Placement], float, float] | None = None
-    for sort_key in _SORT_STRATEGIES:
-        result = run_one(sort_key)
-        if best is None or result[1] < best[1]:
-            best = result
-    assert best is not None
-    return best
+def _run_one_strategy(
+    pieces: list[Piece],
+    fabric_width_mm: float,
+    mode: str,
+    fabric_grain_deg: float,
+    sort_index: int,
+) -> tuple[list[Placement], float, float]:
+    """Module-level entry for ProcessPoolExecutor. sort_index selects from
+    _SORT_STRATEGIES so we don't have to pickle the callable across the
+    process boundary."""
+    sort_key = _SORT_STRATEGIES[sort_index]
+    return _blf_pack_nfp(pieces, fabric_width_mm, mode, fabric_grain_deg, sort_key=sort_key)
 
 
 # ---------------------------------------------------------------------------
@@ -495,12 +502,34 @@ def _modes_to_try(grain_mode: str) -> list[str]:
     return [grain_mode]
 
 
+def _worker_count(effort: int) -> int:
+    """Resolve user-facing effort level (1-5) to a concrete worker count
+    based on the local CPU count. Higher levels leave less headroom for
+    the UI thread; Max uses every available core.
+
+    effort values outside 1-5 are clamped (>5 → max, <1 → 1). API-level
+    validation rejects bad input before it ever reaches this function.
+    """
+    if effort <= 1:
+        return 1
+    cpu = os.cpu_count() or 4
+    if effort == 2:
+        return 2
+    if effort == 3:
+        return max(2, cpu // 2)
+    if effort == 4:
+        return max(2, cpu - 1)
+    # effort >= 5
+    return max(2, cpu)
+
+
 def auto_layout_polygon(
     pieces: list[Piece],
     fabric_width_mm: float,
     grain_mode: str,
     fabric_grain_deg: float,
     disable_nfp_cache: bool = False,
+    effort: int = 1,
 ) -> tuple[list[Placement], float, float]:
     """No-Fit-Polygon-based Bottom-Left-Fill (slow mode, accurate).
 
@@ -514,18 +543,58 @@ def auto_layout_polygon(
 
     `disable_nfp_cache`: when True, each strategy run gets a fresh cache and
     no cross-strategy reuse happens. Identical results, slower — exposed for
-    A/B comparison and debugging only.
+    A/B comparison and debugging only. Only meaningful on the serial path
+    (the parallel path always rebuilds per-worker caches anyway).
+
+    `effort`: user-facing parallel effort level (1=serial, 5=all cores).
+    When >1 and the input is large enough to amortize Windows process spawn
+    cost, sort strategies and bi-mode's secondary single run are dispatched
+    across worker processes via ProcessPoolExecutor. Cancellation is
+    best-effort on the parallel path (in-flight workers run to completion).
     """
-    shared_cache: NfpCache = {}
+    modes = _modes_to_try(grain_mode)
+    total_runs = len(modes) * len(_SORT_STRATEGIES)
+    workers = _worker_count(effort)
+
+    # Skip the pool for tiny inputs — Windows spawn cost (~200-500ms per
+    # worker) outweighs the parallel win. The threshold is intentionally
+    # conservative; benchmarks should refine it but the cost of misjudging
+    # is small (a few hundred ms on a job that would have taken <1s anyway).
+    use_pool = workers > 1 and total_runs * len(pieces) >= 20
+
+    if not use_pool:
+        # Serial path. NFP cache shared across all strategies/modes for max
+        # reuse — this is the dominant win when copies > 1.
+        shared_cache: NfpCache = {}
+        best: tuple[list[Placement], float, float] | None = None
+        for mode in modes:
+            for sort_index in range(len(_SORT_STRATEGIES)):
+                cache = {} if disable_nfp_cache else shared_cache
+                result = _blf_pack_nfp(
+                    pieces, fabric_width_mm, mode, fabric_grain_deg,
+                    sort_key=_SORT_STRATEGIES[sort_index],
+                    nfp_cache=cache,
+                )
+                best = _shorter(best, result)
+        assert best is not None
+        return best
+
+    # Parallel path. Each worker rebuilds its own NFP cache (lost cross-strategy
+    # reuse) but we get N-way parallelism. Cancellation does NOT reach workers
+    # in v1 — they run to completion. Pool is created per-request and torn down
+    # on exit to keep idle memory at baseline.
+    futures = []
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        for mode in modes:
+            for sort_index in range(len(_SORT_STRATEGIES)):
+                futures.append(pool.submit(
+                    _run_one_strategy,
+                    pieces, fabric_width_mm, mode, fabric_grain_deg, sort_index,
+                ))
+        results = [f.result() for f in futures]
+
     best: tuple[list[Placement], float, float] | None = None
-    for mode in _modes_to_try(grain_mode):
-        def run_one(sort_key, _mode=mode):
-            cache = {} if disable_nfp_cache else shared_cache
-            return _blf_pack_nfp(
-                pieces, fabric_width_mm, _mode, fabric_grain_deg,
-                sort_key=sort_key,
-                nfp_cache=cache,
-            )
-        best = _shorter(best, _best_of_strategies(run_one))
+    for r in results:
+        best = _shorter(best, r)
     assert best is not None
     return best
