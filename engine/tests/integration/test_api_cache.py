@@ -56,11 +56,11 @@ async def test_auto_layout_returns_cache_metadata():
 async def test_list_layouts_returns_summary_newest_first():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         ids = []
-        for _ in range(3):
+        for i in range(3):
             res = await client.post("/auto-layout", json={
                 "filename": "sample.dxf",
                 "pieces": [_square_piece()],
-                "fabric_width_mm": 1500,
+                "fabric_width_mm": 1500 + i,           # distinct per run (dedup)
                 "grain_mode": "single",
                 "grain_direction_deg": 90,
             })
@@ -156,11 +156,11 @@ async def test_delete_layout_missing_returns_404():
 async def test_fifo_eviction_after_6_runs():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         ids = []
-        for _ in range(6):
+        for i in range(6):
             res = await client.post("/auto-layout", json={
                 "filename": "sample.dxf",
                 "pieces": [_square_piece()],
-                "fabric_width_mm": 1500,
+                "fabric_width_mm": 1500 + i,           # distinct per run
                 "grain_mode": "single",
                 "grain_direction_deg": 90,
             })
@@ -173,6 +173,48 @@ async def test_fifo_eviction_after_6_runs():
     assert len(listed_ids) == 5
     assert ids[0] not in listed_ids
     assert oldest_get.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_auto_layout_dedup_returns_existing_entry():
+    body = {
+        "filename": "sample.dxf",
+        "pieces": [_square_piece()],
+        "fabric_width_mm": 1500,
+        "grain_mode": "single",
+        "grain_direction_deg": 90,
+        "copies": 1,
+    }
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        first = await client.post("/auto-layout", json=body)
+        second = await client.post("/auto-layout", json=body)
+        listing = await client.get("/layouts")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["id"] == second.json()["id"]
+    # Same id from both runs AND only one entry in the cache.
+    assert len(listing.json()) == 1
+
+
+@pytest.mark.asyncio
+async def test_auto_layout_different_settings_creates_new_entry():
+    base = {
+        "filename": "sample.dxf",
+        "pieces": [_square_piece()],
+        "fabric_width_mm": 1500,
+        "grain_mode": "single",
+        "grain_direction_deg": 90,
+        "copies": 1,
+    }
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r1 = await client.post("/auto-layout", json=base)
+        r2 = await client.post("/auto-layout", json={**base, "copies": 2})
+        r3 = await client.post("/auto-layout", json={**base, "fabric_width_mm": 1600})
+        r4 = await client.post("/auto-layout", json={**base, "grain_mode": "bi"})
+
+    ids = {r1.json()["id"], r2.json()["id"], r3.json()["id"], r4.json()["id"]}
+    assert len(ids) == 4  # all distinct
 
 
 @pytest.mark.asyncio

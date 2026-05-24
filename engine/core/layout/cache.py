@@ -43,6 +43,26 @@ class LayoutCache:
     def list(self) -> list[CachedLayout]:
         return sorted(self._entries.values(), key=lambda e: e.created_at, reverse=True)
 
+    def find_by_settings(
+        self,
+        filename: str,
+        grain_mode: str,
+        copies: int,
+        fabric_width_mm: float,
+    ) -> CachedLayout | None:
+        """Return the newest entry matching ALL of (filename, grain_mode, copies,
+        fabric_width_mm), or None. Used to dedup re-runs with identical settings."""
+        matches = [
+            e for e in self._entries.values()
+            if e.filename == filename
+            and e.grain_mode == grain_mode
+            and e.copies == copies
+            and e.fabric_width_mm == fabric_width_mm
+        ]
+        if not matches:
+            return None
+        return max(matches, key=lambda e: e.created_at)
+
 
 _cache = LayoutCache()
 

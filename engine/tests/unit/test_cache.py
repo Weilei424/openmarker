@@ -60,3 +60,43 @@ def test_delete_returns_true_when_present():
 def test_delete_returns_false_when_missing():
     cache = LayoutCache()
     assert cache.delete("missing") is False
+
+
+def test_find_by_settings_returns_match():
+    cache = LayoutCache()
+    cache.insert(_make_entry("a"))  # default settings: sample.dxf, single, 1, 1500
+    hit = cache.find_by_settings(
+        filename="sample.dxf", grain_mode="single", copies=1, fabric_width_mm=1500.0
+    )
+    assert hit is not None
+    assert hit.id == "a"
+
+
+def test_find_by_settings_no_match_returns_none():
+    cache = LayoutCache()
+    cache.insert(_make_entry("a"))
+    assert cache.find_by_settings(
+        filename="other.dxf", grain_mode="single", copies=1, fabric_width_mm=1500.0
+    ) is None
+    assert cache.find_by_settings(
+        filename="sample.dxf", grain_mode="bi", copies=1, fabric_width_mm=1500.0
+    ) is None
+    assert cache.find_by_settings(
+        filename="sample.dxf", grain_mode="single", copies=2, fabric_width_mm=1500.0
+    ) is None
+    assert cache.find_by_settings(
+        filename="sample.dxf", grain_mode="single", copies=1, fabric_width_mm=1600.0
+    ) is None
+
+
+def test_find_by_settings_newest_match_wins():
+    """If multiple entries somehow share settings (legacy), return the newest."""
+    import time as _t
+    cache = LayoutCache()
+    cache.insert(_make_entry("old", created_at=_t.time() - 10))
+    cache.insert(_make_entry("new", created_at=_t.time()))
+    hit = cache.find_by_settings(
+        filename="sample.dxf", grain_mode="single", copies=1, fabric_width_mm=1500.0
+    )
+    assert hit is not None
+    assert hit.id == "new"

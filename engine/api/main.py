@@ -150,6 +150,24 @@ async def auto_layout_endpoint(request: Request) -> dict:
             grainline_direction_deg=d.get("grainline_direction_deg"),
         ))
 
+    # Dedup: if a cached entry exists for these exact settings, return it
+    # instead of re-running the heuristic.
+    existing = get_cache().find_by_settings(
+        filename=filename,
+        grain_mode=grain_mode,
+        copies=int(body.get("copies", 1)),
+        fabric_width_mm=fabric_width_mm,
+    )
+    if existing is not None:
+        return {
+            "id": existing.id,
+            "timestamp": existing.timestamp,
+            "duration_ms": existing.duration_ms,
+            "placements": existing.placements,
+            "marker_length_mm": existing.marker_length_mm,
+            "utilization_pct": existing.utilization_pct,
+        }
+
     # Clear any stale cancellation flag from a previous run.
     reset_cancellation()
 
