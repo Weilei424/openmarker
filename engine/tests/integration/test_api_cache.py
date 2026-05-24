@@ -50,3 +50,107 @@ async def test_auto_layout_returns_cache_metadata():
     assert "duration_ms" in body
     assert body["marker_length_mm"] > 0
     assert isinstance(body["id"], str) and len(body["id"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_list_layouts_returns_summary_newest_first():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        ids = []
+        for _ in range(3):
+            res = await client.post("/auto-layout", json={
+                "filename": "sample.dxf",
+                "pieces": [_square_piece()],
+                "fabric_width_mm": 1500,
+                "grain_mode": "single",
+                "grain_direction_deg": 90,
+            })
+            ids.append(res.json()["id"])
+
+        listing = await client.get("/layouts")
+
+    assert listing.status_code == 200
+    body = listing.json()
+    assert [e["id"] for e in body] == list(reversed(ids))
+    assert all("placements" not in e for e in body)
+    for e in body:
+        assert {"id", "filename", "timestamp", "grain_mode", "copies",
+                "fabric_width_mm", "marker_length_mm", "utilization_pct",
+                "duration_ms"}.issubset(e.keys())
+
+
+@pytest.mark.asyncio
+async def test_get_layout_returns_full_entry():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        post = await client.post("/auto-layout", json={
+            "filename": "sample.dxf",
+            "pieces": [_square_piece()],
+            "fabric_width_mm": 1500,
+            "grain_mode": "single",
+            "grain_direction_deg": 90,
+        })
+        layout_id = post.json()["id"]
+
+        res = await client.get(f"/layouts/{layout_id}")
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["id"] == layout_id
+    assert "placements" in body
+    assert len(body["placements"]) == 1
+    assert body["placements"][0]["piece_id"] == "p0"
+
+
+@pytest.mark.asyncio
+async def test_get_layout_missing_returns_404():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.get("/layouts/nonexistent")
+    assert res.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_layout_removes_entry():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        post = await client.post("/auto-layout", json={
+            "filename": "sample.dxf",
+            "pieces": [_square_piece()],
+            "fabric_width_mm": 1500,
+            "grain_mode": "single",
+            "grain_direction_deg": 90,
+        })
+        layout_id = post.json()["id"]
+
+        del_res = await client.delete(f"/layouts/{layout_id}")
+        get_res = await client.get(f"/layouts/{layout_id}")
+
+    assert del_res.status_code == 204
+    assert get_res.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_layout_missing_returns_404():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.delete("/layouts/nonexistent")
+    assert res.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_fifo_eviction_after_6_runs():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        ids = []
+        for _ in range(6):
+            res = await client.post("/auto-layout", json={
+                "filename": "sample.dxf",
+                "pieces": [_square_piece()],
+                "fabric_width_mm": 1500,
+                "grain_mode": "single",
+                "grain_direction_deg": 90,
+            })
+            ids.append(res.json()["id"])
+
+        listing = await client.get("/layouts")
+        oldest_get = await client.get(f"/layouts/{ids[0]}")
+
+    listed_ids = {e["id"] for e in listing.json()}
+    assert len(listed_ids) == 5
+    assert ids[0] not in listed_ids
+    assert oldest_get.status_code == 404

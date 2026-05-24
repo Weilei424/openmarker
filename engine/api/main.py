@@ -10,7 +10,7 @@ from datetime import datetime
 
 import ezdxf
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request, UploadFile
+from fastapi import FastAPI, HTTPException, Request, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -209,6 +209,47 @@ def cancel_layout() -> dict:
     piece-placement checkpoint. Returns immediately."""
     request_cancellation()
     return {"ok": True}
+
+
+def _summary(entry) -> dict:
+    return {
+        "id": entry.id,
+        "filename": entry.filename,
+        "timestamp": entry.timestamp,
+        "grain_mode": entry.grain_mode,
+        "copies": entry.copies,
+        "fabric_width_mm": entry.fabric_width_mm,
+        "marker_length_mm": entry.marker_length_mm,
+        "utilization_pct": entry.utilization_pct,
+        "duration_ms": entry.duration_ms,
+    }
+
+
+@app.get("/layouts")
+def list_layouts() -> list[dict]:
+    """Return a lightweight summary of cached layouts, newest-first.
+    Excludes the (heavy) placements array; fetch a single entry to get it."""
+    return [_summary(e) for e in get_cache().list()]
+
+
+@app.get("/layouts/{layout_id}")
+def get_layout(layout_id: str) -> dict:
+    """Return the full cached layout, including placements."""
+    entry = get_cache().get(layout_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Layout not found")
+    return {
+        **_summary(entry),
+        "placements": entry.placements,
+    }
+
+
+@app.delete("/layouts/{layout_id}", status_code=204)
+def delete_layout(layout_id: str) -> Response:
+    """Remove a cached layout (manual tab close from the UI)."""
+    if not get_cache().delete(layout_id):
+        raise HTTPException(status_code=404, detail="Layout not found")
+    return Response(status_code=204)
 
 
 if __name__ == "__main__":
