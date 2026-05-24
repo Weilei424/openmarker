@@ -90,4 +90,31 @@ describe("useLayoutCache", () => {
     await waitFor(() => expect(result.current.activeId).toBeNull());
     expect(result.current.activeEntry).toBeNull();
   });
+
+  it("switching active tab mid-fetch does not overwrite the new active entry", async () => {
+    let resolveA: (value: Response) => void = () => {};
+    const aPromise = new Promise<Response>((r) => { resolveA = r; });
+
+    (globalThis.fetch as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ ok: true, json: async () => [summary("a"), summary("b")] } as Response) // /layouts
+      .mockReturnValueOnce(aPromise)                                                                     // GET a (held)
+      .mockResolvedValueOnce({ ok: true, json: async () => full("b") } as Response);                     // GET b
+
+    const { result } = renderHook(() => useLayoutCache());
+    await act(async () => { await result.current.refresh(); });
+    await act(async () => { result.current.setActiveId("a"); });
+    // Switch to b BEFORE a's GET resolves.
+    await act(async () => { result.current.setActiveId("b"); });
+    await waitFor(() => expect(result.current.activeEntry?.id).toBe("b"));
+
+    // Now let a's GET resolve — the cancelled flag should prevent it overwriting b.
+    await act(async () => {
+      resolveA({ ok: true, json: async () => full("a") } as Response);
+      // Allow microtasks to drain.
+      await new Promise(r => setTimeout(r, 0));
+    });
+
+    expect(result.current.activeEntry?.id).toBe("b");
+    expect(result.current.activeId).toBe("b");
+  });
 });

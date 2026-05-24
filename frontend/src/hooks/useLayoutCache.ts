@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type { CachedLayout, CachedLayoutSummary } from "../types/engine";
 
 const ENGINE_URL = "http://127.0.0.1:8765";
@@ -8,21 +8,26 @@ export function useLayoutCache() {
   const [activeId, setActiveIdRaw] = useState<string | null>(null);
   const [activeEntry, setActiveEntry] = useState<CachedLayout | null>(null);
 
+  const entriesRef = useRef<CachedLayoutSummary[]>([]);
+  useEffect(() => { entriesRef.current = entries; }, [entries]);
+
   const refresh = useCallback(async (): Promise<CachedLayoutSummary[]> => {
     try {
       const res = await fetch(`${ENGINE_URL}/layouts`);
-      if (!res.ok) return entries;
+      if (!res.ok) return entriesRef.current;
       const list = (await res.json()) as CachedLayoutSummary[];
       setEntries(list);
       return list;
     } catch {
-      return entries;
+      return entriesRef.current;
     }
-  }, [entries]);
+  }, []);
 
   const setActiveId = useCallback((id: string | null) => {
-    setActiveIdRaw(id);
-    if (id === null) setActiveEntry(null);
+    setActiveIdRaw((prev) => {
+      if (prev !== id) setActiveEntry(null);
+      return id;
+    });
   }, []);
 
   useEffect(() => {
@@ -51,15 +56,13 @@ export function useLayoutCache() {
       await fetch(`${ENGINE_URL}/layouts/${id}`, { method: "DELETE" });
     } catch {}
     const fresh = await refresh();
-    if (activeId === id) {
-      if (fresh.length === 0) {
-        setActiveIdRaw(null);
-        setActiveEntry(null);
-      } else {
-        setActiveIdRaw(fresh[0].id);
-      }
-    }
-  }, [activeId, refresh]);
+    setActiveIdRaw((current) => {
+      if (current !== id) return current;             // user picked a different tab; leave it
+      const next = fresh[0]?.id ?? null;
+      if (next === null) setActiveEntry(null);
+      return next;
+    });
+  }, [refresh]);
 
   return { entries, activeId, activeEntry, setActiveId, closeTab, refresh };
 }
