@@ -143,3 +143,34 @@ Task checklist (filled in once the planning skill produces the detailed plan):
 - [ ] Generate app icons (scripts/gen-icons.py)
 - [ ] Remove any remaining setup friction
 - [ ] QA checklist for non-technical users
+
+---
+
+## Future / Unscheduled
+
+Items not yet assigned to a phase. Rough notes captured to avoid losing context.
+
+### Layout performance — advanced controls
+
+- [ ] **NFP cache toggle (developer / advanced).** Sidebar (under a "Developer" subsection, NOT main Settings) checkbox to bypass the per-call NFP cache. Engine: `/auto-layout` accepts an optional `disable_nfp_cache: bool`; when true, `_blf_pack_nfp` is invoked with a fresh `{}` per strategy. Intended for A/B comparison and bug isolation, not regular use. Quietly remove once confidence is high (target: Phase 7 acceptance testing window).
+
+- [ ] **Parallel strategy execution + effort slider.** Run the 4-strategy `_best_of_strategies` (and the 2-mode `_modes_to_try` runs in bi grain) across multiple worker processes via `concurrent.futures.ProcessPoolExecutor`. Expose user-facing effort selector (5 levels):
+  - `Eco / Off` → 1 worker (serial; current behaviour, maximum NFP-cache benefit)
+  - `Low` → 2 workers
+  - `Balanced` → `cpu_count // 2`
+  - `High` → `cpu_count - 1` (leaves one core for UI/OS)
+  - `Max` → `cpu_count` (may stutter the UI)
+
+  Implementation notes:
+  - Put the selector under **Settings → Preferences** (menu bar), not the sidebar Settings block — it's a workflow preference, not a layout input.
+  - Show the resolved core count next to the slider (e.g. *"Uses ~3 of 8 CPU cores"*) so non-technical users can calibrate.
+  - Skip pool spawn for tiny inputs (`pieces × strategies < ~20`); Windows process spawn is ~200–500 ms.
+  - Per-request pool (created in `auto_layout_polygon`, torn down after) so memory returns to baseline between Runs.
+  - Trade-off vs the NFP cache: each worker rebuilds its own cache, losing cross-strategy reuse. Net win is still positive for medium/large inputs but the combined speedup of cache+parallel is sub-multiplicative. Worth documenting in the slider's tooltip.
+
+### Other deferred items (captured by the Phase 6 final reviewer)
+
+- [ ] `GrainPanel.test.tsx` — was in the spec but never added; trivial vitest case for the new `Show grainline` checkbox + the `single/bi` radio set.
+- [ ] `BottomPanel` overflow branch — currently unreachable from the NFP-BLF output (utilization is mathematically bounded by 100%). Either remove the branch or wire it to an engine-emitted warning when a piece's bbox edge exceeds usable fabric width.
+- [ ] `useLayoutCache` on-mount `refresh()` — tabs currently start empty after a webview reload even if the engine still holds entries. One-shot mount effect would restore them.
+- [ ] Cache `created_at` uses wall-clock `time.time()`; FIFO order could reverse under system-clock change. `time.monotonic()` would be more correct.
