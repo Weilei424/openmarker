@@ -112,7 +112,25 @@ User-visible scope (raw requirements captured from planning conversation):
 
 Task checklist (filled in once the planning skill produces the detailed plan):
 
-- [ ] (to be populated by the Phase 6 planning skill)
+- [x] Engine: `LayoutCache` module (FIFO, max 5, no dedup)
+- [x] Engine: wire cache into `POST /auto-layout` (returns id/timestamp/duration)
+- [x] Engine: `GET /layouts`, `GET /layouts/{id}`, `DELETE /layouts/{id}`
+- [x] Engine: drop `'none'` grain mode
+- [x] Engine: drop `auto_layout_bbox` (fast mode)
+- [x] Engine: require `filename`, reject `grain_mode='none'` (422)
+- [x] Frontend: tighten `GrainMode` type, add `CachedLayout` types
+- [x] Frontend: `useLayoutCache` hook
+- [x] Frontend: `useAutoLayout` sends filename + copies; drops fast_mode
+- [x] Frontend: `usePlacements` derives from active cached entry
+- [x] Frontend: `GrainPanel` drops none + fast, adds Show grainline
+- [x] Frontend: `PieceShape` uses `showGrainline` prop
+- [x] Frontend: `CanvasWorkspace` passes `showGrainline`
+- [x] Frontend: `BottomPanel` with `MM:SS` timer
+- [x] Frontend: `CachedLayoutTabs` strip above canvas
+- [x] Frontend: App.tsx new layout; double-height copies input
+- [x] Frontend: delete unused `utils/metrics.ts`
+- [x] Desktop: drop fixed window size, start hidden
+- [x] Desktop: compute 70%-height 4:3 size in `lib.rs`
 
 ### Phase 7 — Export
 - [ ] Export layout as DXF or PNG (sourced from any cached layout tab)
