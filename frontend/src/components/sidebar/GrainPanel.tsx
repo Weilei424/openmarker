@@ -2,29 +2,28 @@ import type { GrainMode } from "../../types/engine";
 
 interface GrainPanelProps {
   grainMode: GrainMode;
-  fastMode: boolean;
+  showGrainline: boolean;
   onGrainModeChange: (mode: GrainMode) => void;
-  onFastModeChange: (enabled: boolean) => void;
+  onShowGrainlineChange: (show: boolean) => void;
 }
 
 const GRAIN_MODE_LABELS: Record<GrainMode, string> = {
-  none: "None (free)",
   single: "Single direction",
   bi: "Bi-directional",
 };
 
 export function GrainPanel({
   grainMode,
-  fastMode,
+  showGrainline,
   onGrainModeChange,
-  onFastModeChange,
+  onShowGrainlineChange,
 }: GrainPanelProps) {
   return (
     <div>
       <div>
         <div style={styles.label}>Grain Mode</div>
         <div style={styles.hint}>Fabric grain runs top → bottom</div>
-        {(["none", "single", "bi"] as const).map((mode) => (
+        {(["single", "bi"] as const).map((mode) => (
           <label key={mode} style={styles.radioRow}>
             <input
               type="radio"
@@ -41,10 +40,10 @@ export function GrainPanel({
         <label style={styles.checkRow}>
           <input
             type="checkbox"
-            checked={fastMode}
-            onChange={(e) => onFastModeChange(e.target.checked)}
+            checked={showGrainline}
+            onChange={(e) => onShowGrainlineChange(e.target.checked)}
           />
-          <span style={{ fontSize: 12 }}>Fast mode (bbox)</span>
+          <span style={{ fontSize: 12 }}>Show grainline</span>
         </label>
       </div>
     </div>
