@@ -21,6 +21,15 @@ const full = (id: string): CachedLayout => ({
 });
 
 describe("useLayoutCache", () => {
+  // Mount fires a single GET /layouts. Tests below prepend a `mountEmpty()`
+  // entry to their mock chain so the mount-refresh resolves to an empty
+  // list and doesn't steal a mock intended for an explicit later call.
+  const mountEmpty = () =>
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      json: async () => [],
+    } as Response);
+
   beforeEach(() => {
     vi.spyOn(globalThis, "fetch");
   });
@@ -29,6 +38,7 @@ describe("useLayoutCache", () => {
   });
 
   it("refresh() pulls /layouts and stores entries", async () => {
+    mountEmpty();
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ok: true,
       json: async () => [summary("a"), summary("b")],
@@ -41,6 +51,7 @@ describe("useLayoutCache", () => {
   });
 
   it("setActiveId triggers GET /layouts/{id} and stores the full entry", async () => {
+    mountEmpty();
     (globalThis.fetch as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce({ ok: true, json: async () => [summary("a")] } as Response)
       .mockResolvedValueOnce({ ok: true, json: async () => full("a") } as Response);
@@ -54,6 +65,7 @@ describe("useLayoutCache", () => {
   });
 
   it("closeTab calls DELETE and refreshes the list", async () => {
+    mountEmpty();
     (globalThis.fetch as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce({ ok: true, json: async () => [summary("a"), summary("b")] } as Response)
       .mockResolvedValueOnce({ ok: true, json: async () => full("a") } as Response)
@@ -73,6 +85,7 @@ describe("useLayoutCache", () => {
   });
 
   it("closing the last tab clears active state", async () => {
+    mountEmpty();
     (globalThis.fetch as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce({ ok: true, json: async () => [summary("a")] } as Response)
       .mockResolvedValueOnce({ ok: true, json: async () => full("a") } as Response)
@@ -92,6 +105,7 @@ describe("useLayoutCache", () => {
   });
 
   it("clearAll empties entries, clears activeId/activeEntry, calls DELETE /layouts", async () => {
+    mountEmpty();
     (globalThis.fetch as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce({ ok: true, json: async () => [summary("a")] } as Response)   // refresh
       .mockResolvedValueOnce({ ok: true, json: async () => full("a") } as Response)         // GET a
@@ -108,17 +122,32 @@ describe("useLayoutCache", () => {
     expect(result.current.activeId).toBeNull();
     expect(result.current.activeEntry).toBeNull();
 
-    // The third fetch call must have been DELETE /layouts (no id).
+    // The last fetch call must have been DELETE /layouts (no id).
     const calls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
     const lastCall = calls[calls.length - 1];
     expect(lastCall[0]).toMatch(/\/layouts$/);
     expect(lastCall[1]?.method).toBe("DELETE");
   });
 
+  it("calls /layouts on mount to restore tabs across webview reloads", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      json: async () => [summary("a"), summary("b")],
+    } as Response);
+
+    const { result } = renderHook(() => useLayoutCache());
+
+    await waitFor(() => expect(result.current.entries.map(e => e.id)).toEqual(["a", "b"]));
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0])
+      .toMatch(/\/layouts$/);
+  });
+
   it("switching active tab mid-fetch does not overwrite the new active entry", async () => {
     let resolveA: (value: Response) => void = () => {};
     const aPromise = new Promise<Response>((r) => { resolveA = r; });
 
+    mountEmpty();
     (globalThis.fetch as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce({ ok: true, json: async () => [summary("a"), summary("b")] } as Response) // /layouts
       .mockReturnValueOnce(aPromise)                                                                     // GET a (held)

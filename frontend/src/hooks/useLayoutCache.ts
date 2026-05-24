@@ -75,5 +75,14 @@ export function useLayoutCache() {
     setActiveEntry(null);
   }, []);
 
+  // Restore the tab strip across webview reloads (or HMR during dev) —
+  // the engine still holds the in-memory cache from this session, so a
+  // single GET /layouts on mount brings the UI back into sync. `refresh`
+  // is stable-identity so this fires exactly once.
+  useEffect(() => {
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only
+  }, []);
+
   return { entries, activeId, activeEntry, setActiveId, closeTab, refresh, clearAll };
 }
