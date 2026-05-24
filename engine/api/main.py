@@ -124,6 +124,7 @@ async def auto_layout_endpoint(request: Request) -> dict:
 
     fabric_width_mm = float(body.get("fabric_width_mm", 1500))
     grain_direction_deg = float(body.get("grain_direction_deg", 0.0))
+    disable_nfp_cache = bool(body.get("disable_nfp_cache", False))
 
     pieces_data = body.get("pieces", [])
     if not pieces_data:
@@ -174,7 +175,10 @@ async def auto_layout_endpoint(request: Request) -> dict:
     # Run the CPU-bound layout in a worker thread so other endpoints
     # (notably /cancel-layout, /ping) stay responsive while it runs.
     def _do_layout():
-        return auto_layout_polygon(pieces, fabric_width_mm, grain_mode, grain_direction_deg)
+        return auto_layout_polygon(
+            pieces, fabric_width_mm, grain_mode, grain_direction_deg,
+            disable_nfp_cache=disable_nfp_cache,
+        )
 
     start = time.perf_counter()
     try:

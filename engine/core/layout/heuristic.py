@@ -500,6 +500,7 @@ def auto_layout_polygon(
     fabric_width_mm: float,
     grain_mode: str,
     fabric_grain_deg: float,
+    disable_nfp_cache: bool = False,
 ) -> tuple[list[Placement], float, float]:
     """No-Fit-Polygon-based Bottom-Left-Fill (slow mode, accurate).
 
@@ -510,18 +511,20 @@ def auto_layout_polygon(
 
     Returns (placements, marker_length_mm, utilization_pct).
     Raises ValueError if any piece cannot fit at any allowed rotation.
+
+    `disable_nfp_cache`: when True, each strategy run gets a fresh cache and
+    no cross-strategy reuse happens. Identical results, slower — exposed for
+    A/B comparison and debugging only.
     """
-    # Shared across all sort strategies and grain modes within this call. Key
-    # includes rotation, so sharing across modes is correct (single and bi
-    # often try overlapping rotation values).
-    nfp_cache: NfpCache = {}
+    shared_cache: NfpCache = {}
     best: tuple[list[Placement], float, float] | None = None
     for mode in _modes_to_try(grain_mode):
-        def run_one(sort_key, _mode=mode, _cache=nfp_cache):
+        def run_one(sort_key, _mode=mode):
+            cache = {} if disable_nfp_cache else shared_cache
             return _blf_pack_nfp(
                 pieces, fabric_width_mm, _mode, fabric_grain_deg,
                 sort_key=sort_key,
-                nfp_cache=_cache,
+                nfp_cache=cache,
             )
         best = _shorter(best, _best_of_strategies(run_one))
     assert best is not None

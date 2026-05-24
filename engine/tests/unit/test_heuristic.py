@@ -154,3 +154,24 @@ def test_polygon_grain_single_enforced():
     )
     for pl in placements:
         assert pl.rotation_deg == pytest.approx(90.0, abs=0.01)
+
+
+def test_polygon_disable_nfp_cache_yields_identical_result():
+    """The disable_nfp_cache toggle must not affect output — only speed."""
+    pieces = [_make_rect(f"p{i}", 100, 80) for i in range(3)]
+    on = auto_layout_polygon(
+        pieces, fabric_width_mm=1500, grain_mode="single", fabric_grain_deg=90.0,
+        disable_nfp_cache=False,
+    )
+    off = auto_layout_polygon(
+        pieces, fabric_width_mm=1500, grain_mode="single", fabric_grain_deg=90.0,
+        disable_nfp_cache=True,
+    )
+    assert on[1] == off[1]  # marker length
+    assert on[2] == off[2]  # utilization
+    assert len(on[0]) == len(off[0])
+    for a, b in zip(on[0], off[0]):
+        assert a.piece_id == b.piece_id
+        assert abs(a.x - b.x) < 1e-9
+        assert abs(a.y - b.y) < 1e-9
+        assert abs(a.rotation_deg - b.rotation_deg) < 1e-9
