@@ -96,11 +96,10 @@ async def auto_layout_endpoint(request: Request) -> dict:
     {
         "pieces": [...],            // Piece objects from /import-dxf
         "fabric_width_mm": 1500,
-        "grain_mode": "none",       // "none" | "single" | "bi" (Phase 6: "none" removed in T17)
+        "grain_mode": "single",     // "single" | "bi"
         "grain_direction_deg": 0,
-        "fast_mode": false,         // Phase 6: removed in T17
-        "filename": "...",          // Phase 6: required after T17
-        "copies": 1                 // Phase 6: required after T17
+        "filename": "...",          // required
+        "copies": 1                 // optional, defaults to 1
     }
 
     Response JSON:
