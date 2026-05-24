@@ -64,5 +64,16 @@ export function useLayoutCache() {
     });
   }, [refresh]);
 
-  return { entries, activeId, activeEntry, setActiveId, closeTab, refresh };
+  const clearAll = useCallback(async (): Promise<void> => {
+    try {
+      await fetch(`${ENGINE_URL}/layouts`, { method: "DELETE" });
+    } catch {
+      // Swallow — best-effort.
+    }
+    setEntries([]);
+    setActiveIdRaw(null);
+    setActiveEntry(null);
+  }, []);
+
+  return { entries, activeId, activeEntry, setActiveId, closeTab, refresh, clearAll };
 }

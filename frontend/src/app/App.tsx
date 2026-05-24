@@ -32,7 +32,7 @@ export default function App() {
   const [copiesInput, setCopiesInput] = useState<string>("");
 
   const { runAutoLayout, abort: abortAutoLayout, status: autoStatus, errorMessage: autoError } = useAutoLayout();
-  const { entries, activeId, activeEntry, setActiveId, closeTab, refresh: refreshCache } = useLayoutCache();
+  const { entries, activeId, activeEntry, setActiveId, closeTab, refresh: refreshCache, clearAll: clearCache } = useLayoutCache();
 
   const copies = useMemo(() => {
     const trimmed = copiesInput.trim();
@@ -103,16 +103,25 @@ export default function App() {
       const file = e.target.files?.[0];
       if (!file) return;
       e.target.value = "";
+
+      // New import = fresh slate. Drop cached tabs and reset sidebar form
+      // before we even know whether the import succeeds — the user's
+      // mental model is "I'm starting over."
+      await clearCache();
+      setFabricWidthMm(1500);
+      setGrainMode("single");
+      setShowGrainline(true);
+      setCopiesInput("");
+
       const outcome: ImportOutcome = await handleFileSelected(file);
       if (outcome.ok) {
         setStatusMessage(`${outcome.pieces.length} piece${outcome.pieces.length !== 1 ? "s" : ""} imported from ${file.name}`);
         setCurrentFileName(file.name);
-        setFabricWidthMm(1500);
       } else {
         setStatusMessage(`Import failed: ${outcome.errorMessage}`);
       }
     },
-    [handleFileSelected]
+    [handleFileSelected, clearCache]
   );
 
   const handleAutoLayout = useCallback(async () => {

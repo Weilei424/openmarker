@@ -91,6 +91,30 @@ describe("useLayoutCache", () => {
     expect(result.current.activeEntry).toBeNull();
   });
 
+  it("clearAll empties entries, clears activeId/activeEntry, calls DELETE /layouts", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ ok: true, json: async () => [summary("a")] } as Response)   // refresh
+      .mockResolvedValueOnce({ ok: true, json: async () => full("a") } as Response)         // GET a
+      .mockResolvedValueOnce({ ok: true, status: 204 } as Response);                        // DELETE /layouts
+
+    const { result } = renderHook(() => useLayoutCache());
+    await act(async () => { await result.current.refresh(); });
+    await act(async () => { result.current.setActiveId("a"); });
+    await waitFor(() => expect(result.current.activeEntry?.id).toBe("a"));
+
+    await act(async () => { await result.current.clearAll(); });
+
+    expect(result.current.entries).toEqual([]);
+    expect(result.current.activeId).toBeNull();
+    expect(result.current.activeEntry).toBeNull();
+
+    // The third fetch call must have been DELETE /layouts (no id).
+    const calls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
+    const lastCall = calls[calls.length - 1];
+    expect(lastCall[0]).toMatch(/\/layouts$/);
+    expect(lastCall[1]?.method).toBe("DELETE");
+  });
+
   it("switching active tab mid-fetch does not overwrite the new active entry", async () => {
     let resolveA: (value: Response) => void = () => {};
     const aPromise = new Promise<Response>((r) => { resolveA = r; });
