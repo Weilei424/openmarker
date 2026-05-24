@@ -40,6 +40,10 @@ class LayoutCache:
             return True
         return False
 
+    def clear(self) -> None:
+        """Drop all entries. Idempotent."""
+        self._entries.clear()
+
     def list(self) -> list[CachedLayout]:
         return sorted(self._entries.values(), key=lambda e: e.created_at, reverse=True)
 
@@ -73,4 +77,4 @@ def get_cache() -> LayoutCache:
 
 def reset_cache() -> None:
     """For tests: clear the singleton between cases."""
-    _cache._entries.clear()
+    _cache.clear()

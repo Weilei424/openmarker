@@ -261,6 +261,14 @@ def get_layout(layout_id: str) -> dict:
     }
 
 
+@app.delete("/layouts", status_code=204)
+def clear_layouts() -> Response:
+    """Clear ALL cached layouts. Used by the frontend on DXF import to
+    discard tabs from the previous import."""
+    get_cache().clear()
+    return Response(status_code=204)
+
+
 @app.delete("/layouts/{layout_id}", status_code=204)
 def delete_layout(layout_id: str) -> Response:
     """Remove a cached layout (manual tab close from the UI)."""

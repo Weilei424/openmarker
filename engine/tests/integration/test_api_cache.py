@@ -231,6 +231,36 @@ async def test_auto_layout_rejects_grain_mode_none():
 
 
 @pytest.mark.asyncio
+async def test_delete_all_layouts_clears_cache():
+    body = {
+        "filename": "sample.dxf",
+        "pieces": [_square_piece()],
+        "fabric_width_mm": 1500,
+        "grain_mode": "single",
+        "grain_direction_deg": 90,
+        "copies": 1,
+    }
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        # Seed the cache with 3 distinct entries.
+        for i in range(3):
+            await client.post("/auto-layout", json={**body, "fabric_width_mm": 1500 + i})
+        before = await client.get("/layouts")
+        clear = await client.delete("/layouts")
+        after = await client.get("/layouts")
+
+    assert len(before.json()) == 3
+    assert clear.status_code == 204
+    assert after.json() == []
+
+
+@pytest.mark.asyncio
+async def test_delete_all_layouts_when_empty_returns_204():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.delete("/layouts")
+    assert res.status_code == 204
+
+
+@pytest.mark.asyncio
 async def test_auto_layout_rejects_missing_filename():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         res = await client.post("/auto-layout", json={
