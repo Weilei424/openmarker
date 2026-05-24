@@ -40,7 +40,8 @@ export interface ImportDxfResponse {
 
 export type ImportStatus = "idle" | "loading" | "success" | "error";
 
-export type GrainMode = "none" | "single" | "bi";
+// Phase 6: "none" removed. Only "single" and "bi" are valid.
+export type GrainMode = "single" | "bi";
 
 export interface AutoLayoutPlacement {
   piece_id: string;
@@ -49,8 +50,28 @@ export interface AutoLayoutPlacement {
   rotation_deg: number;
 }
 
+// Phase 6: /auto-layout now also returns the cache id, timestamp, and duration.
 export interface AutoLayoutResponse {
+  id: string;
+  timestamp: string;            // YYYYMMDDHHMMSS
+  duration_ms: number;
   placements: AutoLayoutPlacement[];
   marker_length_mm: number;
   utilization_pct: number;
+}
+
+export interface CachedLayoutSummary {
+  id: string;
+  filename: string;
+  timestamp: string;
+  grain_mode: GrainMode;
+  copies: number;
+  fabric_width_mm: number;
+  marker_length_mm: number;
+  utilization_pct: number;
+  duration_ms: number;
+}
+
+export interface CachedLayout extends CachedLayoutSummary {
+  placements: AutoLayoutPlacement[];
 }
