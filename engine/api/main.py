@@ -115,8 +115,15 @@ async def auto_layout_endpoint(request: Request) -> dict:
     """
     body = await request.json()
 
+    filename = body.get("filename")
+    if not isinstance(filename, str) or not filename:
+        raise HTTPException(status_code=422, detail="`filename` is required")
+
+    grain_mode = str(body.get("grain_mode", "single"))
+    if grain_mode not in ("single", "bi"):
+        raise HTTPException(status_code=422, detail=f"`grain_mode` must be 'single' or 'bi', got {grain_mode!r}")
+
     fabric_width_mm = float(body.get("fabric_width_mm", 1500))
-    grain_mode = str(body.get("grain_mode", "none"))
     grain_direction_deg = float(body.get("grain_direction_deg", 0.0))
 
     pieces_data = body.get("pieces", [])
@@ -170,16 +177,12 @@ async def auto_layout_endpoint(request: Request) -> dict:
     ]
 
     now = time.time()
-    filename = str(body.get("filename", "")) or "untitled.dxf"
     copies = int(body.get("copies", 1))
     entry = CachedLayout(
         id=uuid.uuid4().hex,
         filename=filename,
         timestamp=datetime.fromtimestamp(now).strftime("%Y%m%d%H%M%S"),
-        # Phase 6 transitional: cache only stores "single"/"bi" per CachedLayout's
-        # type. Until Task 17 removes "none" from the request schema, fall back
-        # to "single" to avoid a TypeError. After T17 this coercion is dead.
-        grain_mode=grain_mode if grain_mode in ("single", "bi") else "single",
+        grain_mode=grain_mode,
         copies=copies,
         fabric_width_mm=fabric_width_mm,
         placements=placements_serialized,

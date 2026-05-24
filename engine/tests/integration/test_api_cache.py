@@ -154,3 +154,28 @@ async def test_fifo_eviction_after_6_runs():
     assert len(listed_ids) == 5
     assert ids[0] not in listed_ids
     assert oldest_get.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_auto_layout_rejects_grain_mode_none():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post("/auto-layout", json={
+            "filename": "sample.dxf",
+            "pieces": [_square_piece()],
+            "fabric_width_mm": 1500,
+            "grain_mode": "none",
+            "grain_direction_deg": 90,
+        })
+    assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_auto_layout_rejects_missing_filename():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post("/auto-layout", json={
+            "pieces": [_square_piece()],
+            "fabric_width_mm": 1500,
+            "grain_mode": "single",
+            "grain_direction_deg": 90,
+        })
+    assert res.status_code == 422
