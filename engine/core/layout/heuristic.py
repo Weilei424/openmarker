@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import pyclipper
 import shapely.affinity
@@ -193,6 +194,59 @@ def _compute_nfp_polygons(
     return result
 
 
+def _base_id(piece_id: str) -> str:
+    """Strip the frontend's '__c{n}' copy suffix.
+
+    Two pieces sharing a base id have identical polygons, so an NFP computed for
+    one is reusable for the other.
+    """
+    idx = piece_id.find("__c")
+    return piece_id if idx < 0 else piece_id[:idx]
+
+
+# Per-layout NFP cache. Key: (base_id_a, rot_a, base_id_b, rot_b). Value: NFP
+# polygons in "A-at-origin" coordinates. Translate by A's placement offset on use.
+NfpCache = dict[tuple[str, float, str, float], list[ShapelyPolygon]]
+
+
+def _get_or_compute_nfp(
+    cache: NfpCache,
+    piece_a: Piece, rot_a: float,
+    piece_b: Piece, rot_b: float,
+) -> list[ShapelyPolygon]:
+    """Memoized NFP between piece_a (stationary, at origin) and piece_b (orbiting,
+    at origin), each rotated. Keyed by base id so multiple copies of the same
+    shape and multiple sort strategies all share results.
+
+    Uses the identity NFP(B, A) = -NFP(A, B) (reflected through origin) to
+    serve a reverse-direction request from a cached forward result without
+    re-running pyclipper.MinkowskiSum. Doubles effective hit rate across sort
+    strategies that visit piece pairs in different orders.
+    """
+    base_a = _base_id(piece_a.id)
+    base_b = _base_id(piece_b.id)
+    key = (base_a, rot_a, base_b, rot_b)
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
+
+    reverse_key = (base_b, rot_b, base_a, rot_a)
+    reverse = cache.get(reverse_key)
+    if reverse is not None:
+        flipped = [
+            shapely.affinity.scale(p, xfact=-1, yfact=-1, origin=(0, 0))
+            for p in reverse
+        ]
+        cache[key] = flipped
+        return flipped
+
+    a_coords = _polygon_at_origin(piece_a, rot_a)
+    b_coords = _polygon_at_origin(piece_b, rot_b)
+    polys = _compute_nfp_polygons(a_coords, b_coords)
+    cache[key] = polys
+    return polys
+
+
 def _sorted_vertices(region) -> list[tuple[float, float]]:
     """Return all boundary vertices of a polygon region sorted by (y, x).
 
@@ -227,12 +281,24 @@ def _sorted_vertices(region) -> list[tuple[float, float]]:
     return verts
 
 
+class _Placed(NamedTuple):
+    """A successfully placed piece, with the offset that turns its
+    "at-origin rotated" coords into its placed coords. The offset lets us
+    translate a cached NFP into the placed-piece's reference frame."""
+    piece: Piece
+    rotation: float
+    polygon: ShapelyPolygon
+    dx: float
+    dy: float
+
+
 def _blf_pack_nfp(
     pieces: list[Piece],
     fabric_width_mm: float,
     grain_mode: str,
     fabric_grain_deg: float,
     sort_key=None,
+    nfp_cache: NfpCache | None = None,
 ) -> tuple[list[Placement], float, float]:
     """Bottom-Left-Fill using polygon set algebra over NFPs.
 
@@ -250,9 +316,15 @@ def _blf_pack_nfp(
 
     Touching is allowed — Shapely's difference produces the open valid region;
     its boundary vertices are exactly the touching positions.
+
+    `nfp_cache` is reused across sort strategies and grain modes within one
+    `auto_layout_polygon` call to avoid recomputing Minkowski sums for repeated
+    (shape, rotation) pairs — the dominant cost when copies > 1.
     """
     if sort_key is None:
         sort_key = lambda p: p.area
+    if nfp_cache is None:
+        nfp_cache = {}
     sorted_pieces = sorted(pieces, key=sort_key, reverse=True)
     _validate_pieces_fit(sorted_pieces, fabric_width_mm, grain_mode, fabric_grain_deg, _polygon_dims)
 
@@ -260,7 +332,7 @@ def _blf_pack_nfp(
     max_y_search = sum(max(p.bbox.width, p.bbox.height) for p in pieces) + EDGE_GAP
 
     placements: list[Placement] = []
-    placed_polys: list[ShapelyPolygon] = []
+    placed: list[_Placed] = []
 
     for piece in sorted_pieces:
         if is_cancelled():
@@ -268,7 +340,10 @@ def _blf_pack_nfp(
         rotations = _layout_rotations(
             grain_mode, fabric_grain_deg, piece.grainline_direction_deg
         )
-        best: tuple[float, float, float, ShapelyPolygon] | None = None
+        # best carries: (bbox_tl_y, bbox_tl_x, rot, candidate_poly, orig_minx, orig_miny)
+        # orig_minx/orig_miny are needed to derive (dx, dy) on commit so cached
+        # NFPs can be shifted to this placement's reference frame later.
+        best: tuple[float, float, float, ShapelyPolygon, float, float] | None = None
 
         for rot in rotations:
             new_coords = _polygon_at_origin(piece, rot)
@@ -288,11 +363,16 @@ def _blf_pack_nfp(
             ifp = shapely_box(nfx_min, nfy_min, nfx_max, nfy_max)
 
             nfp_polys: list[ShapelyPolygon] = []
-            for placed_poly in placed_polys:
-                placed_coords = list(placed_poly.exterior.coords)
-                if placed_coords and placed_coords[0] == placed_coords[-1]:
-                    placed_coords = placed_coords[:-1]
-                nfp_polys.extend(_compute_nfp_polygons(placed_coords, new_coords))
+            for rec in placed:
+                cached = _get_or_compute_nfp(
+                    nfp_cache, rec.piece, rec.rotation, piece, rot
+                )
+                if not cached:
+                    continue
+                nfp_polys.extend(
+                    shapely.affinity.translate(p, xoff=rec.dx, yoff=rec.dy)
+                    for p in cached
+                )
 
             if nfp_polys:
                 try:
@@ -328,10 +408,10 @@ def _blf_pack_nfp(
                     continue
                 if candidate_poly.bounds[1] < EDGE_GAP - 1e-3:
                     continue
-                if any(_has_area_overlap(candidate_poly, pp) for pp in placed_polys):
+                if any(_has_area_overlap(candidate_poly, rec.polygon) for rec in placed):
                     continue
 
-                best = (bbox_tl_y, bbox_tl_x, rot, candidate_poly)
+                best = (bbox_tl_y, bbox_tl_x, rot, candidate_poly, minx, miny)
                 break  # vertices sorted ascending; first valid is best at this rotation
 
         # Fallback: if NFP found nothing usable, force a "new shelf" placement
@@ -339,8 +419,8 @@ def _blf_pack_nfp(
         # The candidate sits strictly below max_placed_bottom + EDGE_GAP, so by
         # construction it cannot overlap any placed piece — no overlap check.
         if best is None:
-            max_placed_bottom = (
-                max((pp.bounds[3] for pp in placed_polys), default=EDGE_GAP)
+            max_placed_bottom = max(
+                (rec.polygon.bounds[3] for rec in placed), default=EDGE_GAP
             )
             fallback_y = max_placed_bottom + EDGE_GAP
             for rot in rotations:
@@ -348,7 +428,10 @@ def _blf_pack_nfp(
                 if pw + 2 * EDGE_GAP > fabric_width_mm:
                     continue
                 candidate_poly = _placed_polygon(piece, EDGE_GAP, fallback_y, rot)
-                best = (fallback_y, EDGE_GAP, rot, candidate_poly)
+                orig_coords = _polygon_at_origin(piece, rot)
+                orig_minx = min(c[0] for c in orig_coords)
+                orig_miny = min(c[1] for c in orig_coords)
+                best = (fallback_y, EDGE_GAP, rot, candidate_poly, orig_minx, orig_miny)
                 break
 
         if best is None:
@@ -357,9 +440,11 @@ def _blf_pack_nfp(
                 f"within fabric width {fabric_width_mm:.0f} mm."
             )
 
-        bbox_tl_y, bbox_tl_x, rot, candidate_poly = best
+        bbox_tl_y, bbox_tl_x, rot, candidate_poly, orig_minx, orig_miny = best
         placements.append(Placement(piece.id, round(bbox_tl_x, 4), round(bbox_tl_y, 4), rot))
-        placed_polys.append(candidate_poly)
+        dx = candidate_poly.bounds[0] - orig_minx
+        dy = candidate_poly.bounds[1] - orig_miny
+        placed.append(_Placed(piece, rot, candidate_poly, dx, dy))
 
     marker_length, utilization = _compute_metrics(placements, pieces, fabric_width_mm, _polygon_dims)
     return placements, marker_length, utilization
@@ -426,12 +511,17 @@ def auto_layout_polygon(
     Returns (placements, marker_length_mm, utilization_pct).
     Raises ValueError if any piece cannot fit at any allowed rotation.
     """
+    # Shared across all sort strategies and grain modes within this call. Key
+    # includes rotation, so sharing across modes is correct (single and bi
+    # often try overlapping rotation values).
+    nfp_cache: NfpCache = {}
     best: tuple[list[Placement], float, float] | None = None
     for mode in _modes_to_try(grain_mode):
-        def run_one(sort_key, _mode=mode):
+        def run_one(sort_key, _mode=mode, _cache=nfp_cache):
             return _blf_pack_nfp(
                 pieces, fabric_width_mm, _mode, fabric_grain_deg,
                 sort_key=sort_key,
+                nfp_cache=_cache,
             )
         best = _shorter(best, _best_of_strategies(run_one))
     assert best is not None
