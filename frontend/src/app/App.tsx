@@ -31,6 +31,7 @@ export default function App() {
   const [showGrainline, setShowGrainline] = useState<boolean>(true);
   const [copiesInput, setCopiesInput] = useState<string>("");
   const [disableNfpCache, setDisableNfpCache] = useState<boolean>(false);
+  const [effort, setEffort] = useState<number>(1);
 
   const { runAutoLayout, abort: abortAutoLayout, status: autoStatus, errorMessage: autoError } = useAutoLayout();
   const { entries, activeId, activeEntry, setActiveId, closeTab, refresh: refreshCache, clearAll: clearCache } = useLayoutCache();
@@ -148,7 +149,7 @@ export default function App() {
       setCopiesInput(canonical);
     }
     const outcome = await runAutoLayout(
-      currentFileName, expandedPieces, fabricWidthMm, grainMode, FABRIC_GRAIN_DEG, copies, disableNfpCache,
+      currentFileName, expandedPieces, fabricWidthMm, grainMode, FABRIC_GRAIN_DEG, copies, disableNfpCache, effort,
     );
     if (outcome.ok) {
       await refreshCache();
@@ -163,7 +164,7 @@ export default function App() {
     } else {
       setStatusMessage(`Auto layout failed: ${outcome.errorMessage}`);
     }
-  }, [expandedPieces, currentFileName, fabricWidthMm, grainMode, copies, copiesInput, disableNfpCache, runAutoLayout, refreshCache, setActiveId]);
+  }, [expandedPieces, currentFileName, fabricWidthMm, grainMode, copies, copiesInput, disableNfpCache, effort, runAutoLayout, refreshCache, setActiveId]);
 
   const importButtonLabel = importStatus === "loading" ? "Importing..." : "Import DXF";
 
@@ -224,6 +225,28 @@ export default function App() {
               <span style={{ fontSize: 12 }}>Disable NFP cache</span>
             </label>
             <p style={styles.advancedHint}>For benchmarking. Layout result is identical either way; only speed changes.</p>
+
+            <div style={{ marginTop: 8 }}>
+              <div style={styles.settingLabel}>Parallel effort</div>
+              {[
+                { value: 1, label: "Eco (serial)" },
+                { value: 2, label: "Low (2 cores)" },
+                { value: 3, label: "Balanced (1/2 cores)" },
+                { value: 4, label: "High (all but one)" },
+                { value: 5, label: "Max (all cores)" },
+              ].map((opt) => (
+                <label key={opt.value} style={styles.advancedRadioRow}>
+                  <input
+                    type="radio"
+                    name="effort"
+                    checked={effort === opt.value}
+                    onChange={() => setEffort(opt.value)}
+                  />
+                  <span style={{ fontSize: 12 }}>{opt.label}</span>
+                </label>
+              ))}
+              <p style={styles.advancedHint}>Cancellation may not interrupt parallel runs immediately.</p>
+            </div>
           </Section>
 
           <Section title="Layout">
@@ -426,6 +449,13 @@ const styles = {
     gap: 6,
     cursor: "pointer",
     fontSize: 12,
+  },
+  advancedRadioRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 4,
+    cursor: "pointer",
   },
   advancedHint: {
     fontSize: 10,
