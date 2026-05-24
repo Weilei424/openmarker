@@ -30,6 +30,7 @@ export default function App() {
   const [grainMode, setGrainMode] = useState<GrainMode>("single");
   const [showGrainline, setShowGrainline] = useState<boolean>(true);
   const [copiesInput, setCopiesInput] = useState<string>("");
+  const [disableNfpCache, setDisableNfpCache] = useState<boolean>(false);
 
   const { runAutoLayout, abort: abortAutoLayout, status: autoStatus, errorMessage: autoError } = useAutoLayout();
   const { entries, activeId, activeEntry, setActiveId, closeTab, refresh: refreshCache, clearAll: clearCache } = useLayoutCache();
@@ -147,7 +148,7 @@ export default function App() {
       setCopiesInput(canonical);
     }
     const outcome = await runAutoLayout(
-      currentFileName, expandedPieces, fabricWidthMm, grainMode, FABRIC_GRAIN_DEG, copies,
+      currentFileName, expandedPieces, fabricWidthMm, grainMode, FABRIC_GRAIN_DEG, copies, disableNfpCache,
     );
     if (outcome.ok) {
       await refreshCache();
@@ -162,7 +163,7 @@ export default function App() {
     } else {
       setStatusMessage(`Auto layout failed: ${outcome.errorMessage}`);
     }
-  }, [expandedPieces, currentFileName, fabricWidthMm, grainMode, copies, copiesInput, runAutoLayout, refreshCache, setActiveId]);
+  }, [expandedPieces, currentFileName, fabricWidthMm, grainMode, copies, copiesInput, disableNfpCache, runAutoLayout, refreshCache, setActiveId]);
 
   const importButtonLabel = importStatus === "loading" ? "Importing..." : "Import DXF";
 
@@ -211,6 +212,18 @@ export default function App() {
                 style={styles.numberInputTall}
               />
             </label>
+          </Section>
+
+          <Section title="Advanced">
+            <label style={styles.advancedCheckRow}>
+              <input
+                type="checkbox"
+                checked={disableNfpCache}
+                onChange={(e) => setDisableNfpCache(e.target.checked)}
+              />
+              <span style={{ fontSize: 12 }}>Disable NFP cache</span>
+            </label>
+            <p style={styles.advancedHint}>For benchmarking. Layout result is identical either way; only speed changes.</p>
           </Section>
 
           <Section title="Layout">
@@ -406,5 +419,19 @@ const styles = {
     borderRadius: 3,
     fontSize: 18,
     textAlign: "right" as const,
+  },
+  advancedCheckRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    cursor: "pointer",
+    fontSize: 12,
+  },
+  advancedHint: {
+    fontSize: 10,
+    color: "var(--color-text-muted)",
+    fontStyle: "italic" as const,
+    marginTop: 4,
+    marginBottom: 0,
   },
 } as const;

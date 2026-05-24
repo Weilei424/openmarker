@@ -21,6 +21,7 @@ export function useAutoLayout() {
       grainMode: GrainMode,
       grainDirectionDeg: number,
       copies: number,
+      disableNfpCache: boolean = false,
     ): Promise<AutoLayoutOutcome> => {
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -39,6 +40,7 @@ export function useAutoLayout() {
             grain_mode: grainMode,
             grain_direction_deg: grainDirectionDeg,
             copies,
+            disable_nfp_cache: disableNfpCache,
           }),
           signal: controller.signal,
         });
