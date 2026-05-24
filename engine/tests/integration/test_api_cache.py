@@ -127,6 +127,25 @@ async def test_delete_layout_removes_entry():
 
 
 @pytest.mark.asyncio
+async def test_cors_allows_delete_preflight():
+    """Browser preflight (OPTIONS) for DELETE must be allowed by CORS middleware.
+    Regression: previously CORS only listed GET/POST, so the × tab-close button
+    silently failed in real browsers (preflight rejected → DELETE never sent)."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.options(
+            "/layouts/some-id",
+            headers={
+                "Origin": "http://localhost:1420",
+                "Access-Control-Request-Method": "DELETE",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+    assert res.status_code == 200, res.text
+    allow_methods = res.headers.get("access-control-allow-methods", "")
+    assert "DELETE" in allow_methods.upper(), f"DELETE not in: {allow_methods!r}"
+
+
+@pytest.mark.asyncio
 async def test_delete_layout_missing_returns_404():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         res = await client.delete("/layouts/nonexistent")
