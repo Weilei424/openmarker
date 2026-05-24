@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 
 import pyclipper
@@ -9,7 +8,6 @@ from shapely.geometry import Polygon as ShapelyPolygon, box as shapely_box
 from shapely.ops import unary_union
 
 from core.layout.cancellation import CancellationError, is_cancelled
-from core.layout.grain import allowed_rotations
 from core.models.piece import Piece
 
 # Integer scale for pyclipper. Preserves 3 decimal places of mm precision;
@@ -34,16 +32,6 @@ class Placement:
 # ---------------------------------------------------------------------------
 # Geometry helpers
 # ---------------------------------------------------------------------------
-
-def _rotated_bbox_dims(piece: Piece, rotation_deg: float) -> tuple[float, float]:
-    """Return (width, height) of the axis-aligned bbox of the piece rotated CW by rotation_deg."""
-    angle_rad = math.radians(rotation_deg)
-    cos_a = abs(math.cos(angle_rad))
-    sin_a = abs(math.sin(angle_rad))
-    w = piece.bbox.width * cos_a + piece.bbox.height * sin_a
-    h = piece.bbox.width * sin_a + piece.bbox.height * cos_a
-    return w, h
-
 
 def _placed_polygon(piece: Piece, x: float, y: float, rotation_deg: float) -> ShapelyPolygon:
     """Return the piece polygon rotated CW by rotation_deg (screen) and translated to (x, y).
@@ -86,19 +74,17 @@ def _layout_rotations(
 ) -> list[float]:
     """Discrete rotation set for layout search.
 
-    For 'none' mode we use cardinal angles (4 candidates) rather than the 360
-    returned by allowed_rotations(): production markers only ever use cardinal
-    rotations, and 360 candidates is wasted search across grain-free layouts.
+    Pieces with no grainline data: fall back to cardinal angles (production
+    markers only use cardinal rotations; 360 candidates wastes search).
     """
-    if grain_mode == "none" or piece_grainline_deg is None:
+    if piece_grainline_deg is None:
         return [0.0, 90.0, 180.0, 270.0]
     target = (fabric_grain_deg - piece_grainline_deg) % 360
     if grain_mode == "single":
         return [target]
-    elif grain_mode == "bi":
+    if grain_mode == "bi":
         return [target, (target + 180) % 360]
-    else:
-        raise ValueError(f"Unknown grain_mode: {grain_mode!r}")
+    raise ValueError(f"Unknown grain_mode: {grain_mode!r}")
 
 
 def _compute_metrics(
@@ -143,70 +129,6 @@ def _validate_pieces_fit(
                 f"Piece '{piece.name}' minimum width {min_w:.1f} mm cannot fit within "
                 f"usable fabric width {fabric_width_mm - 2 * EDGE_GAP:.1f} mm at any allowed rotation."
             )
-
-
-# ---------------------------------------------------------------------------
-# Strip-packing (bbox / fast mode) — shelf-based
-# ---------------------------------------------------------------------------
-
-def _strip_pack(
-    pieces: list[Piece],
-    fabric_width_mm: float,
-    grain_mode: str,
-    fabric_grain_deg: float,
-    dim_fn,
-    fits_fn,
-    on_placed=None,
-    sort_key=None,
-) -> tuple[list[Placement], float, float]:
-    if sort_key is None:
-        sort_key = lambda p: p.area
-    sorted_pieces = sorted(pieces, key=sort_key, reverse=True)
-    _validate_pieces_fit(sorted_pieces, fabric_width_mm, grain_mode, fabric_grain_deg, dim_fn)
-
-    placements: list[Placement] = []
-    shelf_y = EDGE_GAP
-    shelf_h = 0.0
-    x_cursor = EDGE_GAP
-
-    def _best_rotation(piece: Piece, x: float, y: float) -> tuple[float, float, float] | None:
-        best: tuple[float, float, float] | None = None
-        for rot in _layout_rotations(grain_mode, fabric_grain_deg, piece.grainline_direction_deg):
-            w, h = dim_fn(piece, rot)
-            if fits_fn(piece, x, y, rot, w) and x + w + EDGE_GAP <= fabric_width_mm:
-                if best is None or h < best[2]:
-                    best = (rot, w, h)
-        return best
-
-    def _best_rotation_new_shelf(piece: Piece) -> tuple[float, float, float]:
-        best: tuple[float, float, float] | None = None
-        for rot in _layout_rotations(grain_mode, fabric_grain_deg, piece.grainline_direction_deg):
-            w, h = dim_fn(piece, rot)
-            if w + 2 * EDGE_GAP <= fabric_width_mm:
-                if best is None or h < best[2]:
-                    best = (rot, w, h)
-        assert best is not None, "piece passed validation but no rotation fits — invariant violated"
-        return best
-
-    for piece in sorted_pieces:
-        if is_cancelled():
-            raise CancellationError("Auto-layout cancelled by user.")
-        result = _best_rotation(piece, x_cursor, shelf_y)
-        if result is None:
-            shelf_y += shelf_h + EDGE_GAP
-            shelf_h = 0.0
-            x_cursor = EDGE_GAP
-            result = _best_rotation_new_shelf(piece)
-
-        rot, w, h = result
-        placements.append(Placement(piece.id, round(x_cursor, 4), round(shelf_y, 4), rot))
-        if on_placed is not None:
-            on_placed(piece, placements[-1], rot)
-        x_cursor += w + EDGE_GAP
-        shelf_h = max(shelf_h, h)
-
-    marker_length, utilization = _compute_metrics(placements, pieces, fabric_width_mm, dim_fn)
-    return placements, marker_length, utilization
 
 
 # ---------------------------------------------------------------------------
@@ -567,40 +489,10 @@ def _modes_to_try(grain_mode: str) -> list[str]:
     """Bi mode's rotation set is a strict superset of single's. A greedy BLF
     can therefore produce a worse bi layout than single (a locally-good rotation
     leaves a worse global gap). To guarantee bi >= single, run both and keep
-    the shorter result. Same idea for none → bi → single as superset chain."""
+    the shorter result."""
     if grain_mode == "bi":
         return ["bi", "single"]
-    if grain_mode == "none":
-        return ["none"]
     return [grain_mode]
-
-
-def auto_layout_bbox(
-    pieces: list[Piece],
-    fabric_width_mm: float,
-    grain_mode: str,
-    fabric_grain_deg: float,
-) -> tuple[list[Placement], float, float]:
-    """Strip-packing using axis-aligned bounding boxes (fast mode).
-
-    Returns (placements, marker_length_mm, utilization_pct).
-    Raises ValueError if any piece cannot fit at any allowed rotation.
-    """
-    def fits_bbox(piece, x, y, rot, w):
-        return True
-
-    best: tuple[list[Placement], float, float] | None = None
-    for mode in _modes_to_try(grain_mode):
-        def run_one(sort_key, _mode=mode):
-            return _strip_pack(
-                pieces, fabric_width_mm, _mode, fabric_grain_deg,
-                dim_fn=_rotated_bbox_dims,
-                fits_fn=fits_bbox,
-                sort_key=sort_key,
-            )
-        best = _shorter(best, _best_of_strategies(run_one))
-    assert best is not None
-    return best
 
 
 def auto_layout_polygon(

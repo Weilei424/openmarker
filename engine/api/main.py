@@ -23,7 +23,7 @@ from core.layout.cancellation import (
     request_cancellation,
     reset_cancellation,
 )
-from core.layout.heuristic import auto_layout_bbox, auto_layout_polygon
+from core.layout.heuristic import auto_layout_polygon
 from core.models.piece import BoundingBox, Piece as PieceModel
 
 app = FastAPI(title="OpenMarker Engine", version="0.1.0")
@@ -118,7 +118,6 @@ async def auto_layout_endpoint(request: Request) -> dict:
     fabric_width_mm = float(body.get("fabric_width_mm", 1500))
     grain_mode = str(body.get("grain_mode", "none"))
     grain_direction_deg = float(body.get("grain_direction_deg", 0.0))
-    fast_mode = bool(body.get("fast_mode", False))
 
     pieces_data = body.get("pieces", [])
     if not pieces_data:
@@ -151,8 +150,6 @@ async def auto_layout_endpoint(request: Request) -> dict:
     # Run the CPU-bound layout in a worker thread so other endpoints
     # (notably /cancel-layout, /ping) stay responsive while it runs.
     def _do_layout():
-        if fast_mode:
-            return auto_layout_bbox(pieces, fabric_width_mm, grain_mode, grain_direction_deg)
         return auto_layout_polygon(pieces, fabric_width_mm, grain_mode, grain_direction_deg)
 
     start = time.perf_counter()
