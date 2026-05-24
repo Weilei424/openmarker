@@ -193,12 +193,12 @@ async def auto_layout_endpoint(request: Request) -> dict:
         for pl in placements
     ]
 
-    now = time.time()
+    wall_now = time.time()
     copies = int(body.get("copies", 1))
     entry = CachedLayout(
         id=uuid.uuid4().hex,
         filename=filename,
-        timestamp=datetime.fromtimestamp(now).strftime("%Y%m%d%H%M%S"),
+        timestamp=datetime.fromtimestamp(wall_now).strftime("%Y%m%d%H%M%S"),
         grain_mode=grain_mode,
         copies=copies,
         fabric_width_mm=fabric_width_mm,
@@ -206,7 +206,9 @@ async def auto_layout_endpoint(request: Request) -> dict:
         marker_length_mm=marker_length,
         utilization_pct=utilization,
         duration_ms=duration_ms,
-        created_at=now,
+        # Monotonic — used only for FIFO ordering, never displayed.
+        # Wall-clock display lives in `timestamp`.
+        created_at=time.monotonic(),
     )
     get_cache().insert(entry)
 
