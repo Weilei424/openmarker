@@ -159,6 +159,7 @@ Task checklist:
 ### Phase 6 follow-ups — algorithm performance
 
 - [x] Engine: branch pruning in serial `auto_layout_polygon` — abort strategies whose partial marker length already meets/exceeds the best complete result. Monotone-bound argument: BLF's partial marker length is non-decreasing in the number of placed pieces. Measured speedup 1.04x–1.65x on synthetic inputs and 1.18x on the sample_2.dxf × 10 real workload (190 pieces, bi grain). Shipped in PR #7.
+- [x] Engine: parallel-path branch pruning via shared `multiprocessing.Value('d')` cutoff. Main process publishes completed-strategy results via `as_completed`; workers read per placement and self-abort once their partial >= shared cutoff. Result identical to serial mode. Measured wall-clock: sample_2.dxf × 10 (190 pieces, bi grain) drops from 25.7s (serial, pruning on) to 11.3s (parallel effort=5, pruning on) — 2.3x speedup from parallelism, plus pruning contributes ~10% within parallel mode (11.3s vs 12.5s no-prune). Also adds `disable_pruning: bool = False` toggle on `auto_layout_polygon` (mirrors `disable_nfp_cache`). Shipped in PR #<n>.
 
 ### Phase 7 — Export
 - [ ] Export layout as DXF or PNG (sourced from any cached layout tab)
@@ -191,7 +192,7 @@ Items not yet assigned to a phase. Rough notes captured to avoid losing context.
 
 ### Branch-pruning follow-ups (filed when PR #7 shipped)
 
-- [ ] **Parallel-path pruning.** Workers in `ProcessPoolExecutor` don't share `best_so_far`. Options: `multiprocessing.Value` for an atomic shared cutoff (checked every N placements to amortize IPC), or tournament staging (run 2 scout strategies serially first, then dispatch the rest with the established cutoff). Defer until benchmarks justify the IPC cost on real workloads.
+- [x] **Parallel-path pruning.** Workers in `ProcessPoolExecutor` don't share `best_so_far`. Options: `multiprocessing.Value` for an atomic shared cutoff (checked every N placements to amortize IPC), or tournament staging (run 2 scout strategies serially first, then dispatch the rest with the established cutoff). Defer until benchmarks justify the IPC cost on real workloads. (Shipped in PR #<n>.)
 - [ ] **Smart strategy ordering.** Run the historically-best sort strategy first so the cutoff tightens sooner for the remaining runs. Needs telemetry on which sort wins most often (currently no data).
 - [ ] **Cutoff slack.** Accept runs within `epsilon` of best for diversity (e.g., to keep "almost as good" results for future export/comparison). Not needed today; file here so it's not lost.
 
