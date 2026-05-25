@@ -156,6 +156,10 @@ Task checklist:
 - [x] `useLayoutCache` on-mount `refresh()` — tabs restored after webview reload
 - [x] Cache FIFO ordering — replaced `time.monotonic()` with internal monotonic integer `_sort_key` (avoids Windows 16 ms resolution ties)
 
+### Phase 6 follow-ups — algorithm performance
+
+- [x] Engine: branch pruning in serial `auto_layout_polygon` — abort strategies whose partial marker length already meets/exceeds the best complete result. Monotone-bound argument: BLF's partial marker length is non-decreasing in the number of placed pieces. Measured speedup 1.04x–1.65x on synthetic inputs and 1.18x on the sample_2.dxf × 10 real workload (190 pieces, bi grain).
+
 ### Phase 7 — Export
 - [ ] Export layout as DXF or PNG (sourced from any cached layout tab)
 - [ ] Export UI flow
