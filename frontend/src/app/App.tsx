@@ -33,6 +33,9 @@ export default function App() {
   const [disableNfpCache, setDisableNfpCache] = useState<boolean>(false);
   const [effort, setEffort] = useState<number>(1);
   const [maxCacheEntries, setMaxCacheEntries] = useState<number>(5);
+  // TEMP(phase6-bench): include effort in dedup key so the same settings at
+  // different effort levels create separate cache tabs for benchmarking.
+  const [includeEffortInKey, setIncludeEffortInKey] = useState<boolean>(false);
 
   const { runAutoLayout, abort: abortAutoLayout, status: autoStatus, errorMessage: autoError } = useAutoLayout();
   const { entries, activeId, activeEntry, setActiveId, closeTab, refresh: refreshCache, clearAll: clearCache } = useLayoutCache();
@@ -150,7 +153,7 @@ export default function App() {
       setCopiesInput(canonical);
     }
     const outcome = await runAutoLayout(
-      currentFileName, expandedPieces, fabricWidthMm, grainMode, FABRIC_GRAIN_DEG, copies, disableNfpCache, effort, maxCacheEntries,
+      currentFileName, expandedPieces, fabricWidthMm, grainMode, FABRIC_GRAIN_DEG, copies, disableNfpCache, effort, maxCacheEntries, includeEffortInKey,
     );
     if (outcome.ok) {
       await refreshCache();
@@ -165,7 +168,7 @@ export default function App() {
     } else {
       setStatusMessage(`Auto layout failed: ${outcome.errorMessage}`);
     }
-  }, [expandedPieces, currentFileName, fabricWidthMm, grainMode, copies, copiesInput, disableNfpCache, effort, maxCacheEntries, runAutoLayout, refreshCache, setActiveId]);
+  }, [expandedPieces, currentFileName, fabricWidthMm, grainMode, copies, copiesInput, disableNfpCache, effort, maxCacheEntries, includeEffortInKey, runAutoLayout, refreshCache, setActiveId]);
 
   const importButtonLabel = importStatus === "loading" ? "Importing..." : "Import DXF";
 
@@ -241,6 +244,17 @@ export default function App() {
               <span style={{ fontSize: 12 }}>Disable NFP cache</span>
             </label>
             <p style={styles.advancedHint}>For benchmarking. Layout result is identical either way; only speed changes.</p>
+
+            {/* TEMP(phase6-bench): cache key includes effort for benchmarking */}
+            <label style={styles.advancedCheckRow}>
+              <input
+                type="checkbox"
+                checked={includeEffortInKey}
+                onChange={(e) => setIncludeEffortInKey(e.target.checked)}
+              />
+              <span style={{ fontSize: 12 }}>[TEMP] Include effort in cache key</span>
+            </label>
+            <p style={styles.advancedHint}>For benchmarking: same settings at different effort levels create separate tabs.</p>
 
             <div style={{ marginTop: 8 }}>
               <div style={styles.settingLabel}>Parallel effort</div>

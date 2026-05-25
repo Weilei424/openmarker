@@ -132,6 +132,10 @@ async def auto_layout_endpoint(request: Request) -> dict:
     if effort < 1 or effort > 5:
         raise HTTPException(status_code=422, detail=f"`effort` must be between 1 and 5, got {effort}")
 
+    # TEMP(phase6-bench): when True, dedup key also includes the effort level,
+    # so the same settings run at different effort levels produce distinct entries.
+    include_effort_in_key = bool(body.get("include_effort_in_key", False))
+
     max_cache_entries = body.get("max_cache_entries")
     if max_cache_entries is not None:
         try:
@@ -177,6 +181,7 @@ async def auto_layout_endpoint(request: Request) -> dict:
         grain_mode=grain_mode,
         copies=int(body.get("copies", 1)),
         fabric_width_mm=fabric_width_mm,
+        effort=effort if include_effort_in_key else None,  # TEMP(phase6-bench)
     )
     if existing is not None:
         return {
@@ -234,6 +239,11 @@ async def auto_layout_endpoint(request: Request) -> dict:
         # Wall-clock display lives in `timestamp`.
         created_at=time.monotonic(),
     )
+    # TEMP(phase6-bench): tag the entry with the effort level used to compute it,
+    # so future lookups with include_effort_in_key=True can find it.
+    # CachedLayout is a (non-frozen) @dataclass so a dynamic attribute is allowed.
+    if include_effort_in_key:
+        entry._bench_effort = effort
     get_cache().insert(entry)
 
     return {

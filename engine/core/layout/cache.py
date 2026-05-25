@@ -85,16 +85,25 @@ class LayoutCache:
         grain_mode: str,
         copies: int,
         fabric_width_mm: float,
+        effort: int | None = None,  # TEMP(phase6-bench): include in key when not None
     ) -> CachedLayout | None:
         """Return the newest entry matching ALL of (filename, grain_mode, copies,
         fabric_width_mm), or None. Used to dedup re-runs with identical settings."""
-        matches = [
-            e for e in self._entries.values()
-            if e.filename == filename
-            and e.grain_mode == grain_mode
-            and e.copies == copies
-            and e.fabric_width_mm == fabric_width_mm
-        ]
+        matches = []
+        for e in self._entries.values():
+            if not (e.filename == filename
+                    and e.grain_mode == grain_mode
+                    and e.copies == copies
+                    and e.fabric_width_mm == fabric_width_mm):
+                continue
+            # TEMP(phase6-bench): if effort is part of the key, require it to match.
+            # Entries inserted without the bench flag won't have _bench_effort set,
+            # so they're treated as effort=None and never collide with a tagged lookup.
+            if effort is not None:
+                stored = getattr(e, "_bench_effort", None)
+                if stored != effort:
+                    continue
+            matches.append(e)
         if not matches:
             return None
         return max(matches, key=self._order_key)

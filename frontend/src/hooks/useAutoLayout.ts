@@ -24,6 +24,7 @@ export function useAutoLayout() {
       disableNfpCache: boolean = false,
       effort: number = 1,
       maxCacheEntries: number = 5,
+      includeEffortInKey: boolean = false, // TEMP(phase6-bench)
     ): Promise<AutoLayoutOutcome> => {
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -45,6 +46,7 @@ export function useAutoLayout() {
             disable_nfp_cache: disableNfpCache,
             effort,
             max_cache_entries: maxCacheEntries,
+            include_effort_in_key: includeEffortInKey, // TEMP(phase6-bench)
           }),
           signal: controller.signal,
         });

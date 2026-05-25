@@ -329,6 +329,44 @@ async def test_auto_layout_max_cache_entries_takes_effect():
 
 
 @pytest.mark.asyncio
+async def test_include_effort_in_key_creates_distinct_entries():
+    """TEMP(phase6-bench): with include_effort_in_key=True, two runs at different
+    effort levels but identical settings produce two cache entries."""
+    body = {
+        "filename": "sample.dxf",
+        "pieces": [_square_piece()],
+        "fabric_width_mm": 1500,
+        "grain_mode": "single",
+        "grain_direction_deg": 90,
+        "copies": 1,
+        "include_effort_in_key": True,
+    }
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r1 = await client.post("/auto-layout", json={**body, "effort": 1})
+        r2 = await client.post("/auto-layout", json={**body, "effort": 2})
+        listing = await client.get("/layouts")
+    assert r1.json()["id"] != r2.json()["id"]
+    assert len(listing.json()) == 2
+
+
+@pytest.mark.asyncio
+async def test_include_effort_in_key_off_still_dedups_across_effort():
+    """Default behavior is unchanged: same settings dedup regardless of effort."""
+    body = {
+        "filename": "sample.dxf",
+        "pieces": [_square_piece()],
+        "fabric_width_mm": 1500,
+        "grain_mode": "single",
+        "grain_direction_deg": 90,
+        "copies": 1,
+    }
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r1 = await client.post("/auto-layout", json={**body, "effort": 1})
+        r2 = await client.post("/auto-layout", json={**body, "effort": 2})
+    assert r1.json()["id"] == r2.json()["id"]
+
+
+@pytest.mark.asyncio
 async def test_auto_layout_accepts_valid_effort():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         for good in (1, 2, 3, 4, 5):
