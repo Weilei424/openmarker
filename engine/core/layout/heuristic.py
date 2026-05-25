@@ -80,6 +80,17 @@ class Placement:
     rotation_deg: float
 
 
+class _PrunedRun(Exception):
+    """Internal: raised by `_blf_pack_nfp` when its partial marker length
+    already meets or exceeds `best_marker_so_far`. The serial caller in
+    `auto_layout_polygon` catches this and skips to the next strategy.
+
+    The check is sound because BLF's partial marker length is monotone
+    non-decreasing in the number of placed pieces — placing more can only
+    push the bottom edge further down, never bring it up.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Geometry helpers
 # ---------------------------------------------------------------------------
@@ -349,6 +360,7 @@ def _blf_pack_nfp(
     fabric_grain_deg: float,
     sort_key=None,
     nfp_cache: NfpCache | None = None,
+    best_marker_so_far: float | None = None,
 ) -> tuple[list[Placement], float, float]:
     """Bottom-Left-Fill using polygon set algebra over NFPs.
 
@@ -383,6 +395,7 @@ def _blf_pack_nfp(
 
     placements: list[Placement] = []
     placed: list[_Placed] = []
+    current_max_bottom: float = 0.0
 
     for piece in sorted_pieces:
         if is_cancelled():
@@ -495,6 +508,15 @@ def _blf_pack_nfp(
         dx = candidate_poly.bounds[0] - orig_minx
         dy = candidate_poly.bounds[1] - orig_miny
         placed.append(_Placed(piece, rot, candidate_poly, dx, dy))
+
+        # Branch pruning. `candidate_poly.bounds[3]` is the bottom edge of the
+        # bbox in screen-y-down coords (= top + height because _placed_polygon
+        # aligns minx/miny to the requested top-left). Partial marker length is
+        # monotone non-decreasing — once it meets the cutoff, this run cannot win.
+        if candidate_poly.bounds[3] > current_max_bottom:
+            current_max_bottom = candidate_poly.bounds[3]
+        if best_marker_so_far is not None and current_max_bottom + EDGE_GAP >= best_marker_so_far:
+            raise _PrunedRun()
 
     marker_length, utilization = _compute_metrics(placements, pieces, fabric_width_mm, _polygon_dims)
     return placements, marker_length, utilization

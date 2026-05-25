@@ -213,3 +213,56 @@ def test_kill_current_executor_no_op_when_none():
     """Calling kill before any layout runs must not raise."""
     from core.layout.heuristic import kill_current_executor
     kill_current_executor()  # should be silent no-op
+
+
+# --- branch pruning tests ---
+
+def test_blf_default_no_pruning_behavior_unchanged():
+    """Without best_marker_so_far, _blf_pack_nfp behaves exactly as before."""
+    from core.layout.heuristic import _blf_pack_nfp
+    pieces = [_make_square(f"p{i}", 100) for i in range(3)]
+    placements, length, _ = _blf_pack_nfp(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0
+    )
+    assert len(placements) == 3
+    assert length > 0
+
+
+def test_blf_high_cutoff_runs_to_completion():
+    """A cutoff above any plausible result should not trigger pruning."""
+    from core.layout.heuristic import _blf_pack_nfp
+    pieces = [_make_square(f"p{i}", 100) for i in range(3)]
+    placements, length, _ = _blf_pack_nfp(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        best_marker_so_far=1e9,
+    )
+    assert len(placements) == 3
+    assert length > 0
+
+
+def test_blf_tight_cutoff_raises_pruned_run():
+    """A cutoff at zero must trigger _PrunedRun before completion."""
+    from core.layout.heuristic import _blf_pack_nfp, _PrunedRun
+    pieces = [_make_square(f"p{i}", 100) for i in range(3)]
+    with pytest.raises(_PrunedRun):
+        _blf_pack_nfp(
+            pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+            best_marker_so_far=0.0,
+        )
+
+
+def test_blf_cutoff_just_above_optimal_does_not_prune():
+    """A cutoff strictly larger than the actual final marker length should
+    allow the run to finish. Run once to learn the length, then run again
+    with cutoff = length + 1 mm."""
+    from core.layout.heuristic import _blf_pack_nfp
+    pieces = [_make_square(f"p{i}", 100) for i in range(3)]
+    _, length, _ = _blf_pack_nfp(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0
+    )
+    placements2, length2, _ = _blf_pack_nfp(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        best_marker_so_far=length + 1.0,
+    )
+    assert len(placements2) == 3
+    assert abs(length2 - length) < 1e-6
