@@ -277,22 +277,22 @@ def test_blf_cutoff_just_above_optimal_does_not_prune():
     assert abs(length2 - length) < 1e-6
 
 
-def test_auto_layout_serial_pruning_gives_same_result():
-    """Pruning must not change the chosen layout. The serial path always
-    has pruning on after this PR; this test pins identical output across
-    two consecutive runs on a deterministic input."""
+def test_auto_layout_serial_pruning_matches_unpruned_best():
+    """auto_layout_polygon (with the new pruning wired in) must equal the
+    best across all strategies run individually without a cutoff. If pruning
+    ever silently discarded the winning run, this would fail."""
+    from core.layout.heuristic import _blf_pack_nfp, _SORT_STRATEGIES
     pieces = [_make_rect(f"p{i}", 80 + i * 10, 120) for i in range(5)]
-    a_placements, a_length, a_util = auto_layout_polygon(
+    pruned = auto_layout_polygon(
         pieces, fabric_width_mm=600, grain_mode="single", fabric_grain_deg=0.0, effort=1
     )
-    b_placements, b_length, b_util = auto_layout_polygon(
-        pieces, fabric_width_mm=600, grain_mode="single", fabric_grain_deg=0.0, effort=1
-    )
-    assert a_length == b_length
-    assert a_util == b_util
-    assert len(a_placements) == len(b_placements)
-    for pa, pb in zip(a_placements, b_placements):
-        assert pa.piece_id == pb.piece_id
-        assert abs(pa.x - pb.x) < 1e-6
-        assert abs(pa.y - pb.y) < 1e-6
-        assert pa.rotation_deg == pb.rotation_deg
+    # Independent baseline: every strategy run with no cutoff, take the shortest.
+    unpruned_best_length = None
+    for sk in _SORT_STRATEGIES:
+        _, length, _ = _blf_pack_nfp(
+            pieces, fabric_width_mm=600, grain_mode="single", fabric_grain_deg=0.0,
+            sort_key=sk,
+        )
+        if unpruned_best_length is None or length < unpruned_best_length:
+            unpruned_best_length = length
+    assert pruned[1] == unpruned_best_length
