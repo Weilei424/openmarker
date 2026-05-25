@@ -218,14 +218,23 @@ def test_kill_current_executor_no_op_when_none():
 # --- branch pruning tests ---
 
 def test_blf_default_no_pruning_behavior_unchanged():
-    """Without best_marker_so_far, _blf_pack_nfp behaves exactly as before."""
+    """Two calls with best_marker_so_far=None must produce identical output —
+    pins that the default code path is deterministic and unaffected by the
+    new parameter."""
     from core.layout.heuristic import _blf_pack_nfp
     pieces = [_make_square(f"p{i}", 100) for i in range(3)]
-    placements, length, _ = _blf_pack_nfp(
+    a_pl, a_len, a_util = _blf_pack_nfp(
         pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0
     )
-    assert len(placements) == 3
-    assert length > 0
+    b_pl, b_len, b_util = _blf_pack_nfp(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0
+    )
+    assert len(a_pl) == 3 and len(b_pl) == 3
+    assert a_len == b_len
+    assert a_util == b_util
+    for pa, pb in zip(a_pl, b_pl):
+        assert pa.piece_id == pb.piece_id
+        assert pa.x == pb.x and pa.y == pb.y and pa.rotation_deg == pb.rotation_deg
 
 
 def test_blf_high_cutoff_runs_to_completion():
