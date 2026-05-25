@@ -73,51 +73,53 @@ def _load_dxf_pieces(path: str, copies: int) -> list[Piece]:
     return expanded
 
 
-def _run(pieces, fabric_width_mm, grain_mode):
+def _run(pieces, fabric_width_mm, grain_mode, effort):
     t0 = time.perf_counter()
     result = heuristic.auto_layout_polygon(
         pieces, fabric_width_mm=fabric_width_mm,
-        grain_mode=grain_mode, fabric_grain_deg=0.0, effort=1,
+        grain_mode=grain_mode, fabric_grain_deg=0.0, effort=effort,
     )
     return time.perf_counter() - t0, result[1]  # (seconds, marker_length)
 
 
-def _bench(name: str, pieces, fabric_width_mm: float, grain_mode: str = "single") -> None:
-    # Warmup pass — first call eats import/JIT overhead (shapely, pyclipper).
-    # Matches bench_nfp_cache.py's pattern of discarding iteration 1.
-    _run(pieces, fabric_width_mm, grain_mode)
+def _bench(name: str, pieces, fabric_width_mm: float, grain_mode: str = "single", effort: int = 1) -> None:
+    # Warmup pass — eats import/JIT overhead (shapely, pyclipper, process spawn).
+    _run(pieces, fabric_width_mm, grain_mode, effort)
 
-    on_t, on_len = _run(pieces, fabric_width_mm, grain_mode)
+    on_t, on_len = _run(pieces, fabric_width_mm, grain_mode, effort)
 
     original = heuristic._blf_pack_nfp
     def no_prune(*args, **kwargs):
+        # Strip BOTH cutoff kwargs so the baseline runs with no pruning at all
+        # (matches both serial-path and parallel-path call sites).
         kwargs.pop("best_marker_so_far", None)
+        kwargs.pop("shared_best_value", None)
         return original(*args, **kwargs)
     heuristic._blf_pack_nfp = no_prune
     try:
-        off_t, off_len = _run(pieces, fabric_width_mm, grain_mode)
+        off_t, off_len = _run(pieces, fabric_width_mm, grain_mode, effort)
     finally:
         heuristic._blf_pack_nfp = original
 
     speedup = off_t / on_t if on_t > 0 else float("inf")
     same = "same" if abs(on_len - off_len) < 1e-6 else f"DIFFER on={on_len:.2f} off={off_len:.2f}"
-    print(f"{name:50s} on={on_t*1000:8.1f}ms  off={off_t*1000:8.1f}ms  speedup={speedup:5.2f}x  result={same}")
+    print(f"{name:55s} on={on_t*1000:8.1f}ms  off={off_t*1000:8.1f}ms  speedup={speedup:5.2f}x  result={same}")
 
 
 if __name__ == "__main__":
     # Many small same-size rects on a narrow strip — sort strategies should
     # diverge in quality, so pruning has real wins.
     pieces_small = [_piece(f"s{i}", 80, 60) for i in range(20)]
-    _bench("20 small rects (80x60), fabric=300", pieces_small, 300.0)
+    _bench("20 small rects (80x60), fabric=300", pieces_small, 300.0, effort=1)
 
     # Mixed sizes — area, max-dim, height, width sorts produce different orders.
     pieces_mixed = [_piece(f"m{i}", 100 + i * 20, 80 + (i % 3) * 40) for i in range(8)]
-    _bench("8 mixed rects, fabric=400", pieces_mixed, 400.0)
+    _bench("8 mixed rects, fabric=400", pieces_mixed, 400.0, effort=1)
 
     # Bi mode — exercises both `bi` and the `single` fallback. Single should
     # prune early once bi establishes a tight cutoff (or vice versa).
     pieces_bi = [_piece(f"b{i}", 100, 200 if i % 2 else 80, grainline=0.0) for i in range(8)]
-    _bench("8 mixed rects, bi grain, fabric=400", pieces_bi, 400.0, "bi")
+    _bench("8 mixed rects, bi grain, fabric=400", pieces_bi, 400.0, "bi", effort=1)
 
     # Real workload: same fixture as the commercial-vs-ours comparison.
     dxf_path = _find_sample_dxf("sample_2.dxf")
@@ -125,4 +127,16 @@ if __name__ == "__main__":
         print("[skipped] sample_2.dxf not found — place it in examples/input/ to enable the real-workload bench")
     else:
         pieces_real = _load_dxf_pieces(dxf_path, copies=10)
-        _bench(f"sample_2.dxf x 10 copies ({len(pieces_real)} pieces), fabric=1500, bi", pieces_real, 1500.0, "bi")
+        _bench(f"sample_2.dxf x 10 copies ({len(pieces_real)} pieces), bi", pieces_real, 1500.0, "bi", effort=1)
+
+    # --- parallel scenarios (effort=5 = all cores) ---
+    print()  # blank line for readability
+    print("Parallel mode (effort=5):")
+
+    _bench("8 mixed rects, bi grain, fabric=400 [par]", pieces_bi, 400.0, "bi", effort=5)
+
+    if dxf_path is not None:
+        _bench(
+            f"sample_2.dxf x 10 copies ({len(pieces_real)} pieces), bi [par]",
+            pieces_real, 1500.0, "bi", effort=5,
+        )
