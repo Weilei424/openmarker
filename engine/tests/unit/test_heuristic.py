@@ -213,3 +213,86 @@ def test_kill_current_executor_no_op_when_none():
     """Calling kill before any layout runs must not raise."""
     from core.layout.heuristic import kill_current_executor
     kill_current_executor()  # should be silent no-op
+
+
+# --- branch pruning tests ---
+
+def test_blf_default_no_pruning_behavior_unchanged():
+    """Two calls with best_marker_so_far=None must produce identical output —
+    pins that the default code path is deterministic and unaffected by the
+    new parameter."""
+    from core.layout.heuristic import _blf_pack_nfp
+    pieces = [_make_square(f"p{i}", 100) for i in range(3)]
+    a_pl, a_len, a_util = _blf_pack_nfp(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0
+    )
+    b_pl, b_len, b_util = _blf_pack_nfp(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0
+    )
+    assert len(a_pl) == 3 and len(b_pl) == 3
+    assert a_len == b_len
+    assert a_util == b_util
+    for pa, pb in zip(a_pl, b_pl):
+        assert pa.piece_id == pb.piece_id
+        assert pa.x == pb.x and pa.y == pb.y and pa.rotation_deg == pb.rotation_deg
+
+
+def test_blf_high_cutoff_runs_to_completion():
+    """A cutoff above any plausible result should not trigger pruning."""
+    from core.layout.heuristic import _blf_pack_nfp
+    pieces = [_make_square(f"p{i}", 100) for i in range(3)]
+    placements, length, _ = _blf_pack_nfp(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        best_marker_so_far=1e9,
+    )
+    assert len(placements) == 3
+    assert length > 0
+
+
+def test_blf_tight_cutoff_raises_pruned_run():
+    """A cutoff at zero must trigger _PrunedRun before completion."""
+    from core.layout.heuristic import _blf_pack_nfp, _PrunedRun
+    pieces = [_make_square(f"p{i}", 100) for i in range(3)]
+    with pytest.raises(_PrunedRun):
+        _blf_pack_nfp(
+            pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+            best_marker_so_far=0.0,
+        )
+
+
+def test_blf_cutoff_just_above_optimal_does_not_prune():
+    """A cutoff strictly larger than the actual final marker length should
+    allow the run to finish. Run once to learn the length, then run again
+    with cutoff = length + 1 mm."""
+    from core.layout.heuristic import _blf_pack_nfp
+    pieces = [_make_square(f"p{i}", 100) for i in range(3)]
+    _, length, _ = _blf_pack_nfp(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0
+    )
+    placements2, length2, _ = _blf_pack_nfp(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        best_marker_so_far=length + 1.0,
+    )
+    assert len(placements2) == 3
+    assert abs(length2 - length) < 1e-6
+
+
+def test_auto_layout_serial_pruning_matches_unpruned_best():
+    """auto_layout_polygon (with the new pruning wired in) must equal the
+    best across all strategies run individually without a cutoff. If pruning
+    ever silently discarded the winning run, this would fail."""
+    from core.layout.heuristic import _blf_pack_nfp, _SORT_STRATEGIES
+    pieces = [_make_rect(f"p{i}", 80 + i * 10, 120) for i in range(5)]
+    pruned = auto_layout_polygon(
+        pieces, fabric_width_mm=600, grain_mode="single", fabric_grain_deg=0.0, effort=1
+    )
+    # Independent baseline: every strategy run with no cutoff, take the shortest.
+    unpruned_best_length = None
+    for sk in _SORT_STRATEGIES:
+        _, length, _ = _blf_pack_nfp(
+            pieces, fabric_width_mm=600, grain_mode="single", fabric_grain_deg=0.0,
+            sort_key=sk,
+        )
+        if unpruned_best_length is None or length < unpruned_best_length:
+            unpruned_best_length = length
+    assert pruned[1] == unpruned_best_length
