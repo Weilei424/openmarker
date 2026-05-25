@@ -15,13 +15,17 @@ export function useAutoLayout() {
 
   const runAutoLayout = useCallback(
     async (
+      filename: string,
       pieces: Piece[],
       fabricWidthMm: number,
       grainMode: GrainMode,
       grainDirectionDeg: number,
-      fastMode: boolean
+      copies: number,
+      disableNfpCache: boolean = false,
+      effort: number = 1,
+      maxCacheEntries: number = 5,
+      includeEffortInKey: boolean = false, // TEMP(phase6-bench)
     ): Promise<AutoLayoutOutcome> => {
-      // Cancel any in-flight request before starting a new one.
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
@@ -33,11 +37,16 @@ export function useAutoLayout() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            filename,
             pieces,
             fabric_width_mm: fabricWidthMm,
             grain_mode: grainMode,
             grain_direction_deg: grainDirectionDeg,
-            fast_mode: fastMode,
+            copies,
+            disable_nfp_cache: disableNfpCache,
+            effort,
+            max_cache_entries: maxCacheEntries,
+            include_effort_in_key: includeEffortInKey, // TEMP(phase6-bench)
           }),
           signal: controller.signal,
         });
@@ -49,7 +58,6 @@ export function useAutoLayout() {
         setStatus("idle");
         return { ok: true, data };
       } catch (e) {
-        // Abort throws a DOMException with name "AbortError" in browsers / undici.
         if (e instanceof Error && (e.name === "AbortError" || /aborted/i.test(e.message))) {
           setStatus("idle");
           setErrorMessage(null);
@@ -69,12 +77,7 @@ export function useAutoLayout() {
   );
 
   const abort = useCallback(() => {
-    // Tell the engine to stop its current run at the next checkpoint
-    // (the layout loop checks a cancellation flag between piece placements).
-    // Fire-and-forget; the response is ignored.
-    fetch(`${ENGINE_URL}/cancel-layout`, { method: "POST" }).catch(() => {
-      // Engine might be unreachable; that's OK — the abort below still cancels the in-flight fetch.
-    });
+    fetch(`${ENGINE_URL}/cancel-layout`, { method: "POST" }).catch(() => {});
     abortRef.current?.abort();
   }, []);
 

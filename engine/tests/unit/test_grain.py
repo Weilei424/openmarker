@@ -2,30 +2,16 @@ import pytest
 from core.layout.grain import allowed_rotations
 
 
-def test_mode_none_returns_all_360():
-    result = allowed_rotations("none", fabric_grain_deg=0.0, piece_grainline_deg=90.0)
-    assert result == list(range(360))
-
-
-def test_mode_none_ignores_grainline():
-    """grain_mode='none' ignores piece grainline regardless of value."""
-    result = allowed_rotations("none", fabric_grain_deg=45.0, piece_grainline_deg=None)
-    assert result == list(range(360))
-
-
 def test_piece_without_grainline_always_free():
-    """Any grain mode with piece_grainline_deg=None returns all 360 rotations."""
+    """Any grain mode with piece_grainline_deg=None returns all 360 rotations
+    — no constraint without grain data."""
     for mode in ("single", "bi"):
         result = allowed_rotations(mode, fabric_grain_deg=0.0, piece_grainline_deg=None)
         assert result == list(range(360)), f"mode={mode} with None grainline should be free"
 
 
 def test_single_aligns_grainline_with_fabric():
-    """
-    fabric_grain=0°, piece_grain=90° →
-    target = (0 - 90) % 360 = 270°.
-    Rotating piece 270° CW turns its 90° grainline to 0° (fabric grain).
-    """
+    """fabric_grain=0°, piece_grain=90° → target=(0-90)%360=270°."""
     result = allowed_rotations("single", fabric_grain_deg=0.0, piece_grainline_deg=90.0)
     assert result == [270.0]
 
@@ -52,6 +38,12 @@ def test_single_45_degree_fabric():
     """fabric=45°, piece_grain=90° → target=(45-90)%360=315°."""
     result = allowed_rotations("single", fabric_grain_deg=45.0, piece_grainline_deg=90.0)
     assert result == [315.0]
+
+
+def test_none_mode_is_rejected():
+    """Phase 6 removed 'none' as a grain mode."""
+    with pytest.raises(ValueError, match="Unknown grain_mode"):
+        allowed_rotations("none", fabric_grain_deg=0.0, piece_grainline_deg=0.0)
 
 
 def test_unknown_mode_raises():

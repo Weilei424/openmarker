@@ -1,7 +1,11 @@
 from __future__ import annotations
 
-import math
+import os
+import threading
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import pyclipper
 import shapely.affinity
@@ -9,8 +13,53 @@ from shapely.geometry import Polygon as ShapelyPolygon, box as shapely_box
 from shapely.ops import unary_union
 
 from core.layout.cancellation import CancellationError, is_cancelled
-from core.layout.grain import allowed_rotations
 from core.models.piece import Piece
+
+
+# ---------------------------------------------------------------------------
+# Parallel-cancel plumbing
+# ---------------------------------------------------------------------------
+# Tracks the in-flight ProcessPoolExecutor (if any) so /cancel-layout can
+# terminate its worker children. Without this, parallel strategies run to
+# completion after the user clicks Stop because the module-level cancellation
+# flag only reaches the SERIAL hot loop — child processes never check it.
+_executor_lock = threading.Lock()
+_current_executor: ProcessPoolExecutor | None = None
+
+
+def _set_current_executor(ex: ProcessPoolExecutor | None) -> None:
+    global _current_executor
+    with _executor_lock:
+        _current_executor = ex
+
+
+def kill_current_executor() -> None:
+    """Forcibly terminate any in-flight ProcessPoolExecutor workers. Called by
+    /cancel-layout so parallel strategies abort ASAP rather than running to
+    completion. No-op when no executor is active or in serial mode.
+
+    Touches ProcessPoolExecutor._processes — an internal attribute. If a future
+    Python release removes it the except-Exception falls through gracefully and
+    the executor still gets shutdown(cancel_futures=True), which prevents NEW
+    submissions but doesn't kill the in-flight ones.
+    """
+    with _executor_lock:
+        ex = _current_executor
+    if ex is None:
+        return
+    try:
+        for proc in list(ex._processes.values()):
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+    except Exception:
+        # _processes is implementation-detail; if it disappears, fall through.
+        pass
+    try:
+        ex.shutdown(wait=False, cancel_futures=True)
+    except Exception:
+        pass
 
 # Integer scale for pyclipper. Preserves 3 decimal places of mm precision;
 # polygons up to ~2 km square stay within int32 range.
@@ -34,16 +83,6 @@ class Placement:
 # ---------------------------------------------------------------------------
 # Geometry helpers
 # ---------------------------------------------------------------------------
-
-def _rotated_bbox_dims(piece: Piece, rotation_deg: float) -> tuple[float, float]:
-    """Return (width, height) of the axis-aligned bbox of the piece rotated CW by rotation_deg."""
-    angle_rad = math.radians(rotation_deg)
-    cos_a = abs(math.cos(angle_rad))
-    sin_a = abs(math.sin(angle_rad))
-    w = piece.bbox.width * cos_a + piece.bbox.height * sin_a
-    h = piece.bbox.width * sin_a + piece.bbox.height * cos_a
-    return w, h
-
 
 def _placed_polygon(piece: Piece, x: float, y: float, rotation_deg: float) -> ShapelyPolygon:
     """Return the piece polygon rotated CW by rotation_deg (screen) and translated to (x, y).
@@ -86,19 +125,17 @@ def _layout_rotations(
 ) -> list[float]:
     """Discrete rotation set for layout search.
 
-    For 'none' mode we use cardinal angles (4 candidates) rather than the 360
-    returned by allowed_rotations(): production markers only ever use cardinal
-    rotations, and 360 candidates is wasted search across grain-free layouts.
+    Pieces with no grainline data: fall back to cardinal angles (production
+    markers only use cardinal rotations; 360 candidates wastes search).
     """
-    if grain_mode == "none" or piece_grainline_deg is None:
+    if piece_grainline_deg is None:
         return [0.0, 90.0, 180.0, 270.0]
     target = (fabric_grain_deg - piece_grainline_deg) % 360
     if grain_mode == "single":
         return [target]
-    elif grain_mode == "bi":
+    if grain_mode == "bi":
         return [target, (target + 180) % 360]
-    else:
-        raise ValueError(f"Unknown grain_mode: {grain_mode!r}")
+    raise ValueError(f"Unknown grain_mode: {grain_mode!r}")
 
 
 def _compute_metrics(
@@ -143,155 +180,6 @@ def _validate_pieces_fit(
                 f"Piece '{piece.name}' minimum width {min_w:.1f} mm cannot fit within "
                 f"usable fabric width {fabric_width_mm - 2 * EDGE_GAP:.1f} mm at any allowed rotation."
             )
-
-
-# ---------------------------------------------------------------------------
-# Strip-packing (bbox / fast mode) — shelf-based
-# ---------------------------------------------------------------------------
-
-def _strip_pack(
-    pieces: list[Piece],
-    fabric_width_mm: float,
-    grain_mode: str,
-    fabric_grain_deg: float,
-    dim_fn,
-    fits_fn,
-    on_placed=None,
-    sort_key=None,
-) -> tuple[list[Placement], float, float]:
-    if sort_key is None:
-        sort_key = lambda p: p.area
-    sorted_pieces = sorted(pieces, key=sort_key, reverse=True)
-    _validate_pieces_fit(sorted_pieces, fabric_width_mm, grain_mode, fabric_grain_deg, dim_fn)
-
-    placements: list[Placement] = []
-    shelf_y = EDGE_GAP
-    shelf_h = 0.0
-    x_cursor = EDGE_GAP
-
-    def _best_rotation(piece: Piece, x: float, y: float) -> tuple[float, float, float] | None:
-        best: tuple[float, float, float] | None = None
-        for rot in _layout_rotations(grain_mode, fabric_grain_deg, piece.grainline_direction_deg):
-            w, h = dim_fn(piece, rot)
-            if fits_fn(piece, x, y, rot, w) and x + w + EDGE_GAP <= fabric_width_mm:
-                if best is None or h < best[2]:
-                    best = (rot, w, h)
-        return best
-
-    def _best_rotation_new_shelf(piece: Piece) -> tuple[float, float, float]:
-        best: tuple[float, float, float] | None = None
-        for rot in _layout_rotations(grain_mode, fabric_grain_deg, piece.grainline_direction_deg):
-            w, h = dim_fn(piece, rot)
-            if w + 2 * EDGE_GAP <= fabric_width_mm:
-                if best is None or h < best[2]:
-                    best = (rot, w, h)
-        assert best is not None, "piece passed validation but no rotation fits — invariant violated"
-        return best
-
-    for piece in sorted_pieces:
-        if is_cancelled():
-            raise CancellationError("Auto-layout cancelled by user.")
-        result = _best_rotation(piece, x_cursor, shelf_y)
-        if result is None:
-            shelf_y += shelf_h + EDGE_GAP
-            shelf_h = 0.0
-            x_cursor = EDGE_GAP
-            result = _best_rotation_new_shelf(piece)
-
-        rot, w, h = result
-        placements.append(Placement(piece.id, round(x_cursor, 4), round(shelf_y, 4), rot))
-        if on_placed is not None:
-            on_placed(piece, placements[-1], rot)
-        x_cursor += w + EDGE_GAP
-        shelf_h = max(shelf_h, h)
-
-    marker_length, utilization = _compute_metrics(placements, pieces, fabric_width_mm, dim_fn)
-    return placements, marker_length, utilization
-
-
-# ---------------------------------------------------------------------------
-# Bottom-Left-Fill (polygon mode) — gap-aware packing
-# ---------------------------------------------------------------------------
-
-def _blf_pack(
-    pieces: list[Piece],
-    fabric_width_mm: float,
-    grain_mode: str,
-    fabric_grain_deg: float,
-    sort_key=None,
-) -> tuple[list[Placement], float, float]:
-    """Bottom-Left-Fill placement using polygon collision detection.
-
-    For each piece (largest first by sort_key), pick the (x, y) position with
-    the smallest y (then smallest x) where the rotated polygon does not
-    positive-area-overlap any placed piece and stays within the fabric width.
-
-    Candidate (x, y) values are derived from placed pieces' right/bottom edges
-    so a new piece can nestle into gaps above shorter neighbors — the failure
-    mode of pure shelf-packing.
-
-    Touching boundaries does NOT count as collision (per cutting-room rule).
-    Reference: Burke et al., "A new bottom-left-fill heuristic algorithm for
-    the two-dimensional irregular packing problem" (Op. Research, 2006).
-    """
-    if sort_key is None:
-        sort_key = lambda p: p.area
-    sorted_pieces = sorted(pieces, key=sort_key, reverse=True)
-    _validate_pieces_fit(sorted_pieces, fabric_width_mm, grain_mode, fabric_grain_deg, _polygon_dims)
-
-    placements: list[Placement] = []
-    placed_polys: list[ShapelyPolygon] = []
-
-    for piece in sorted_pieces:
-        if is_cancelled():
-            raise CancellationError("Auto-layout cancelled by user.")
-        rotations = _layout_rotations(
-            grain_mode, fabric_grain_deg, piece.grainline_direction_deg
-        )
-        best: tuple[float, float, float, ShapelyPolygon] | None = None
-
-        for rot in rotations:
-            # Candidate positions: fabric top-left + every placed piece's right/bottom edge.
-            # No inter-piece gap — pieces may touch.
-            candidate_xs = {EDGE_GAP}
-            candidate_ys = {EDGE_GAP}
-            for pp in placed_polys:
-                candidate_xs.add(pp.bounds[2])
-                candidate_ys.add(pp.bounds[3])
-
-            for y in sorted(candidate_ys):
-                # Pruning: any candidate with y > best.y cannot improve.
-                if best is not None and y > best[0]:
-                    break
-
-                for x in sorted(candidate_xs):
-                    # Pruning: same y, x >= best.x cannot improve.
-                    if best is not None and y == best[0] and x >= best[1]:
-                        break
-
-                    candidate = _placed_polygon(piece, x, y, rot)
-
-                    if candidate.bounds[2] > fabric_width_mm - EDGE_GAP:
-                        continue
-                    if any(_has_area_overlap(candidate, pp) for pp in placed_polys):
-                        continue
-
-                    best = (y, x, rot, candidate)
-                    # x is sorted ascending; no smaller-x position remains at this y.
-                    break
-
-        if best is None:
-            raise ValueError(
-                f"Cannot place piece '{piece.name}' — no valid BLF position found "
-                f"(should be impossible after _validate_pieces_fit)."
-            )
-
-        y, x, rot, candidate = best
-        placements.append(Placement(piece.id, round(x, 4), round(y, 4), rot))
-        placed_polys.append(candidate)
-
-    marker_length, utilization = _compute_metrics(placements, pieces, fabric_width_mm, _polygon_dims)
-    return placements, marker_length, utilization
 
 
 # ---------------------------------------------------------------------------
@@ -356,6 +244,59 @@ def _compute_nfp_polygons(
     return result
 
 
+def _base_id(piece_id: str) -> str:
+    """Strip the frontend's '__c{n}' copy suffix.
+
+    Two pieces sharing a base id have identical polygons, so an NFP computed for
+    one is reusable for the other.
+    """
+    idx = piece_id.find("__c")
+    return piece_id if idx < 0 else piece_id[:idx]
+
+
+# Per-layout NFP cache. Key: (base_id_a, rot_a, base_id_b, rot_b). Value: NFP
+# polygons in "A-at-origin" coordinates. Translate by A's placement offset on use.
+NfpCache = dict[tuple[str, float, str, float], list[ShapelyPolygon]]
+
+
+def _get_or_compute_nfp(
+    cache: NfpCache,
+    piece_a: Piece, rot_a: float,
+    piece_b: Piece, rot_b: float,
+) -> list[ShapelyPolygon]:
+    """Memoized NFP between piece_a (stationary, at origin) and piece_b (orbiting,
+    at origin), each rotated. Keyed by base id so multiple copies of the same
+    shape and multiple sort strategies all share results.
+
+    Uses the identity NFP(B, A) = -NFP(A, B) (reflected through origin) to
+    serve a reverse-direction request from a cached forward result without
+    re-running pyclipper.MinkowskiSum. Doubles effective hit rate across sort
+    strategies that visit piece pairs in different orders.
+    """
+    base_a = _base_id(piece_a.id)
+    base_b = _base_id(piece_b.id)
+    key = (base_a, rot_a, base_b, rot_b)
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
+
+    reverse_key = (base_b, rot_b, base_a, rot_a)
+    reverse = cache.get(reverse_key)
+    if reverse is not None:
+        flipped = [
+            shapely.affinity.scale(p, xfact=-1, yfact=-1, origin=(0, 0))
+            for p in reverse
+        ]
+        cache[key] = flipped
+        return flipped
+
+    a_coords = _polygon_at_origin(piece_a, rot_a)
+    b_coords = _polygon_at_origin(piece_b, rot_b)
+    polys = _compute_nfp_polygons(a_coords, b_coords)
+    cache[key] = polys
+    return polys
+
+
 def _sorted_vertices(region) -> list[tuple[float, float]]:
     """Return all boundary vertices of a polygon region sorted by (y, x).
 
@@ -390,12 +331,24 @@ def _sorted_vertices(region) -> list[tuple[float, float]]:
     return verts
 
 
+class _Placed(NamedTuple):
+    """A successfully placed piece, with the offset that turns its
+    "at-origin rotated" coords into its placed coords. The offset lets us
+    translate a cached NFP into the placed-piece's reference frame."""
+    piece: Piece
+    rotation: float
+    polygon: ShapelyPolygon
+    dx: float
+    dy: float
+
+
 def _blf_pack_nfp(
     pieces: list[Piece],
     fabric_width_mm: float,
     grain_mode: str,
     fabric_grain_deg: float,
     sort_key=None,
+    nfp_cache: NfpCache | None = None,
 ) -> tuple[list[Placement], float, float]:
     """Bottom-Left-Fill using polygon set algebra over NFPs.
 
@@ -413,9 +366,15 @@ def _blf_pack_nfp(
 
     Touching is allowed — Shapely's difference produces the open valid region;
     its boundary vertices are exactly the touching positions.
+
+    `nfp_cache` is reused across sort strategies and grain modes within one
+    `auto_layout_polygon` call to avoid recomputing Minkowski sums for repeated
+    (shape, rotation) pairs — the dominant cost when copies > 1.
     """
     if sort_key is None:
         sort_key = lambda p: p.area
+    if nfp_cache is None:
+        nfp_cache = {}
     sorted_pieces = sorted(pieces, key=sort_key, reverse=True)
     _validate_pieces_fit(sorted_pieces, fabric_width_mm, grain_mode, fabric_grain_deg, _polygon_dims)
 
@@ -423,7 +382,7 @@ def _blf_pack_nfp(
     max_y_search = sum(max(p.bbox.width, p.bbox.height) for p in pieces) + EDGE_GAP
 
     placements: list[Placement] = []
-    placed_polys: list[ShapelyPolygon] = []
+    placed: list[_Placed] = []
 
     for piece in sorted_pieces:
         if is_cancelled():
@@ -431,7 +390,10 @@ def _blf_pack_nfp(
         rotations = _layout_rotations(
             grain_mode, fabric_grain_deg, piece.grainline_direction_deg
         )
-        best: tuple[float, float, float, ShapelyPolygon] | None = None
+        # best carries: (bbox_tl_y, bbox_tl_x, rot, candidate_poly, orig_minx, orig_miny)
+        # orig_minx/orig_miny are needed to derive (dx, dy) on commit so cached
+        # NFPs can be shifted to this placement's reference frame later.
+        best: tuple[float, float, float, ShapelyPolygon, float, float] | None = None
 
         for rot in rotations:
             new_coords = _polygon_at_origin(piece, rot)
@@ -451,11 +413,16 @@ def _blf_pack_nfp(
             ifp = shapely_box(nfx_min, nfy_min, nfx_max, nfy_max)
 
             nfp_polys: list[ShapelyPolygon] = []
-            for placed_poly in placed_polys:
-                placed_coords = list(placed_poly.exterior.coords)
-                if placed_coords and placed_coords[0] == placed_coords[-1]:
-                    placed_coords = placed_coords[:-1]
-                nfp_polys.extend(_compute_nfp_polygons(placed_coords, new_coords))
+            for rec in placed:
+                cached = _get_or_compute_nfp(
+                    nfp_cache, rec.piece, rec.rotation, piece, rot
+                )
+                if not cached:
+                    continue
+                nfp_polys.extend(
+                    shapely.affinity.translate(p, xoff=rec.dx, yoff=rec.dy)
+                    for p in cached
+                )
 
             if nfp_polys:
                 try:
@@ -491,10 +458,10 @@ def _blf_pack_nfp(
                     continue
                 if candidate_poly.bounds[1] < EDGE_GAP - 1e-3:
                     continue
-                if any(_has_area_overlap(candidate_poly, pp) for pp in placed_polys):
+                if any(_has_area_overlap(candidate_poly, rec.polygon) for rec in placed):
                     continue
 
-                best = (bbox_tl_y, bbox_tl_x, rot, candidate_poly)
+                best = (bbox_tl_y, bbox_tl_x, rot, candidate_poly, minx, miny)
                 break  # vertices sorted ascending; first valid is best at this rotation
 
         # Fallback: if NFP found nothing usable, force a "new shelf" placement
@@ -502,8 +469,8 @@ def _blf_pack_nfp(
         # The candidate sits strictly below max_placed_bottom + EDGE_GAP, so by
         # construction it cannot overlap any placed piece — no overlap check.
         if best is None:
-            max_placed_bottom = (
-                max((pp.bounds[3] for pp in placed_polys), default=EDGE_GAP)
+            max_placed_bottom = max(
+                (rec.polygon.bounds[3] for rec in placed), default=EDGE_GAP
             )
             fallback_y = max_placed_bottom + EDGE_GAP
             for rot in rotations:
@@ -511,7 +478,10 @@ def _blf_pack_nfp(
                 if pw + 2 * EDGE_GAP > fabric_width_mm:
                     continue
                 candidate_poly = _placed_polygon(piece, EDGE_GAP, fallback_y, rot)
-                best = (fallback_y, EDGE_GAP, rot, candidate_poly)
+                orig_coords = _polygon_at_origin(piece, rot)
+                orig_minx = min(c[0] for c in orig_coords)
+                orig_miny = min(c[1] for c in orig_coords)
+                best = (fallback_y, EDGE_GAP, rot, candidate_poly, orig_minx, orig_miny)
                 break
 
         if best is None:
@@ -520,9 +490,11 @@ def _blf_pack_nfp(
                 f"within fabric width {fabric_width_mm:.0f} mm."
             )
 
-        bbox_tl_y, bbox_tl_x, rot, candidate_poly = best
+        bbox_tl_y, bbox_tl_x, rot, candidate_poly, orig_minx, orig_miny = best
         placements.append(Placement(piece.id, round(bbox_tl_x, 4), round(bbox_tl_y, 4), rot))
-        placed_polys.append(candidate_poly)
+        dx = candidate_poly.bounds[0] - orig_minx
+        dy = candidate_poly.bounds[1] - orig_miny
+        placed.append(_Placed(piece, rot, candidate_poly, dx, dy))
 
     marker_length, utilization = _compute_metrics(placements, pieces, fabric_width_mm, _polygon_dims)
     return placements, marker_length, utilization
@@ -532,23 +504,28 @@ def _blf_pack_nfp(
 # Sort strategies — try several orderings and keep the best.
 # ---------------------------------------------------------------------------
 
-_SORT_STRATEGIES = [
-    lambda p: p.area,                                    # largest area first
-    lambda p: max(p.bbox.width, p.bbox.height),          # longest dim first
-    lambda p: p.bbox.height,                             # tallest first
-    lambda p: p.bbox.width,                              # widest first
-]
+# Named (module-level) functions so they can be pickled and shipped to
+# ProcessPoolExecutor workers; lambdas are NOT picklable.
+def _sort_by_area(p: Piece) -> float: return p.area
+def _sort_by_max_dim(p: Piece) -> float: return max(p.bbox.width, p.bbox.height)
+def _sort_by_height(p: Piece) -> float: return p.bbox.height
+def _sort_by_width(p: Piece) -> float: return p.bbox.width
+
+_SORT_STRATEGIES = [_sort_by_area, _sort_by_max_dim, _sort_by_height, _sort_by_width]
 
 
-def _best_of_strategies(run_one) -> tuple[list[Placement], float, float]:
-    """Run the packer with each sort strategy; return the shortest-length result."""
-    best: tuple[list[Placement], float, float] | None = None
-    for sort_key in _SORT_STRATEGIES:
-        result = run_one(sort_key)
-        if best is None or result[1] < best[1]:
-            best = result
-    assert best is not None
-    return best
+def _run_one_strategy(
+    pieces: list[Piece],
+    fabric_width_mm: float,
+    mode: str,
+    fabric_grain_deg: float,
+    sort_index: int,
+) -> tuple[list[Placement], float, float]:
+    """Module-level entry for ProcessPoolExecutor. sort_index selects from
+    _SORT_STRATEGIES so we don't have to pickle the callable across the
+    process boundary."""
+    sort_key = _SORT_STRATEGIES[sort_index]
+    return _blf_pack_nfp(pieces, fabric_width_mm, mode, fabric_grain_deg, sort_key=sort_key)
 
 
 # ---------------------------------------------------------------------------
@@ -567,40 +544,31 @@ def _modes_to_try(grain_mode: str) -> list[str]:
     """Bi mode's rotation set is a strict superset of single's. A greedy BLF
     can therefore produce a worse bi layout than single (a locally-good rotation
     leaves a worse global gap). To guarantee bi >= single, run both and keep
-    the shorter result. Same idea for none → bi → single as superset chain."""
+    the shorter result."""
     if grain_mode == "bi":
         return ["bi", "single"]
-    if grain_mode == "none":
-        return ["none"]
     return [grain_mode]
 
 
-def auto_layout_bbox(
-    pieces: list[Piece],
-    fabric_width_mm: float,
-    grain_mode: str,
-    fabric_grain_deg: float,
-) -> tuple[list[Placement], float, float]:
-    """Strip-packing using axis-aligned bounding boxes (fast mode).
+def _worker_count(effort: int) -> int:
+    """Resolve user-facing effort level (1-5) to a concrete worker count
+    based on the local CPU count. Higher levels leave less headroom for
+    the UI thread; Max uses every available core.
 
-    Returns (placements, marker_length_mm, utilization_pct).
-    Raises ValueError if any piece cannot fit at any allowed rotation.
+    effort values outside 1-5 are clamped (>5 → max, <1 → 1). API-level
+    validation rejects bad input before it ever reaches this function.
     """
-    def fits_bbox(piece, x, y, rot, w):
-        return True
-
-    best: tuple[list[Placement], float, float] | None = None
-    for mode in _modes_to_try(grain_mode):
-        def run_one(sort_key, _mode=mode):
-            return _strip_pack(
-                pieces, fabric_width_mm, _mode, fabric_grain_deg,
-                dim_fn=_rotated_bbox_dims,
-                fits_fn=fits_bbox,
-                sort_key=sort_key,
-            )
-        best = _shorter(best, _best_of_strategies(run_one))
-    assert best is not None
-    return best
+    if effort <= 1:
+        return 1
+    cpu = os.cpu_count() or 4
+    if effort == 2:
+        return 2
+    if effort == 3:
+        return max(2, cpu // 2)
+    if effort == 4:
+        return max(2, cpu - 1)
+    # effort >= 5
+    return max(2, cpu)
 
 
 def auto_layout_polygon(
@@ -608,6 +576,8 @@ def auto_layout_polygon(
     fabric_width_mm: float,
     grain_mode: str,
     fabric_grain_deg: float,
+    disable_nfp_cache: bool = False,
+    effort: int = 1,
 ) -> tuple[list[Placement], float, float]:
     """No-Fit-Polygon-based Bottom-Left-Fill (slow mode, accurate).
 
@@ -618,14 +588,68 @@ def auto_layout_polygon(
 
     Returns (placements, marker_length_mm, utilization_pct).
     Raises ValueError if any piece cannot fit at any allowed rotation.
+
+    `disable_nfp_cache`: when True, each strategy run gets a fresh cache and
+    no cross-strategy reuse happens. Identical results, slower — exposed for
+    A/B comparison and debugging only. Only meaningful on the serial path
+    (the parallel path always rebuilds per-worker caches anyway).
+
+    `effort`: user-facing parallel effort level (1=serial, 5=all cores).
+    When >1 and the input is large enough to amortize Windows process spawn
+    cost, sort strategies and bi-mode's secondary single run are dispatched
+    across worker processes via ProcessPoolExecutor. Cancellation is
+    best-effort on the parallel path (in-flight workers run to completion).
     """
+    modes = _modes_to_try(grain_mode)
+    total_runs = len(modes) * len(_SORT_STRATEGIES)
+    workers = _worker_count(effort)
+
+    # Skip the pool for tiny inputs — Windows spawn cost (~200-500ms per
+    # worker) outweighs the parallel win. The threshold is intentionally
+    # conservative; benchmarks should refine it but the cost of misjudging
+    # is small (a few hundred ms on a job that would have taken <1s anyway).
+    use_pool = workers > 1 and total_runs * len(pieces) >= 20
+
+    if not use_pool:
+        # Serial path. NFP cache shared across all strategies/modes for max
+        # reuse — this is the dominant win when copies > 1.
+        shared_cache: NfpCache = {}
+        best: tuple[list[Placement], float, float] | None = None
+        for mode in modes:
+            for sort_index in range(len(_SORT_STRATEGIES)):
+                cache = {} if disable_nfp_cache else shared_cache
+                result = _blf_pack_nfp(
+                    pieces, fabric_width_mm, mode, fabric_grain_deg,
+                    sort_key=_SORT_STRATEGIES[sort_index],
+                    nfp_cache=cache,
+                )
+                best = _shorter(best, result)
+        assert best is not None
+        return best
+
+    # Parallel path. Each worker rebuilds its own NFP cache (lost cross-strategy
+    # reuse) but we get N-way parallelism. /cancel-layout terminates the worker
+    # processes via kill_current_executor (see module top); the resulting
+    # BrokenProcessPool from future.result() is translated to CancellationError.
+    futures = []
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        _set_current_executor(pool)
+        try:
+            for mode in modes:
+                for sort_index in range(len(_SORT_STRATEGIES)):
+                    futures.append(pool.submit(
+                        _run_one_strategy,
+                        pieces, fabric_width_mm, mode, fabric_grain_deg, sort_index,
+                    ))
+            try:
+                results = [f.result() for f in futures]
+            except BrokenProcessPool as e:
+                raise CancellationError("Auto-layout cancelled (workers terminated).") from e
+        finally:
+            _set_current_executor(None)
+
     best: tuple[list[Placement], float, float] | None = None
-    for mode in _modes_to_try(grain_mode):
-        def run_one(sort_key, _mode=mode):
-            return _blf_pack_nfp(
-                pieces, fabric_width_mm, _mode, fabric_grain_deg,
-                sort_key=sort_key,
-            )
-        best = _shorter(best, _best_of_strategies(run_one))
+    for r in results:
+        best = _shorter(best, r)
     assert best is not None
     return best

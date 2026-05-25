@@ -6,7 +6,7 @@
 import { useRef, useState, useEffect, useCallback } from "react";
 import { Stage, Layer, Rect, Line, Group } from "react-konva";
 import type { KonvaEventObject } from "konva/lib/Node";
-import type { Piece, GrainMode } from "../../types/engine";
+import type { Piece } from "../../types/engine";
 import type { Placement } from "../../types/canvas";
 import { useViewport } from "../../hooks/useViewport";
 import { computeFitViewportFromWorldBbox } from "../../utils/placement";
@@ -22,7 +22,7 @@ interface Props {
   selectedPieceId: string | null;
   onSelectPiece: (id: string | null) => void;
   fabricWidthMm: number;
-  grainMode: GrainMode;
+  showGrainline: boolean;
   markerLengthMm: number;
 }
 
@@ -32,7 +32,7 @@ export function CanvasWorkspace({
   selectedPieceId,
   onSelectPiece,
   fabricWidthMm,
-  grainMode,
+  showGrainline,
   markerLengthMm,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -198,7 +198,7 @@ export function CanvasWorkspace({
                   placement={pl}
                   isSelected={isSelected}
                   onSelect={() => onSelectPiece(isSelected ? null : piece.id)}
-                  grainMode={grainMode}
+                  showGrainline={showGrainline}
                   scale={transform.scale}
                   baseStroke={colorForSet(setIdx)}
                   baseFill={fillForSet(setIdx, 0.12)}

@@ -110,9 +110,51 @@ User-visible scope (raw requirements captured from planning conversation):
 8. **UI — metrics moved to bottom panel + timer.** Remove the live metrics block from the left sidebar. Add a new bottom panel showing: marker length, utilization %, overflow warning, and a layout-duration timer in `MM:SS` format (measured from auto-layout request → response).
 9. **Feature — per-tab cached metrics.** Each cached-result tab keeps its own metrics (marker length, utilization, duration). Switching tabs swaps both the canvas placements and the bottom-panel metrics.
 
-Task checklist (filled in once the planning skill produces the detailed plan):
+Task checklist:
 
-- [ ] (to be populated by the Phase 6 planning skill)
+**Original Phase 6 plan:**
+- [x] Engine: `LayoutCache` module (FIFO, max 5, no dedup)
+- [x] Engine: wire cache into `POST /auto-layout` (returns id/timestamp/duration)
+- [x] Engine: `GET /layouts`, `GET /layouts/{id}`, `DELETE /layouts/{id}`, `DELETE /layouts`
+- [x] Engine: drop `'none'` grain mode
+- [x] Engine: drop `auto_layout_bbox` (fast mode)
+- [x] Engine: require `filename`, reject `grain_mode='none'` (422)
+- [x] Frontend: tighten `GrainMode` type, add `CachedLayout` types
+- [x] Frontend: `useLayoutCache` hook
+- [x] Frontend: `useAutoLayout` sends filename + copies; drops fast_mode
+- [x] Frontend: `usePlacements` derives from active cached entry
+- [x] Frontend: `GrainPanel` drops none + fast, adds Show grainline
+- [x] Frontend: `PieceShape` uses `showGrainline` prop
+- [x] Frontend: `CanvasWorkspace` passes `showGrainline`
+- [x] Frontend: `BottomPanel` with `MM:SS` timer
+- [x] Frontend: `CachedLayoutTabs` strip above canvas
+- [x] Frontend: App.tsx new layout; double-height copies input
+- [x] Frontend: delete unused `utils/metrics.ts`
+- [x] Desktop: drop fixed window size, start hidden
+- [x] Desktop: compute 70%-height 4:3 size in `lib.rs`
+
+**Bug fixes (found during manual testing):**
+- [x] Fix: CORS `allow_methods` missing `DELETE` — tab close silently failed in browser
+- [x] Fix: Tauri capability `core:window:allow-set-title` missing — OS title did not update
+- [x] Fix: Canvas freeze — canvas must reflect the active cached tab's snapshot, not live sidebar state
+- [x] Fix: Reset sidebar + clear cache on new DXF import
+
+**Performance improvements (pulled from Future/Unscheduled):**
+- [x] Engine: NFP cache across sort strategies, copies, and grain modes (per-call dict, reverse-key trick)
+- [x] Engine: parallel strategy execution via `ProcessPoolExecutor` with effort level 1–5
+- [x] Engine: `/cancel-layout` terminates parallel workers immediately (`kill_current_executor`)
+- [x] Frontend: Advanced sidebar — "Disable NFP cache" checkbox (dev/A-B toggle)
+- [x] Frontend: Advanced sidebar — Parallel effort radio (1–5 levels)
+- [x] Frontend: Configurable cache size input (5–20 entries)
+
+**TEMP feature — internal name: "NFP temp switch":**
+- [x] Engine + Frontend: `include_effort_in_key` flag — when enabled, the effort level is part of the cache dedup key so the same settings at different effort levels produce distinct entries; intended for benchmarking only. **Will be removed in a future PR** once parallel execution is validated.
+
+**Reviewer follow-ups (all resolved):**
+- [x] `GrainPanel.test.tsx` — vitest cases for Show grainline + single/bi radios
+- [x] `BottomPanel` overflow branch — removed (unreachable from NFP-BLF math)
+- [x] `useLayoutCache` on-mount `refresh()` — tabs restored after webview reload
+- [x] Cache FIFO ordering — replaced `time.monotonic()` with internal monotonic integer `_sort_key` (avoids Windows 16 ms resolution ties)
 
 ### Phase 7 — Export
 - [ ] Export layout as DXF or PNG (sourced from any cached layout tab)
@@ -125,3 +167,26 @@ Task checklist (filled in once the planning skill produces the detailed plan):
 - [ ] Generate app icons (scripts/gen-icons.py)
 - [ ] Remove any remaining setup friction
 - [ ] QA checklist for non-technical users
+
+---
+
+## Future / Unscheduled
+
+Items not yet assigned to a phase. Rough notes captured to avoid losing context.
+
+### NFP temp switch — removal target
+
+> Internal name: **NFP temp switch** (`include_effort_in_key` flag in engine + frontend).
+> Benchmarking-only. Remove once parallel execution confidence is high (target: Phase 7 acceptance testing window).
+
+- [ ] Remove `include_effort_in_key` from `POST /auto-layout` body parsing (`engine/api/main.py`)
+- [ ] Remove `_bench_effort` tagging and matching in `LayoutCache.find_by_settings` (`engine/core/layout/cache.py`)
+- [ ] Remove `includeEffortInKey` state + checkbox from `App.tsx` Advanced sidebar
+- [ ] Remove `includeEffortInKey` param from `useAutoLayout.runAutoLayout`
+- [ ] Remove `TEMP(phase6-bench)` comments throughout
+
+### Layout improvements — algorithm
+
+- [ ] **Identical-piece pre-clustering.** Before the main BLF loop, group pieces by base id. For each group, shelf-pack copies into a compact strip (within fabric width). Pass the strip as a super-piece to NFP-BLF, then expand placements back to individual coordinates at render time. Estimated gain: 5–10pp utilization on real markers (observed 7pp gap vs commercial software on sample_2.dxf). Medium effort.
+
+- [ ] **Grain-compatible mirroring.** When `grain_mode == "bi"`, allow horizontal reflection of pieces (flip x-coords within bbox center). Adds reflected copies to the rotation candidate set. Estimated gain: 1–3pp. Medium effort.
