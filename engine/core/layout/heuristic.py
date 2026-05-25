@@ -640,11 +640,15 @@ def auto_layout_polygon(
         for mode in modes:
             for sort_index in range(len(_SORT_STRATEGIES)):
                 cache = {} if disable_nfp_cache else shared_cache
-                result = _blf_pack_nfp(
-                    pieces, fabric_width_mm, mode, fabric_grain_deg,
-                    sort_key=_SORT_STRATEGIES[sort_index],
-                    nfp_cache=cache,
-                )
+                try:
+                    result = _blf_pack_nfp(
+                        pieces, fabric_width_mm, mode, fabric_grain_deg,
+                        sort_key=_SORT_STRATEGIES[sort_index],
+                        nfp_cache=cache,
+                        best_marker_so_far=best[1] if best is not None else None,
+                    )
+                except _PrunedRun:
+                    continue
                 best = _shorter(best, result)
         assert best is not None
         return best
