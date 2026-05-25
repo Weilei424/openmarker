@@ -301,17 +301,24 @@ def test_auto_layout_serial_pruning_matches_unpruned_best():
 # --- shared-cutoff (parallel pruning) tests ---
 
 def test_blf_shared_value_none_behaves_like_serial():
-    """When shared_best_value is None, behavior is identical to the serial path."""
+    """When shared_best_value is None, behavior is bitwise identical to omitting it.
+    Compares full placement geometry, not just length, so a regression that
+    shifts placements while preserving length would still fail."""
     from core.layout.heuristic import _blf_pack_nfp
     pieces = [_make_square(f"p{i}", 100) for i in range(3)]
-    _, length_serial, _ = _blf_pack_nfp(
+    pa, la, ua = _blf_pack_nfp(
         pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0
     )
-    _, length_shared, _ = _blf_pack_nfp(
+    pb, lb, ub = _blf_pack_nfp(
         pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
         shared_best_value=None,
     )
-    assert length_serial == length_shared
+    assert la == lb
+    assert ua == ub
+    assert len(pa) == len(pb)
+    for x, y in zip(pa, pb):
+        assert x.piece_id == y.piece_id
+        assert x.x == y.x and x.y == y.y and x.rotation_deg == y.rotation_deg
 
 
 def test_blf_shared_value_infinity_does_not_prune():
@@ -364,3 +371,14 @@ def test_blf_shared_value_takes_min_with_kwarg():
             best_marker_so_far=1.0,
             shared_best_value=shared_loose,
         )
+
+    # Both loose → min(loose, loose) is still loose → no prune, run completes.
+    # Guards against a buggy `min` that returns 0 or NaN when both inputs are present.
+    shared_loose2 = multiprocessing.Value("d", float("inf"))
+    placements, length, _ = _blf_pack_nfp(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        best_marker_so_far=1e9,
+        shared_best_value=shared_loose2,
+    )
+    assert len(placements) == 3
+    assert length > 0
