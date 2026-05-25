@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import threading
 from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from typing import NamedTuple
 
@@ -12,6 +14,52 @@ from shapely.ops import unary_union
 
 from core.layout.cancellation import CancellationError, is_cancelled
 from core.models.piece import Piece
+
+
+# ---------------------------------------------------------------------------
+# Parallel-cancel plumbing
+# ---------------------------------------------------------------------------
+# Tracks the in-flight ProcessPoolExecutor (if any) so /cancel-layout can
+# terminate its worker children. Without this, parallel strategies run to
+# completion after the user clicks Stop because the module-level cancellation
+# flag only reaches the SERIAL hot loop — child processes never check it.
+_executor_lock = threading.Lock()
+_current_executor: ProcessPoolExecutor | None = None
+
+
+def _set_current_executor(ex: ProcessPoolExecutor | None) -> None:
+    global _current_executor
+    with _executor_lock:
+        _current_executor = ex
+
+
+def kill_current_executor() -> None:
+    """Forcibly terminate any in-flight ProcessPoolExecutor workers. Called by
+    /cancel-layout so parallel strategies abort ASAP rather than running to
+    completion. No-op when no executor is active or in serial mode.
+
+    Touches ProcessPoolExecutor._processes — an internal attribute. If a future
+    Python release removes it the except-Exception falls through gracefully and
+    the executor still gets shutdown(cancel_futures=True), which prevents NEW
+    submissions but doesn't kill the in-flight ones.
+    """
+    with _executor_lock:
+        ex = _current_executor
+    if ex is None:
+        return
+    try:
+        for proc in list(ex._processes.values()):
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+    except Exception:
+        # _processes is implementation-detail; if it disappears, fall through.
+        pass
+    try:
+        ex.shutdown(wait=False, cancel_futures=True)
+    except Exception:
+        pass
 
 # Integer scale for pyclipper. Preserves 3 decimal places of mm precision;
 # polygons up to ~2 km square stay within int32 range.
@@ -580,18 +628,25 @@ def auto_layout_polygon(
         return best
 
     # Parallel path. Each worker rebuilds its own NFP cache (lost cross-strategy
-    # reuse) but we get N-way parallelism. Cancellation does NOT reach workers
-    # in v1 — they run to completion. Pool is created per-request and torn down
-    # on exit to keep idle memory at baseline.
+    # reuse) but we get N-way parallelism. /cancel-layout terminates the worker
+    # processes via kill_current_executor (see module top); the resulting
+    # BrokenProcessPool from future.result() is translated to CancellationError.
     futures = []
     with ProcessPoolExecutor(max_workers=workers) as pool:
-        for mode in modes:
-            for sort_index in range(len(_SORT_STRATEGIES)):
-                futures.append(pool.submit(
-                    _run_one_strategy,
-                    pieces, fabric_width_mm, mode, fabric_grain_deg, sort_index,
-                ))
-        results = [f.result() for f in futures]
+        _set_current_executor(pool)
+        try:
+            for mode in modes:
+                for sort_index in range(len(_SORT_STRATEGIES)):
+                    futures.append(pool.submit(
+                        _run_one_strategy,
+                        pieces, fabric_width_mm, mode, fabric_grain_deg, sort_index,
+                    ))
+            try:
+                results = [f.result() for f in futures]
+            except BrokenProcessPool as e:
+                raise CancellationError("Auto-layout cancelled (workers terminated).") from e
+        finally:
+            _set_current_executor(None)
 
     best: tuple[list[Placement], float, float] | None = None
     for r in results:

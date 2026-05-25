@@ -206,3 +206,10 @@ def test_auto_layout_effort_out_of_range_clamps_or_raises():
         pieces, fabric_width_mm=1500, grain_mode="single",
         fabric_grain_deg=90.0, effort=10,
     )
+
+
+
+def test_kill_current_executor_no_op_when_none():
+    """Calling kill before any layout runs must not raise."""
+    from core.layout.heuristic import kill_current_executor
+    kill_current_executor()  # should be silent no-op

@@ -249,8 +249,13 @@ async def auto_layout_endpoint(request: Request) -> dict:
 @app.post("/cancel-layout")
 def cancel_layout() -> dict:
     """Signal the in-progress auto-layout (if any) to abort at the next
-    piece-placement checkpoint. Returns immediately."""
+    piece-placement checkpoint AND terminate any parallel workers immediately."""
     request_cancellation()
+    # Parallel-mode kill: terminates ProcessPoolExecutor children so workers
+    # don't run to completion when the user clicks Stop. Local import keeps
+    # the top-level imports tidy; called only on the one-shot cancel path.
+    from core.layout.heuristic import kill_current_executor
+    kill_current_executor()
     return {"ok": True}
 
 
