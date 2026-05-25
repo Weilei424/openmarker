@@ -296,3 +296,71 @@ def test_auto_layout_serial_pruning_matches_unpruned_best():
         if unpruned_best_length is None or length < unpruned_best_length:
             unpruned_best_length = length
     assert pruned[1] == unpruned_best_length
+
+
+# --- shared-cutoff (parallel pruning) tests ---
+
+def test_blf_shared_value_none_behaves_like_serial():
+    """When shared_best_value is None, behavior is identical to the serial path."""
+    from core.layout.heuristic import _blf_pack_nfp
+    pieces = [_make_square(f"p{i}", 100) for i in range(3)]
+    _, length_serial, _ = _blf_pack_nfp(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0
+    )
+    _, length_shared, _ = _blf_pack_nfp(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        shared_best_value=None,
+    )
+    assert length_serial == length_shared
+
+
+def test_blf_shared_value_infinity_does_not_prune():
+    """A Value initialized to infinity (no cutoff yet) must not trigger pruning."""
+    import multiprocessing
+    from core.layout.heuristic import _blf_pack_nfp
+    pieces = [_make_square(f"p{i}", 100) for i in range(3)]
+    shared = multiprocessing.Value("d", float("inf"))
+    placements, length, _ = _blf_pack_nfp(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        shared_best_value=shared,
+    )
+    assert len(placements) == 3
+    assert length > 0
+
+
+def test_blf_shared_value_tight_cutoff_prunes():
+    """A shared Value with a tight cutoff must raise _PrunedRun mid-run."""
+    import multiprocessing
+    from core.layout.heuristic import _blf_pack_nfp, _PrunedRun
+    pieces = [_make_square(f"p{i}", 100) for i in range(3)]
+    shared = multiprocessing.Value("d", 1.0)  # any non-trivial placement exceeds this
+    with pytest.raises(_PrunedRun):
+        _blf_pack_nfp(
+            pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+            shared_best_value=shared,
+        )
+
+
+def test_blf_shared_value_takes_min_with_kwarg():
+    """When both best_marker_so_far and shared_best_value are provided, the
+    effective cutoff is the minimum (the tighter of the two prunes)."""
+    import multiprocessing
+    from core.layout.heuristic import _blf_pack_nfp, _PrunedRun
+    pieces = [_make_square(f"p{i}", 100) for i in range(3)]
+    # Kwarg is loose (1e9). Shared is tight (1.0). Effective = 1.0 → prune.
+    shared = multiprocessing.Value("d", 1.0)
+    with pytest.raises(_PrunedRun):
+        _blf_pack_nfp(
+            pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+            best_marker_so_far=1e9,
+            shared_best_value=shared,
+        )
+
+    # Inverted: kwarg tight, shared loose → still prune via kwarg.
+    shared_loose = multiprocessing.Value("d", float("inf"))
+    with pytest.raises(_PrunedRun):
+        _blf_pack_nfp(
+            pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+            best_marker_so_far=1.0,
+            shared_best_value=shared_loose,
+        )

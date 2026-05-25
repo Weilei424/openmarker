@@ -361,6 +361,7 @@ def _blf_pack_nfp(
     sort_key=None,
     nfp_cache: NfpCache | None = None,
     best_marker_so_far: float | None = None,
+    shared_best_value=None,  # multiprocessing.Value('d', ...) or None
 ) -> tuple[list[Placement], float, float]:
     """Bottom-Left-Fill using polygon set algebra over NFPs.
 
@@ -515,7 +516,15 @@ def _blf_pack_nfp(
         # monotone non-decreasing — once it meets the cutoff, this run cannot win.
         if candidate_poly.bounds[3] > current_max_bottom:
             current_max_bottom = candidate_poly.bounds[3]
-        if best_marker_so_far is not None and current_max_bottom + EDGE_GAP >= best_marker_so_far:
+        # Effective cutoff = min(caller-supplied initial, shared cross-worker).
+        # `.value` reads through the Value's internal lock (~1-5µs on Windows);
+        # negligible vs the placement work done above.
+        effective_cutoff = best_marker_so_far
+        if shared_best_value is not None:
+            sv = shared_best_value.value
+            if effective_cutoff is None or sv < effective_cutoff:
+                effective_cutoff = sv
+        if effective_cutoff is not None and current_max_bottom + EDGE_GAP >= effective_cutoff:
             raise _PrunedRun()
 
     marker_length, utilization = _compute_metrics(placements, pieces, fabric_width_mm, _polygon_dims)
