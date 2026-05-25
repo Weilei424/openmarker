@@ -382,3 +382,20 @@ def test_blf_shared_value_takes_min_with_kwarg():
     )
     assert len(placements) == 3
     assert length > 0
+
+
+def test_auto_layout_parallel_pruning_matches_serial():
+    """Parallel mode with shared-Value pruning must produce the same chosen
+    layout as the serial path. Result quality must never depend on whether
+    pruning is on or off, or on the worker count."""
+    # Pieces are mixed-size rects — different sort strategies diverge,
+    # so multiple workers are exercised and at least one is prunable.
+    pieces = [_make_rect(f"p{i}", 80 + i * 10, 100 + (i % 3) * 30) for i in range(6)]
+    serial = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="bi", fabric_grain_deg=0.0, effort=1
+    )
+    parallel = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="bi", fabric_grain_deg=0.0, effort=5
+    )
+    assert serial[1] == parallel[1]  # marker length
+    assert serial[2] == parallel[2]  # utilization
