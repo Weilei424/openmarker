@@ -65,9 +65,10 @@ def _load_dxf_pieces(path: str, copies: int) -> list[Piece]:
             base_pieces.append(normalize_piece(r, piece_id=f"piece_{i}"))
         except ValueError:
             pass
+    # Copy-outer / piece-inner order matches bench_nfp_cache.py's _expand.
     expanded: list[Piece] = []
-    for p in base_pieces:
-        for c in range(copies):
+    for c in range(copies):
+        for p in base_pieces:
             expanded.append(dataclasses.replace(p, id=f"{p.id}__c{c}"))
     return expanded
 
@@ -82,6 +83,10 @@ def _run(pieces, fabric_width_mm, grain_mode):
 
 
 def _bench(name: str, pieces, fabric_width_mm: float, grain_mode: str = "single") -> None:
+    # Warmup pass — first call eats import/JIT overhead (shapely, pyclipper).
+    # Matches bench_nfp_cache.py's pattern of discarding iteration 1.
+    _run(pieces, fabric_width_mm, grain_mode)
+
     on_t, on_len = _run(pieces, fabric_width_mm, grain_mode)
 
     original = heuristic._blf_pack_nfp
