@@ -78,6 +78,7 @@ def _init_worker(value) -> None:
     global _worker_shared_best
     _worker_shared_best = value
 
+
 # Integer scale for pyclipper. Preserves 3 decimal places of mm precision;
 # polygons up to ~2 km square stay within int32 range.
 _NFP_SCALE = 1000
@@ -716,8 +717,10 @@ def auto_layout_polygon(
                         result = f.result()
                     except _PrunedRun:
                         continue  # worker self-aborted via the shared cutoff; ignore
-                    # Publish under the Value's lock so concurrent completers
-                    # can't overwrite each other's lower value.
+                    # Lock so worker-process reads (via shared_best_value.value) can't
+                    # see a partial write while the main thread updates the shared cutoff.
+                    # as_completed itself is single-threaded, so there are no concurrent
+                    # writers — the lock exists solely to serialize against reader workers.
                     with shared_best.get_lock():
                         if result[1] < shared_best.value:
                             shared_best.value = result[1]
