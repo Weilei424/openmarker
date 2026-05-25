@@ -73,33 +73,22 @@ def _load_dxf_pieces(path: str, copies: int) -> list[Piece]:
     return expanded
 
 
-def _run(pieces, fabric_width_mm, grain_mode, effort):
+def _run(pieces, fabric_width_mm, grain_mode, effort, disable_pruning=False):
     t0 = time.perf_counter()
     result = heuristic.auto_layout_polygon(
         pieces, fabric_width_mm=fabric_width_mm,
         grain_mode=grain_mode, fabric_grain_deg=0.0, effort=effort,
+        disable_pruning=disable_pruning,
     )
     return time.perf_counter() - t0, result[1]  # (seconds, marker_length)
 
 
 def _bench(name: str, pieces, fabric_width_mm: float, grain_mode: str = "single", effort: int = 1) -> None:
     # Warmup pass — eats import/JIT overhead (shapely, pyclipper, process spawn).
-    _run(pieces, fabric_width_mm, grain_mode, effort)
+    _run(pieces, fabric_width_mm, grain_mode, effort, disable_pruning=False)
 
-    on_t, on_len = _run(pieces, fabric_width_mm, grain_mode, effort)
-
-    original = heuristic._blf_pack_nfp
-    def no_prune(*args, **kwargs):
-        # Strip BOTH cutoff kwargs so the baseline runs with no pruning at all
-        # (matches both serial-path and parallel-path call sites).
-        kwargs.pop("best_marker_so_far", None)
-        kwargs.pop("shared_best_value", None)
-        return original(*args, **kwargs)
-    heuristic._blf_pack_nfp = no_prune
-    try:
-        off_t, off_len = _run(pieces, fabric_width_mm, grain_mode, effort)
-    finally:
-        heuristic._blf_pack_nfp = original
+    on_t, on_len = _run(pieces, fabric_width_mm, grain_mode, effort, disable_pruning=False)
+    off_t, off_len = _run(pieces, fabric_width_mm, grain_mode, effort, disable_pruning=True)
 
     speedup = off_t / on_t if on_t > 0 else float("inf")
     same = "same" if abs(on_len - off_len) < 1e-6 else f"DIFFER on={on_len:.2f} off={off_len:.2f}"

@@ -399,3 +399,41 @@ def test_auto_layout_parallel_pruning_matches_serial():
     )
     assert serial[1] == parallel[1]  # marker length
     assert serial[2] == parallel[2]  # utilization
+
+
+def test_auto_layout_disable_pruning_yields_identical_result():
+    """The disable_pruning toggle must not affect output — only speed.
+    Mirrors the existing disable_nfp_cache test."""
+    pieces = [_make_rect(f"p{i}", 80 + i * 10, 100 + (i % 3) * 30) for i in range(6)]
+    on = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="bi", fabric_grain_deg=0.0,
+        effort=1, disable_pruning=False,
+    )
+    off = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="bi", fabric_grain_deg=0.0,
+        effort=1, disable_pruning=True,
+    )
+    assert on[1] == off[1]
+    assert on[2] == off[2]
+    assert len(on[0]) == len(off[0])
+    for a, b in zip(on[0], off[0]):
+        assert a.piece_id == b.piece_id
+        assert abs(a.x - b.x) < 1e-9
+        assert abs(a.y - b.y) < 1e-9
+        assert abs(a.rotation_deg - b.rotation_deg) < 1e-9
+
+
+def test_auto_layout_disable_pruning_parallel_matches_serial():
+    """disable_pruning must also work in parallel mode — confirms the flag
+    is correctly propagated to workers via the initializer."""
+    pieces = [_make_rect(f"p{i}", 80 + i * 10, 100 + (i % 3) * 30) for i in range(6)]
+    serial = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="bi", fabric_grain_deg=0.0,
+        effort=1, disable_pruning=True,
+    )
+    parallel = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="bi", fabric_grain_deg=0.0,
+        effort=5, disable_pruning=True,
+    )
+    assert serial[1] == parallel[1]
+    assert serial[2] == parallel[2]
