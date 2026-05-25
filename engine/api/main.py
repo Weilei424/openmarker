@@ -101,7 +101,8 @@ async def auto_layout_endpoint(request: Request) -> dict:
         "filename": "...",          // required
         "copies": 1,                // optional, defaults to 1
         "disable_nfp_cache": false, // optional, A/B benchmark toggle
-        "effort": 1                 // optional, 1=serial..5=all cores
+        "effort": 1,                // optional, 1=serial..5=all cores
+        "max_cache_entries": 5      // optional, 5..20; sets FIFO cap before dedup check
     }
 
     Response JSON:
@@ -130,6 +131,19 @@ async def auto_layout_endpoint(request: Request) -> dict:
     effort = int(body.get("effort", 1))
     if effort < 1 or effort > 5:
         raise HTTPException(status_code=422, detail=f"`effort` must be between 1 and 5, got {effort}")
+
+    max_cache_entries = body.get("max_cache_entries")
+    if max_cache_entries is not None:
+        try:
+            max_cache_entries = int(max_cache_entries)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="`max_cache_entries` must be an integer")
+        if max_cache_entries < 5 or max_cache_entries > 20:
+            raise HTTPException(
+                status_code=422,
+                detail=f"`max_cache_entries` must be 5..20, got {max_cache_entries}",
+            )
+        get_cache().set_max_entries(max_cache_entries)
 
     pieces_data = body.get("pieces", [])
     if not pieces_data:

@@ -31,9 +31,11 @@ class CachedLayout:
 
 
 class LayoutCache:
-    MAX_ENTRIES = 5
-
     def __init__(self) -> None:
+        # Per-instance FIFO eviction threshold (default matches the previous
+        # class-level MAX_ENTRIES). Mutate via `set_max_entries` so shrinking
+        # also trims the current contents.
+        self.max_entries: int = 5
         self._entries: dict[str, CachedLayout] = {}
         # Strictly-increasing counter that breaks ties when two entries
         # share a `created_at` (Windows monotonic resolution is ~16 ms,
@@ -43,11 +45,21 @@ class LayoutCache:
     def _order_key(self, entry: CachedLayout) -> tuple[float, int]:
         return (entry.created_at, entry._sort_key)
 
+    def set_max_entries(self, n: int) -> None:
+        """Set the FIFO eviction threshold. If n is smaller than current size,
+        evict oldest entries down to n immediately."""
+        if n < 1:
+            raise ValueError(f"max_entries must be >= 1, got {n}")
+        self.max_entries = n
+        while len(self._entries) > self.max_entries:
+            oldest_id = min(self._entries, key=lambda k: self._order_key(self._entries[k]))
+            del self._entries[oldest_id]
+
     def insert(self, entry: CachedLayout) -> None:
         entry._sort_key = self._next_sort_key
         self._next_sort_key += 1
         self._entries[entry.id] = entry
-        if len(self._entries) > self.MAX_ENTRIES:
+        if len(self._entries) > self.max_entries:
             oldest_id = min(self._entries, key=lambda k: self._order_key(self._entries[k]))
             del self._entries[oldest_id]
 
@@ -96,5 +108,7 @@ def get_cache() -> LayoutCache:
 
 
 def reset_cache() -> None:
-    """For tests: clear the singleton between cases."""
+    """For tests: clear the singleton between cases and restore the default
+    max_entries so per-test set_max_entries calls don't leak across cases."""
     _cache.clear()
+    _cache.max_entries = 5

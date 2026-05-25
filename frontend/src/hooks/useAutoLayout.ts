@@ -23,6 +23,7 @@ export function useAutoLayout() {
       copies: number,
       disableNfpCache: boolean = false,
       effort: number = 1,
+      maxCacheEntries: number = 5,
     ): Promise<AutoLayoutOutcome> => {
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -43,6 +44,7 @@ export function useAutoLayout() {
             copies,
             disable_nfp_cache: disableNfpCache,
             effort,
+            max_cache_entries: maxCacheEntries,
           }),
           signal: controller.signal,
         });

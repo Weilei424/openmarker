@@ -89,6 +89,28 @@ def test_find_by_settings_no_match_returns_none():
     ) is None
 
 
+def test_set_max_entries_trims_when_shrunk():
+    cache = LayoutCache()
+    cache.set_max_entries(20)
+    for i in range(10):
+        cache.insert(_make_entry(f"e{i}", created_at=float(i)))
+    assert len(cache.list()) == 10
+    cache.set_max_entries(3)
+    remaining = {e.id for e in cache.list()}
+    assert len(remaining) == 3
+    # Oldest evicted.
+    assert "e0" not in remaining
+    assert "e7" in remaining and "e8" in remaining and "e9" in remaining
+
+
+def test_set_max_entries_invalid_raises():
+    cache = LayoutCache()
+    with pytest.raises(ValueError):
+        cache.set_max_entries(0)
+    with pytest.raises(ValueError):
+        cache.set_max_entries(-1)
+
+
 def test_find_by_settings_newest_match_wins():
     """If multiple entries somehow share settings (legacy), return the newest."""
     import time as _t

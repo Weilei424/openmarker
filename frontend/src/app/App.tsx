@@ -32,6 +32,7 @@ export default function App() {
   const [copiesInput, setCopiesInput] = useState<string>("");
   const [disableNfpCache, setDisableNfpCache] = useState<boolean>(false);
   const [effort, setEffort] = useState<number>(1);
+  const [maxCacheEntries, setMaxCacheEntries] = useState<number>(5);
 
   const { runAutoLayout, abort: abortAutoLayout, status: autoStatus, errorMessage: autoError } = useAutoLayout();
   const { entries, activeId, activeEntry, setActiveId, closeTab, refresh: refreshCache, clearAll: clearCache } = useLayoutCache();
@@ -149,7 +150,7 @@ export default function App() {
       setCopiesInput(canonical);
     }
     const outcome = await runAutoLayout(
-      currentFileName, expandedPieces, fabricWidthMm, grainMode, FABRIC_GRAIN_DEG, copies, disableNfpCache, effort,
+      currentFileName, expandedPieces, fabricWidthMm, grainMode, FABRIC_GRAIN_DEG, copies, disableNfpCache, effort, maxCacheEntries,
     );
     if (outcome.ok) {
       await refreshCache();
@@ -164,7 +165,7 @@ export default function App() {
     } else {
       setStatusMessage(`Auto layout failed: ${outcome.errorMessage}`);
     }
-  }, [expandedPieces, currentFileName, fabricWidthMm, grainMode, copies, copiesInput, disableNfpCache, effort, runAutoLayout, refreshCache, setActiveId]);
+  }, [expandedPieces, currentFileName, fabricWidthMm, grainMode, copies, copiesInput, disableNfpCache, effort, maxCacheEntries, runAutoLayout, refreshCache, setActiveId]);
 
   const importButtonLabel = importStatus === "loading" ? "Importing..." : "Import DXF";
 
@@ -216,6 +217,21 @@ export default function App() {
           </Section>
 
           <Section title="Advanced">
+            <label style={styles.settingRow}>
+              <span style={styles.settingLabel}>Cached results (5–20)</span>
+              <input
+                type="number"
+                min={5}
+                max={20}
+                value={maxCacheEntries}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10);
+                  if (Number.isFinite(v)) setMaxCacheEntries(Math.max(5, Math.min(20, v)));
+                }}
+                style={styles.numberInputSmall}
+              />
+            </label>
+
             <label style={styles.advancedCheckRow}>
               <input
                 type="checkbox"
@@ -430,6 +446,23 @@ const styles = {
     flexDirection: "column" as const,
     gap: 6,
     fontSize: 12,
+  },
+  settingRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between" as const,
+    gap: 8,
+    fontSize: 12,
+  },
+  numberInputSmall: {
+    width: 60,
+    padding: "4px 6px",
+    background: "var(--color-surface)",
+    color: "var(--color-text)",
+    border: "1px solid var(--color-border)",
+    borderRadius: 3,
+    fontSize: 12,
+    textAlign: "right" as const,
   },
   settingLabel: { color: "var(--color-text-muted)" },
   numberInputTall: {

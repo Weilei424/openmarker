@@ -288,6 +288,47 @@ async def test_auto_layout_rejects_effort_out_of_range():
 
 
 @pytest.mark.asyncio
+async def test_auto_layout_max_cache_entries_validates():
+    body = {
+        "filename": "sample.dxf",
+        "pieces": [_square_piece()],
+        "fabric_width_mm": 1500,
+        "grain_mode": "single",
+        "grain_direction_deg": 90,
+    }
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        for bad in (4, 21, 0, -1, "notnum"):
+            res = await client.post("/auto-layout", json={**body, "max_cache_entries": bad})
+            assert res.status_code == 422, f"max_cache_entries={bad} should be 422"
+        # 5 and 20 are accepted.
+        for good in (5, 20):
+            res = await client.post("/auto-layout", json={
+                **body,
+                "fabric_width_mm": 1500 + good,  # distinct setting to dodge dedup
+                "max_cache_entries": good,
+            })
+            assert res.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_auto_layout_max_cache_entries_takes_effect():
+    """After raising the limit and inserting 7 entries, all 7 should survive."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        for i in range(7):
+            res = await client.post("/auto-layout", json={
+                "filename": "sample.dxf",
+                "pieces": [_square_piece()],
+                "fabric_width_mm": 1500 + i,
+                "grain_mode": "single",
+                "grain_direction_deg": 90,
+                "max_cache_entries": 10,
+            })
+            assert res.status_code == 200
+        listing = await client.get("/layouts")
+    assert len(listing.json()) == 7
+
+
+@pytest.mark.asyncio
 async def test_auto_layout_accepts_valid_effort():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         for good in (1, 2, 3, 4, 5):
