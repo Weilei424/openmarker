@@ -381,6 +381,8 @@ def _blf_pack_nfp(
     nfp_cache: NfpCache | None = None,
     best_marker_so_far: float | None = None,
     shared_best_value=None,  # multiprocessing.Value('d', ...) or None
+    override_rotations: list[float] | None = None,
+    skip_validation: bool = False,
 ) -> tuple[list[Placement], float, float]:
     """Bottom-Left-Fill using polygon set algebra over NFPs.
 
@@ -402,13 +404,22 @@ def _blf_pack_nfp(
     `nfp_cache` is reused across sort strategies and grain modes within one
     `auto_layout_polygon` call to avoid recomputing Minkowski sums for repeated
     (shape, rotation) pairs — the dominant cost when copies > 1.
+
+    `override_rotations`: when set, replaces the per-piece grain-derived rotation
+    set with this list verbatim. Used by `pack_cluster_union` to drive inner BLF
+    with cluster-local rotation sets that don't depend on piece grainline.
+
+    `skip_validation`: skip the upfront `_validate_pieces_fit` call. The caller
+    must have pre-filtered piece widths. Used by `pack_cluster_union`'s
+    candidate-width loop.
     """
     if sort_key is None:
         sort_key = lambda p: p.area
     if nfp_cache is None:
         nfp_cache = {}
     sorted_pieces = sorted(pieces, key=sort_key, reverse=True)
-    _validate_pieces_fit(sorted_pieces, fabric_width_mm, grain_mode, fabric_grain_deg, _polygon_dims)
+    if not skip_validation:
+        _validate_pieces_fit(sorted_pieces, fabric_width_mm, grain_mode, fabric_grain_deg, _polygon_dims)
 
     # Finite IFP height: piece heights stacked tallest-on-tallest as a hard upper bound.
     max_y_search = sum(max(p.bbox.width, p.bbox.height) for p in pieces) + EDGE_GAP
@@ -420,9 +431,12 @@ def _blf_pack_nfp(
     for piece in sorted_pieces:
         if is_cancelled():
             raise CancellationError("Auto-layout cancelled by user.")
-        rotations = _layout_rotations(
-            grain_mode, fabric_grain_deg, piece.grainline_direction_deg
-        )
+        if override_rotations is not None:
+            rotations = override_rotations
+        else:
+            rotations = _layout_rotations(
+                grain_mode, fabric_grain_deg, piece.grainline_direction_deg
+            )
         # best carries: (bbox_tl_y, bbox_tl_x, rot, candidate_poly, orig_minx, orig_miny)
         # orig_minx/orig_miny are needed to derive (dx, dy) on commit so cached
         # NFPs can be shifted to this placement's reference frame later.

@@ -527,3 +527,55 @@ def test_auto_layout_clustering_with_bi_grain():
     rotations = {pl.rotation_deg for pl in placements}
     assert len(rotations) == 1, f"copies in a rigid cluster should share rotation, got {rotations}"
     assert rotations.pop() in (0.0, 180.0)
+
+
+# --- inner-BLF shim plumbing tests ---
+
+def test_blf_pack_nfp_override_rotations_replaces_grain_logic():
+    """When override_rotations is set, _blf_pack_nfp ignores piece.grainline_direction_deg
+    and uses the override list verbatim. Single 100x50 rect with grainline=0.0 placed
+    via override [90.0] must come back rotated 90° (becomes 50 wide x 100 tall)."""
+    from core.layout.heuristic import _blf_pack_nfp
+    piece = _make_rect("p", 100, 50, grainline_deg=0.0)
+    placements, marker, util = _blf_pack_nfp(
+        [piece], fabric_width_mm=200,
+        grain_mode="single", fabric_grain_deg=0.0,
+        override_rotations=[90.0],
+        skip_validation=True,
+    )
+    assert len(placements) == 1
+    assert placements[0].rotation_deg == 90.0
+
+
+def test_blf_pack_nfp_skip_validation_allows_oversize_input():
+    """With skip_validation=True the upfront _validate_pieces_fit is not called.
+    Caller is trusted (e.g., pack_cluster_union's candidate-width pre-filter).
+    Test: a piece that would fail validation at grain-locked rotation still
+    runs when both override_rotations and skip_validation are set to a rotation
+    that fits."""
+    from core.layout.heuristic import _blf_pack_nfp
+    # 600 wide piece, fabric 200 — would fail _validate_pieces_fit at 0°.
+    # But at 90° it's 50 wide (fits 200). Override + skip_validation bypasses.
+    piece = _make_rect("p", 600, 50, grainline_deg=None)
+    placements, marker, util = _blf_pack_nfp(
+        [piece], fabric_width_mm=200,
+        grain_mode="single", fabric_grain_deg=0.0,
+        override_rotations=[90.0],
+        skip_validation=True,
+    )
+    assert len(placements) == 1
+    assert placements[0].rotation_deg == 90.0
+
+
+def test_blf_pack_nfp_default_behavior_unchanged():
+    """Regression guard: without override_rotations/skip_validation, _blf_pack_nfp
+    behaves exactly as before — derives rotations from grain_mode + grainline and
+    calls _validate_pieces_fit."""
+    from core.layout.heuristic import _blf_pack_nfp
+    piece = _make_rect("p", 100, 50, grainline_deg=0.0)
+    placements, marker, util = _blf_pack_nfp(
+        [piece], fabric_width_mm=200,
+        grain_mode="single", fabric_grain_deg=0.0,
+    )
+    assert len(placements) == 1
+    assert placements[0].rotation_deg == 0.0  # target = (0 - 0) % 360 = 0
