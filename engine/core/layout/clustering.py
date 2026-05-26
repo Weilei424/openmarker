@@ -60,15 +60,24 @@ def group_pieces_by_base_id(pieces: list[Piece]) -> dict[str, list[Piece]]:
     return groups
 
 
-def pack_cluster(pieces: list[Piece], fabric_width_mm: float) -> Cluster | None:
+def pack_cluster(
+    pieces: list[Piece],
+    fabric_width_mm: float,
+    grain_mode: str = "single",
+    fabric_grain_deg: float = 0.0,
+) -> Cluster | None:
     """Pack N copies of an identical piece into a compact super-piece.
 
     Returns None when:
       - N < 2 (single copy: no clustering benefit)
-      - No aspect ratio fits within fabric_width_mm - 2*EDGE_GAP
+      - No aspect ratio fits within fabric_width_mm - 2*EDGE_GAP at any
+        BLF-allowed rotation
 
     Among feasible aspect ratios (cols, rows) with cols*rows >= N, picks the
-    one with smallest (dead_slots, cluster_area).
+    one with smallest (cluster_h, cluster_w) — minimises marker-length
+    contribution first, then horizontal blockage. Dead slots are intentionally
+    NOT in the sort key: a taller dead-slot-free cluster contributes more to
+    marker length than a shorter cluster with a few dead slots.
     """
     if len(pieces) < 2:
         return None
@@ -77,23 +86,88 @@ def pack_cluster(pieces: list[Piece], fabric_width_mm: float) -> Cluster | None:
     piece_w = base.bbox.width
     piece_h = base.bbox.height
 
-    candidates: list[tuple[int, int, int, float, float]] = []
+    # Compute allowed rotations for the cluster (matches BLF's _layout_rotations).
+    base_grain = base.grainline_direction_deg
+    if base_grain is None:
+        rotations: list[float] = [0.0, 90.0, 180.0, 270.0]
+    else:
+        target = (fabric_grain_deg - base_grain) % 360
+        if grain_mode == "bi":
+            rotations = [target, (target + 180.0) % 360.0]
+        else:
+            rotations = [target]
+
+    def _width_at_rotation(w: float, h: float, deg: float) -> float:
+        """Return cluster width when rotated by `deg`. Exact for cardinal angles;
+        falls back to max(w, h) for non-cardinal (conservative — over-rejects
+        rather than allowing infeasible clusters)."""
+        r = deg % 180.0
+        if r < 1e-6 or abs(r - 180.0) < 1e-6:
+            return w
+        if abs(r - 90.0) < 1e-6:
+            return h
+        return max(w, h)
+
+    def _height_at_rotation(w: float, h: float, deg: float) -> float:
+        """Return cluster height (marker-length contribution) when rotated."""
+        r = deg % 180.0
+        if r < 1e-6 or abs(r - 180.0) < 1e-6:
+            return h
+        if abs(r - 90.0) < 1e-6:
+            return w
+        return max(w, h)
+
+    candidates: list[tuple[float, float, int, int]] = []
+    usable_width = fabric_width_mm - 2 * EDGE_GAP
     for cols in range(1, n + 1):
         rows = math.ceil(n / cols)
         cluster_w = cols * piece_w
         cluster_h = rows * piece_h
-        if cluster_w + 2 * EDGE_GAP > fabric_width_mm:
-            continue
-        dead = cols * rows - n
-        candidates.append((dead, cols, rows, cluster_w, cluster_h))
+        if base_grain is None:
+            # No grainline: BLF can freely choose any cardinal rotation. Use the
+            # natural-orientation feasibility check (cluster_w fits at 0°) to
+            # prevent selecting wide clusters that only fit when rotated 90° —
+            # those would be very tall in the marker-length direction and regress.
+            # The natural-orientation sort key (cluster_h, cluster_w) is then
+            # the marker contribution at 0° (the most likely placed orientation).
+            if cluster_w > usable_width:
+                continue
+            sort_h = cluster_h
+            sort_w = cluster_w
+        else:
+            # Grain-constrained: BLF must place the cluster at one of the
+            # allowed grain rotations. Check that AT LEAST ONE makes the cluster
+            # narrow enough — mirrors BLF's `_validate_pieces_fit` (min_w across
+            # rotations ≤ usable). This is the Bug 2 fix: the old check
+            # (cluster_w at 0°) allowed clusters that later crashed
+            # `_validate_pieces_fit` when the grain rotation required
+            # cluster_h > fabric_width.
+            feasible_rots = [
+                r for r in rotations
+                if _width_at_rotation(cluster_w, cluster_h, r) <= usable_width
+            ]
+            if not feasible_rots:
+                continue
+            # Sort key: minimum marker-length contribution across feasible
+            # rotations. For a grain-constrained piece (fixed target) this is
+            # the height at that rotation, which can differ from cluster_h when
+            # the target is 90°/270° (W and H swap). Using the actual height at
+            # the feasible rotation prevents selecting a cluster that appears
+            # short in natural orientation but is very tall when grain-rotated.
+            sort_h = min(_height_at_rotation(cluster_w, cluster_h, r) for r in feasible_rots)
+            sort_w = min(_width_at_rotation(cluster_w, cluster_h, r) for r in feasible_rots)
+        candidates.append((sort_h, sort_w, cluster_h, cluster_w, cols, rows))
     if not candidates:
         return None
 
-    # Sort by: fewest dead slots, then smallest cluster height (minimises marker
-    # length), then smallest area (equivalent when pieces are uniform, but kept
-    # for safety).
-    candidates.sort(key=lambda c: (c[0], c[4], c[3] * c[4]))
-    _, cols, rows, cluster_w, cluster_h = candidates[0]
+    # Sort: minimize sort_h (marker-length contribution at the best feasible
+    # rotation) primary, sort_w (horizontal blockage) secondary.
+    # cluster_h and cluster_w are appended as determinism tiebreakers.
+    # Dead slots are intentionally NOT in the key — a taller dead-slot-free
+    # cluster contributes more to marker length than a shorter cluster with a
+    # few dead slots. (Bug 1 fix: old key was (dead, cluster_h, area).)
+    candidates.sort(key=lambda c: (c[0], c[1], c[2], c[3]))
+    _sh, _sw, cluster_h, cluster_w, cols, rows = candidates[0]
 
     offsets: list[tuple[float, float]] = []
     for row in range(rows):
@@ -119,7 +193,10 @@ def pack_cluster(pieces: list[Piece], fabric_width_mm: float) -> Cluster | None:
 
 
 def pre_cluster_pieces(
-    pieces: list[Piece], fabric_width_mm: float
+    pieces: list[Piece],
+    fabric_width_mm: float,
+    grain_mode: str = "single",
+    fabric_grain_deg: float = 0.0,
 ) -> tuple[list[Piece], list[Cluster]]:
     """Group identical pieces and pack each group into a super-piece cluster.
 
@@ -136,7 +213,7 @@ def pre_cluster_pieces(
         if len(group) < 2:
             clustered_input.extend(group)
             continue
-        cluster = pack_cluster(group, fabric_width_mm)
+        cluster = pack_cluster(group, fabric_width_mm, grain_mode, fabric_grain_deg)
         if cluster is None:
             # Couldn't cluster (group's piece too wide for fabric); pass through.
             clustered_input.extend(group)

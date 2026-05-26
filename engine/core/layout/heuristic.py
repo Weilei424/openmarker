@@ -688,7 +688,7 @@ def auto_layout_polygon(
         blf_input = pieces
         clusters: list[Cluster] = []
     else:
-        blf_input, clusters = pre_cluster_pieces(pieces, fabric_width_mm)
+        blf_input, clusters = pre_cluster_pieces(pieces, fabric_width_mm, grain_mode, fabric_grain_deg)
 
     modes = _modes_to_try(grain_mode)
     total_runs = len(modes) * len(_SORT_STRATEGIES)
