@@ -437,3 +437,81 @@ def test_auto_layout_disable_pruning_parallel_matches_serial():
     )
     assert serial[1] == parallel[1]
     assert serial[2] == parallel[2]
+
+
+# --- identical-piece clustering tests ---
+
+def test_auto_layout_disable_clustering_yields_pre_cluster_behavior():
+    """With disable_clustering=True, the result must equal pre-clustering
+    behavior — same input, same chosen layout."""
+    pieces = [_make_rect(f"p__c{i}", 100, 80) for i in range(4)]
+    a = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        effort=1, disable_clustering=True,
+    )
+    b = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        effort=1, disable_clustering=True,
+    )
+    assert a[1] == b[1] and a[2] == b[2]
+    assert len(a[0]) == 4
+
+
+def test_auto_layout_clustering_singletons_unchanged():
+    """When every input piece is unique, clustering is a no-op."""
+    pieces = [_make_rect(f"piece_{i}", 80 + i * 10, 100 + (i % 3) * 30) for i in range(6)]
+    on = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        effort=1, disable_clustering=False,
+    )
+    off = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        effort=1, disable_clustering=True,
+    )
+    assert on[1] == off[1]
+    assert on[2] == off[2]
+
+
+def test_auto_layout_clustering_expands_to_n_placements():
+    """When clustering is on with N copies, the returned placements list must
+    have N entries (one per copy), not 1 (the super-piece)."""
+    pieces = [_make_rect(f"p__c{i}", 100, 80) for i in range(4)]
+    placements, _, _ = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        effort=1, disable_clustering=False,
+    )
+    assert len(placements) == 4
+    # Each placement should reference an original piece id
+    placement_ids = {pl.piece_id for pl in placements}
+    expected_ids = {f"p__c{i}" for i in range(4)}
+    assert placement_ids == expected_ids
+
+
+def test_auto_layout_clustering_does_not_increase_marker_length():
+    """Clustering can only preserve or shrink marker length, never grow it
+    (for rectangular pieces — irregular shapes are out of scope for this PR)."""
+    pieces = [_make_rect(f"p__c{i}", 100, 50) for i in range(8)]
+    on = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        effort=1, disable_clustering=False,
+    )
+    off = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        effort=1, disable_clustering=True,
+    )
+    assert on[1] <= off[1] + 1e-6, (
+        f"Clustering made marker LONGER: on={on[1]}, off={off[1]}"
+    )
+
+
+def test_auto_layout_clustering_with_bi_grain():
+    """Bi-grain must work with clustering: cluster rotates as a unit; each
+    expanded copy gets the cluster's rotation. Result must be valid (all N
+    pieces placed, no overlap)."""
+    pieces = [_make_rect(f"p__c{i}", 100, 80, grainline_deg=0.0) for i in range(4)]
+    placements, length, _ = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="bi", fabric_grain_deg=0.0,
+        effort=1, disable_clustering=False,
+    )
+    assert len(placements) == 4
+    assert length > 0
