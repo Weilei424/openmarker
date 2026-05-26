@@ -220,43 +220,33 @@ def pack_cluster_union(
     grain_mode: str = "single",
     fabric_grain_deg: float = 0.0,
 ) -> Cluster | None:
-    """Pack N identical copies into a grid, union the placed polygons, and return
-    a Cluster whose super_piece.polygon is the union exterior.
-
-    Returns None when:
+    """Pack N identical copies via an inner NFP-BLF, then union them into a
+    cluster polygon. Returns None when:
       - len(pieces) < 2 (no clustering benefit; pre_cluster_pieces passes through)
-      - No grid layout yields a connected single-polygon union below VERTEX_CAP
-        after simplification (pre_cluster_pieces will fall back to pack_cluster_bbox).
-
-    Copy positions follow the same row-major grid as pack_cluster_bbox; copies
-    touch exactly at shared edges so unary_union collapses them. Copy rotations
-    use the cluster-local set (all 0° for single mode; 0°/180° for bi + grainline;
-    all cardinals otherwise) — but in the grid arrangement all copies are at 0°.
+      - No candidate mini-fabric width yields a single-polygon union below VERTEX_CAP
+        after simplify (pre_cluster_pieces will fall back to pack_cluster_bbox).
     """
     if len(pieces) < 2:
         return None
     # Local import to avoid circular import at module load (heuristic imports clustering).
-    from core.layout.heuristic import _placed_polygon
+    from core.layout.heuristic import _blf_pack_nfp, _placed_polygon, Placement
 
     n = len(pieces)
     base = pieces[0]
     piece_w = base.bbox.width
     piece_h = base.bbox.height
 
-    # Cluster-local rotation set: derives from outer grain_mode and piece grainline.
-    # Single mode → no rotation freedom inside cluster regardless of grainline.
-    # Bi mode + grainline → flip only (0/180). Bi or no-mode + no grainline → all cardinals.
+    # Cluster-local rotation set: grain_mode is the primary branch.
+    # single → copies fixed at 0° (no local rotation freedom).
+    # bi + grainline → flip only {0, 180}.
+    # bi + no grainline (or grain_mode=="none") → all cardinal angles.
     base_grain = base.grainline_direction_deg
     if grain_mode == "single":
-        copy_local_rot = 0.0
-        cluster_local_rotations_set: list[float] = [0.0]
+        cluster_local_rotations: list[float] = [0.0]
     elif grain_mode == "bi" and base_grain is not None:
-        copy_local_rot = 0.0
-        cluster_local_rotations_set = [0.0, 180.0]
+        cluster_local_rotations = [0.0, 180.0]
     else:
-        # bi-mode with no grainline, or grain_mode="none"
-        copy_local_rot = 0.0
-        cluster_local_rotations_set = [0.0, 90.0, 180.0, 270.0]
+        cluster_local_rotations = [0.0, 90.0, 180.0, 270.0]
 
     # Outer rotations the cluster will be placed at (used for grain-rotation
     # feasibility filter on candidate widths). Mirrors PR #9's bug-2 logic.
@@ -289,33 +279,51 @@ def pack_cluster_union(
     best_candidate: tuple[float, float, float, float, Cluster] | None = None  # (sort_h, sort_w, cluster_h, cluster_w, cluster)
 
     for cols in range(1, n + 1):
-        rows = math.ceil(n / cols)
-        grid_w = cols * piece_w
-        grid_h = rows * piece_h
+        # Conservative upper-bound: cluster bbox width <= cols * piece_w
+        # (true for grid; true for tight-pack since copies fit inside their bbox column).
+        bbox_w_upper = cols * piece_w
+        bbox_h_upper = ((n + cols - 1) // cols) * piece_h
 
         # Grain-rotation feasibility: at least one outer rotation must keep the
-        # rotated grid width within usable_width. Same logic as pack_cluster_bbox.
+        # rotated bbox width within usable_width. Same logic as pack_cluster_bbox.
         feasible_outer_rots = [
             r for r in outer_rotations
-            if _width_at_rotation(grid_w, grid_h, r) <= usable_width
+            if _width_at_rotation(bbox_w_upper, bbox_h_upper, r) <= usable_width
         ]
         if not feasible_outer_rots:
             continue
 
-        # Build row-major grid offsets (copies touch at shared edges).
-        grid_offsets: list[tuple[float, float]] = []
-        for row in range(rows):
-            for col in range(cols):
-                if len(grid_offsets) >= n:
-                    break
-                grid_offsets.append((col * piece_w, row * piece_h))
-            if len(grid_offsets) >= n:
-                break
+        # Inner BLF on a mini-fabric of width (cols * piece_w + 2*EDGE_GAP + 1)
+        # so the effective packing area is cols * piece_w. The +1 mm slack is
+        # needed so the rightmost piece's touching position (nfx = cols*piece_w)
+        # is strictly inside the IFP (not on its boundary where Shapely's
+        # difference would not include it as a valid-region vertex).
+        # Skip validation (we already pre-filtered widths above) and override rotations.
+        try:
+            inner_placements, _, _ = _blf_pack_nfp(
+                pieces, fabric_width_mm=bbox_w_upper + 2 * EDGE_GAP + 1,
+                grain_mode="single", fabric_grain_deg=0.0,
+                override_rotations=cluster_local_rotations,
+                skip_validation=True,
+            )
+        except ValueError:
+            # Inner BLF couldn't place all copies at this mini-width — skip.
+            continue
+        if len(inner_placements) != n:
+            continue
 
-        # Compute union of pieces placed at grid positions (all at 0° rotation).
+        # Shift placements by -EDGE_GAP so cluster-local frame starts at (0, 0)
+        # rather than (EDGE_GAP, EDGE_GAP). Outer BLF adds its own EDGE_GAP.
+        shifted = [
+            Placement(pl.piece_id, pl.x - EDGE_GAP, pl.y - EDGE_GAP, pl.rotation_deg)
+            for pl in inner_placements
+        ]
+
+        # Build the union of placed copies in cluster-local frame.
+        pieces_by_id = {p.id: p for p in pieces}
         placed_polys = [
-            _placed_polygon(base, dx, dy, copy_local_rot)
-            for dx, dy in grid_offsets
+            _placed_polygon(pieces_by_id[pl.piece_id], pl.x, pl.y, pl.rotation_deg)
+            for pl in shifted
         ]
         union = unary_union(placed_polys)
         if union.geom_type == "MultiPolygon":
@@ -326,8 +334,8 @@ def pack_cluster_union(
         # Strip holes (interior rings unreachable by outer BLF).
         union = ShapelyPolygon(union.exterior)
 
-        # Remove collinear points left by unary_union at shared edges.
-        # simplify(0) removes co-linear vertices without distorting the polygon.
+        # Remove collinear vertices left by unary_union at merged edges.
+        # simplify(0) removes co-linear points without distorting the polygon.
         decollinear = union.simplify(0)
         if decollinear.geom_type == "Polygon" and not decollinear.is_empty:
             union = ShapelyPolygon(decollinear.exterior)
@@ -372,15 +380,22 @@ def pack_cluster_union(
             grainline_direction_deg=base.grainline_direction_deg,
         )
 
+        copy_offsets = [(pl.x, pl.y) for pl in shifted]
+        copy_local_rotations = [pl.rotation_deg for pl in shifted]
+        # Rebuild original_pieces in placement order (pieces are identical, so
+        # the order is purely cosmetic — but we keep it consistent with
+        # copy_offsets/copy_local_rotations).
+        original_pieces = [pieces_by_id[pl.piece_id] for pl in shifted]
+
         cluster = Cluster(
             super_piece=super_piece,
-            copy_offsets=grid_offsets,
-            copy_local_rotations=[copy_local_rot] * n,
-            original_pieces=pieces,
+            copy_offsets=copy_offsets,
+            copy_local_rotations=copy_local_rotations,
+            original_pieces=original_pieces,
         )
 
         candidate_key = (sort_h, sort_w, cluster_h, cluster_w)
-        if best_candidate is None or candidate_key < (best_candidate[0], best_candidate[1], best_candidate[2], best_candidate[3]):
+        if best_candidate is None or candidate_key < best_candidate[:4]:
             best_candidate = (sort_h, sort_w, cluster_h, cluster_w, cluster)
 
     if best_candidate is None:
