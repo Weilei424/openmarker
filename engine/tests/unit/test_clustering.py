@@ -50,7 +50,8 @@ def test_pack_cluster_singleton_returns_none():
 def test_pack_cluster_perfect_grid():
     """4 copies of 100×50 in fabric=300 → 2×2 grid is feasible (200 + 2*EDGE_GAP=20 ≤ 300)
     and is more compact than 1×4 (50 + 20 ≤ 300, height 200) or 4×1 (400 + 20 > 300, infeasible).
-    Of feasible aspect ratios, 2×2 has the smallest bbox area (200×100=20000)."""
+    Of feasible aspect ratios, 2×2 wins via the cluster-height tiebreaker:
+    1×4 area = 2×2 area = 20000, but cluster_h=100 < 200, so 2×2 is preferred."""
     copies = [_rect(f"p__c{i}", 100, 50) for i in range(4)]
     cluster = pack_cluster(copies, fabric_width_mm=300)
     assert cluster is not None
@@ -118,6 +119,17 @@ def test_pre_cluster_all_singletons_no_clusters():
     assert len(clusters) == 0
 
 
+def test_pre_cluster_oversized_group_passes_through():
+    """When a group's piece is too wide to cluster at any aspect ratio,
+    pre_cluster_pieces passes the group through as individual pieces."""
+    pieces = [_rect(f"toobig__c{i}", 200, 50) for i in range(3)]
+    clustered_input, clusters = pre_cluster_pieces(pieces, fabric_width_mm=150)
+    # Group passes through as 3 singletons, no cluster created.
+    assert len(clustered_input) == 3
+    assert len(clusters) == 0
+    assert {p.id for p in clustered_input} == {f"toobig__c{i}" for i in range(3)}
+
+
 # --- expand_cluster_placement ---
 
 def test_expand_cluster_at_rotation_zero():
@@ -155,3 +167,33 @@ def test_expand_returns_original_piece_ids():
     placements = list(expand_cluster_placement(cluster, 0.0, 0.0, 0.0))
     expanded_ids = {p[0] for p in placements}
     assert expanded_ids == {"piece_a__c0", "piece_a__c1"}
+
+
+def test_expand_cluster_non_rectangular_polygon():
+    """Per-copy bbox top-left is computed from actual Polygon.bounds, so the
+    function works for any convex polygon — not just axis-aligned rectangles.
+    Real DXF pieces (Task 2's integration) are non-rectangular; this is the
+    backstop that says: the math doesn't secretly assume rect inputs."""
+    # Right triangles: (0,0), (50,0), (0,30) — bbox 50×30 each
+    pieces = [
+        Piece(
+            id=f"tri__c{i}", name=f"tri__c{i}",
+            polygon=[(0, 0), (50, 0), (0, 30)],
+            area=50 * 30 / 2,
+            bbox=BoundingBox(0, 0, 50, 30, 50, 30),
+            is_valid=True,
+            grainline_direction_deg=None,
+        )
+        for i in range(2)
+    ]
+    cluster = pack_cluster(pieces, fabric_width_mm=300)
+    assert cluster is not None
+    placements = list(
+        expand_cluster_placement(cluster, super_x=100.0, super_y=200.0, super_rotation=0.0)
+    )
+    assert len(placements) == 2
+    # Both copies sit at or beyond the super-piece's top-left; rotation passed through.
+    for piece_id, x, y, r in placements:
+        assert x >= 100.0 - 1e-6
+        assert y >= 200.0 - 1e-6
+        assert r == 0.0
