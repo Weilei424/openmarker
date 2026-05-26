@@ -267,3 +267,31 @@ def test_pack_cluster_grain_rotates_cluster_to_fit():
     # 3×4 wins: smallest sort_h (= cluster_w = 600) among feasible grids.
     assert cluster.super_piece.bbox.width == 600
     assert cluster.super_piece.bbox.height == 400
+
+
+def test_expand_cluster_applies_local_rotation():
+    """A Cluster with mixed local rotations should produce expanded placements
+    where each copy's final rotation = (super_rotation + local_rot) % 360.
+    This is the bi-mode pattern: inner BLF picks local 0° or 180° per copy."""
+    base = _rect("p__c0", 100, 50)
+    # Synthetic Cluster: 2 copies, one at local 0°, one at local 180°. Super-piece
+    # is a 200x50 rectangle. copy_offsets are the rotated-bbox-top-lefts in cluster-local.
+    cluster = Cluster(
+        super_piece=Piece(
+            id="cluster_p_x2", name="cluster p x2",
+            polygon=[(0, 0), (200, 0), (200, 50), (0, 50)],
+            area=2 * (100 * 50),
+            bbox=BoundingBox(0, 0, 200, 50, 200, 50),
+            is_valid=True,
+            grainline_direction_deg=None,
+        ),
+        copy_offsets=[(0.0, 0.0), (100.0, 0.0)],
+        copy_local_rotations=[0.0, 180.0],
+        original_pieces=[base, _rect("p__c1", 100, 50)],
+    )
+    # Place cluster at (500, 1000) with super_rotation=90°.
+    # Effective rotations: (90+0)%360=90, (90+180)%360=270.
+    placements = list(expand_cluster_placement(cluster, super_x=500, super_y=1000, super_rotation=90.0))
+    assert len(placements) == 2
+    rotations = sorted(p[3] for p in placements)
+    assert rotations == [90.0, 270.0]

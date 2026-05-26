@@ -242,18 +242,16 @@ def expand_cluster_placement(
 ) -> Iterator[tuple[str, float, float, float]]:
     """Yield (piece_id, x, y, rotation) for each copy in a placed cluster.
 
-    Reproduces the engine's `_placed_polygon` convention: the cluster polygon
-    is rotated by `super_rotation` around the origin (0, 0), then translated
-    so the rotated cluster's bbox top-left lands at (super_x, super_y). The
-    same affine transformation is applied to each copy's polygon (already at
-    its local offset); the resulting per-copy bbox top-left becomes the copy's
-    Placement.x/y. Per-copy rotation = super_rotation (cluster is rigid).
+    Reproduces the engine's `_placed_polygon` convention: the cluster polygon is
+    rotated around (0, 0) by `super_rotation`, then translated so the rotated
+    cluster's bbox top-left lands at (super_x, super_y). For each copy:
+      1. Reconstruct the copy in cluster-local frame by rotating its polygon by
+         `local_rot` around (0, 0), then translating so the rotated copy bbox
+         top-left lands at `copy_offsets[i]`.
+      2. Apply `super_rotation` around (0, 0) and the cluster-level translation.
+      3. Per-copy final rotation = (super_rotation + local_rot) % 360.
     """
-    cluster_w = cluster.super_piece.bbox.width
-    cluster_h = cluster.super_piece.bbox.height
-    cluster_poly = ShapelyPolygon(
-        [(0.0, 0.0), (cluster_w, 0.0), (cluster_w, cluster_h), (0.0, cluster_h)]
-    )
+    cluster_poly = ShapelyPolygon(cluster.super_piece.polygon)
     rotated_cluster = shapely.affinity.rotate(
         cluster_poly, super_rotation, origin=(0.0, 0.0), use_radians=False
     )
@@ -261,12 +259,23 @@ def expand_cluster_placement(
     xoff = super_x - cluster_min_x
     yoff = super_y - cluster_min_y
 
-    for orig_piece, (dx, dy) in zip(cluster.original_pieces, cluster.copy_offsets):
+    for orig_piece, (dx, dy), local_rot in zip(
+        cluster.original_pieces,
+        cluster.copy_offsets,
+        cluster.copy_local_rotations,
+    ):
         copy_poly = ShapelyPolygon(orig_piece.polygon)
-        copy_poly_in_cluster = shapely.affinity.translate(copy_poly, xoff=dx, yoff=dy)
-        rotated_copy = shapely.affinity.rotate(
-            copy_poly_in_cluster, super_rotation, origin=(0.0, 0.0), use_radians=False
+        rotated_local = shapely.affinity.rotate(
+            copy_poly, local_rot, origin=(0.0, 0.0), use_radians=False
         )
-        placed_copy = shapely.affinity.translate(rotated_copy, xoff=xoff, yoff=yoff)
+        rot_minx, rot_miny = rotated_local.bounds[0], rotated_local.bounds[1]
+        copy_in_cluster = shapely.affinity.translate(
+            rotated_local, xoff=dx - rot_minx, yoff=dy - rot_miny
+        )
+        rotated_with_super = shapely.affinity.rotate(
+            copy_in_cluster, super_rotation, origin=(0.0, 0.0), use_radians=False
+        )
+        placed_copy = shapely.affinity.translate(rotated_with_super, xoff=xoff, yoff=yoff)
         cx, cy = placed_copy.bounds[0], placed_copy.bounds[1]
-        yield (orig_piece.id, round(cx, 4), round(cy, 4), super_rotation)
+        effective_rot = (super_rotation + local_rot) % 360.0
+        yield (orig_piece.id, round(cx, 4), round(cy, 4), effective_rot)
