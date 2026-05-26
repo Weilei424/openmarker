@@ -14,12 +14,23 @@ from typing import Iterator
 
 import shapely.affinity
 from shapely.geometry import Polygon as ShapelyPolygon
+from shapely.ops import unary_union
 
 from core.models.piece import Piece, BoundingBox
 
 # Must match heuristic.EDGE_GAP. Duplicated here to keep clustering.py
 # importable without pulling in heuristic.py (which would create a cycle).
 EDGE_GAP = 10.0
+
+# Maximum exterior vertex count for a union cluster polygon. Beyond this we
+# simplify; if still over cap, the union candidate is rejected and pre_cluster_pieces
+# falls back to pack_cluster_bbox for that group.
+VERTEX_CAP = 200
+
+# Shapely.simplify tolerance (mm) applied when exterior vertex count > VERTEX_CAP.
+# 0.5 mm matches engine's `_has_area_overlap` eps = 0.5 mm² (frontend SAT tolerance);
+# vertices closer than this are below pixel render noise anyway.
+SIMPLIFY_TOL_MM = 0.5
 
 
 @dataclass
@@ -201,6 +212,180 @@ def pack_cluster_bbox(
         copy_local_rotations=[0.0] * n,  # bbox path uses uniform 0° local rotation
         original_pieces=pieces,
     )
+
+
+def pack_cluster_union(
+    pieces: list[Piece],
+    fabric_width_mm: float,
+    grain_mode: str = "single",
+    fabric_grain_deg: float = 0.0,
+) -> Cluster | None:
+    """Pack N identical copies into a grid, union the placed polygons, and return
+    a Cluster whose super_piece.polygon is the union exterior.
+
+    Returns None when:
+      - len(pieces) < 2 (no clustering benefit; pre_cluster_pieces passes through)
+      - No grid layout yields a connected single-polygon union below VERTEX_CAP
+        after simplification (pre_cluster_pieces will fall back to pack_cluster_bbox).
+
+    Copy positions follow the same row-major grid as pack_cluster_bbox; copies
+    touch exactly at shared edges so unary_union collapses them. Copy rotations
+    use the cluster-local set (all 0° for single mode; 0°/180° for bi + grainline;
+    all cardinals otherwise) — but in the grid arrangement all copies are at 0°.
+    """
+    if len(pieces) < 2:
+        return None
+    # Local import to avoid circular import at module load (heuristic imports clustering).
+    from core.layout.heuristic import _placed_polygon
+
+    n = len(pieces)
+    base = pieces[0]
+    piece_w = base.bbox.width
+    piece_h = base.bbox.height
+
+    # Cluster-local rotation set: derives from outer grain_mode and piece grainline.
+    # Single mode → no rotation freedom inside cluster regardless of grainline.
+    # Bi mode + grainline → flip only (0/180). Bi or no-mode + no grainline → all cardinals.
+    base_grain = base.grainline_direction_deg
+    if grain_mode == "single":
+        copy_local_rot = 0.0
+        cluster_local_rotations_set: list[float] = [0.0]
+    elif grain_mode == "bi" and base_grain is not None:
+        copy_local_rot = 0.0
+        cluster_local_rotations_set = [0.0, 180.0]
+    else:
+        # bi-mode with no grainline, or grain_mode="none"
+        copy_local_rot = 0.0
+        cluster_local_rotations_set = [0.0, 90.0, 180.0, 270.0]
+
+    # Outer rotations the cluster will be placed at (used for grain-rotation
+    # feasibility filter on candidate widths). Mirrors PR #9's bug-2 logic.
+    if base_grain is None:
+        outer_rotations: list[float] = [0.0, 90.0, 180.0, 270.0]
+    else:
+        target = (fabric_grain_deg - base_grain) % 360
+        if grain_mode == "bi":
+            outer_rotations = [target, (target + 180.0) % 360.0]
+        else:
+            outer_rotations = [target]
+
+    def _width_at_rotation(w: float, h: float, deg: float) -> float:
+        r = deg % 180.0
+        if r < 1e-6 or abs(r - 180.0) < 1e-6:
+            return w
+        if abs(r - 90.0) < 1e-6:
+            return h
+        return max(w, h)  # conservative for non-cardinal
+
+    def _height_at_rotation(w: float, h: float, deg: float) -> float:
+        r = deg % 180.0
+        if r < 1e-6 or abs(r - 180.0) < 1e-6:
+            return h
+        if abs(r - 90.0) < 1e-6:
+            return w
+        return max(w, h)
+
+    usable_width = fabric_width_mm - 2 * EDGE_GAP
+    best_candidate: tuple[float, float, float, float, Cluster] | None = None  # (sort_h, sort_w, cluster_h, cluster_w, cluster)
+
+    for cols in range(1, n + 1):
+        rows = math.ceil(n / cols)
+        grid_w = cols * piece_w
+        grid_h = rows * piece_h
+
+        # Grain-rotation feasibility: at least one outer rotation must keep the
+        # rotated grid width within usable_width. Same logic as pack_cluster_bbox.
+        feasible_outer_rots = [
+            r for r in outer_rotations
+            if _width_at_rotation(grid_w, grid_h, r) <= usable_width
+        ]
+        if not feasible_outer_rots:
+            continue
+
+        # Build row-major grid offsets (copies touch at shared edges).
+        grid_offsets: list[tuple[float, float]] = []
+        for row in range(rows):
+            for col in range(cols):
+                if len(grid_offsets) >= n:
+                    break
+                grid_offsets.append((col * piece_w, row * piece_h))
+            if len(grid_offsets) >= n:
+                break
+
+        # Compute union of pieces placed at grid positions (all at 0° rotation).
+        placed_polys = [
+            _placed_polygon(base, dx, dy, copy_local_rot)
+            for dx, dy in grid_offsets
+        ]
+        union = unary_union(placed_polys)
+        if union.geom_type == "MultiPolygon":
+            continue
+        if union.geom_type != "Polygon":
+            continue  # GeometryCollection / LineString — degenerate
+
+        # Strip holes (interior rings unreachable by outer BLF).
+        union = ShapelyPolygon(union.exterior)
+
+        # Remove collinear points left by unary_union at shared edges.
+        # simplify(0) removes co-linear vertices without distorting the polygon.
+        decollinear = union.simplify(0)
+        if decollinear.geom_type == "Polygon" and not decollinear.is_empty:
+            union = ShapelyPolygon(decollinear.exterior)
+
+        # Simplify if over vertex cap.
+        exterior_coords = list(union.exterior.coords)
+        if len(exterior_coords) - 1 > VERTEX_CAP:  # -1 for closing duplicate
+            simplified = union.simplify(SIMPLIFY_TOL_MM, preserve_topology=True)
+            if simplified.geom_type != "Polygon":
+                continue
+            simplified = ShapelyPolygon(simplified.exterior)
+            exterior_coords = list(simplified.exterior.coords)
+            if len(exterior_coords) - 1 > VERTEX_CAP:
+                continue  # still too complex; skip this candidate
+            union = simplified
+
+        # Drop closing duplicate; Piece.polygon convention is no closing vertex.
+        polygon_coords = [(round(x, 4), round(y, 4)) for x, y in exterior_coords[:-1]]
+
+        # Cluster bbox from union bounds.
+        minx, miny, maxx, maxy = union.bounds
+        cluster_w = maxx - minx
+        cluster_h = maxy - miny
+
+        # Sort key (mirror pack_cluster_bbox): minimize marker-length contribution
+        # at the cluster's best feasible outer rotation.
+        sort_h = min(
+            _height_at_rotation(cluster_w, cluster_h, r) for r in feasible_outer_rots
+        )
+        sort_w = min(
+            _width_at_rotation(cluster_w, cluster_h, r) for r in feasible_outer_rots
+        )
+
+        super_piece = Piece(
+            id=f"cluster_{_base_id(base.id)}_x{n}",
+            name=f"cluster {base.name} x{n}",
+            polygon=polygon_coords,
+            area=sum(p.area for p in pieces),
+            bbox=BoundingBox(0.0, 0.0, cluster_w, cluster_h, cluster_w, cluster_h),
+            is_valid=True,
+            validation_notes=[],
+            grainline_direction_deg=base.grainline_direction_deg,
+        )
+
+        cluster = Cluster(
+            super_piece=super_piece,
+            copy_offsets=grid_offsets,
+            copy_local_rotations=[copy_local_rot] * n,
+            original_pieces=pieces,
+        )
+
+        candidate_key = (sort_h, sort_w, cluster_h, cluster_w)
+        if best_candidate is None or candidate_key < (best_candidate[0], best_candidate[1], best_candidate[2], best_candidate[3]):
+            best_candidate = (sort_h, sort_w, cluster_h, cluster_w, cluster)
+
+    if best_candidate is None:
+        return None
+    return best_candidate[4]
 
 
 def pre_cluster_pieces(

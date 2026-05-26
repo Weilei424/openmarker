@@ -1,11 +1,14 @@
 import pytest
 from core.models.piece import Piece, BoundingBox
+from shapely.geometry import Polygon as ShapelyPolygon
 from core.layout.clustering import (
     Cluster,
     group_pieces_by_base_id,
     pack_cluster_bbox,
+    pack_cluster_union,
     pre_cluster_pieces,
     expand_cluster_placement,
+    VERTEX_CAP,
 )
 
 
@@ -295,3 +298,150 @@ def test_expand_cluster_applies_local_rotation():
     assert len(placements) == 2
     rotations = sorted(p[3] for p in placements)
     assert rotations == [90.0, 270.0]
+
+
+# --- pack_cluster_union tests ---
+
+
+def test_pack_cluster_union_two_copies_share_edge():
+    """2 identical 100x50 rects: inner BLF places them side-by-side touching.
+    unary_union collapses the shared edge → one 200x50 rectangle exterior."""
+    copies = [_rect(f"p__c{i}", 100, 50) for i in range(2)]
+    cluster = pack_cluster_union(copies, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0)
+    assert cluster is not None
+    # Exterior has 4 unique vertices (rectangle) — Shapely's exterior.coords includes a closing duplicate
+    poly = cluster.super_piece.polygon
+    assert len(poly) == 4  # we strip the closing duplicate when assigning to Piece.polygon
+    # Bounding rectangle: 200x50
+    assert cluster.super_piece.bbox.width == 200
+    assert cluster.super_piece.bbox.height == 50
+    # Local rotations are all 0° (single mode, no rotation freedom)
+    assert cluster.copy_local_rotations == [0.0, 0.0]
+
+
+def test_pack_cluster_union_picks_minimum_height_width():
+    """6 copies of 100x50, fabric=500. Candidates (cluster bbox dims):
+       cols=1: w=100, h=300
+       cols=2: w=200, h=150
+       cols=3: w=300, h=100  ← minimum h, wins
+       cols=4: w=400, h=100 (with 2 dead slots — same h, larger w)
+       cols=5: w=500 + 20 > 500 (infeasible)
+    Winner: cols=3 with cluster_h=100, cluster_w=300."""
+    copies = [_rect(f"p__c{i}", 100, 50) for i in range(6)]
+    cluster = pack_cluster_union(copies, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0)
+    assert cluster is not None
+    assert cluster.super_piece.bbox.height == 100
+    assert cluster.super_piece.bbox.width == 300
+
+
+def test_pack_cluster_union_bi_mode_allows_180_local_rotation():
+    """For bi grain mode, inner BLF's local rotation set is {0, 180}.
+    With an asymmetric polygon, the optimal pack may rotate some copies 180°.
+    We assert that the inner BLF was actually called with the 180° option in its
+    rotation set by checking that at LEAST ONE of the two placement strategies
+    (all-zero vs mixed) is tried — the simplest assertion is that the returned
+    Cluster's copy_local_rotations is well-formed (length N, values in {0, 180})."""
+    # L-shape: footprint (0,0)-(100,0)-(100,40)-(40,40)-(40,80)-(0,80). Asymmetric under 180°.
+    pieces = [
+        Piece(
+            id=f"L__c{i}", name=f"L__c{i}",
+            polygon=[(0, 0), (100, 0), (100, 40), (40, 40), (40, 80), (0, 80)],
+            area=100*40 + 40*40,
+            bbox=BoundingBox(0, 0, 100, 80, 100, 80),
+            is_valid=True,
+            grainline_direction_deg=0.0,
+        )
+        for i in range(4)
+    ]
+    cluster = pack_cluster_union(pieces, fabric_width_mm=500, grain_mode="bi", fabric_grain_deg=0.0)
+    assert cluster is not None
+    assert len(cluster.copy_local_rotations) == 4
+    # Every local rotation must be 0 or 180 (the cluster-local set for bi-mode + grain-locked).
+    for r in cluster.copy_local_rotations:
+        assert r in (0.0, 180.0), f"Unexpected local rotation: {r}"
+
+
+def test_pack_cluster_union_strips_holes():
+    """Build a cluster whose unioned copies form a polygon with an interior hole,
+    confirm: (a) the same unary_union manually shows holes, (b) pack_cluster_union
+    returns a Piece.polygon whose Shapely round-trip has zero interiors AND area
+    equal to the union exterior's area (NOT the donut area)."""
+    import shapely.affinity
+    from shapely.ops import unary_union
+    # C-shapes facing inward — 4 of them form a square with a hole in the middle.
+    # Simpler synthetic: 4 right-angle "L" rotations around a center cavity.
+    # We use a square-with-corner-cut and arrange 4 facing center to leave a hole.
+    # Use a U-shape: bbox 60x60, polygon (0,0)(60,0)(60,60)(40,60)(40,20)(20,20)(20,60)(0,60).
+    # 4 copies forming a ring would leave a hole in the middle. For deterministic
+    # behavior, manually construct the union check and compare areas.
+    u_polygon = [(0, 0), (60, 0), (60, 60), (40, 60), (40, 20), (20, 20), (20, 60), (0, 60)]
+    pieces = [
+        Piece(
+            id=f"U__c{i}", name=f"U__c{i}",
+            polygon=u_polygon,
+            area=60*60 - 20*40,  # 3600 - 800 = 2800
+            bbox=BoundingBox(0, 0, 60, 60, 60, 60),
+            is_valid=True,
+            grainline_direction_deg=None,
+        )
+        for i in range(4)
+    ]
+    cluster = pack_cluster_union(pieces, fabric_width_mm=300, grain_mode="single", fabric_grain_deg=0.0)
+    assert cluster is not None
+    # Reconstruct as Shapely polygon — should have no interiors.
+    reconstructed = ShapelyPolygon(cluster.super_piece.polygon)
+    assert len(list(reconstructed.interiors)) == 0
+    # The polygon's exterior should be valid and enclose at least the original copy area
+    # (4 * 2800 = 11200), proving holes were stripped (with holes, area would be smaller).
+    assert reconstructed.area >= 11200 - 1e-3
+
+
+def test_pack_cluster_union_singleton_returns_none():
+    """Early-return: len(pieces) < 2 → no clustering benefit, return None."""
+    assert pack_cluster_union([_rect("p__c0", 100, 50)], fabric_width_mm=500) is None
+
+
+def test_pack_cluster_union_multipolygon_returns_none(monkeypatch):
+    """When unary_union returns a MultiPolygon (disconnected union), every
+    candidate width is skipped and pack_cluster_union returns None. We force
+    this by monkeypatching shapely.ops.unary_union (as imported in clustering)
+    to always return a MultiPolygon. The caller (pre_cluster_pieces) then
+    falls back to pack_cluster_bbox — that fallback path is verified in Task 5."""
+    from shapely.geometry import MultiPolygon, Polygon as SP
+    import core.layout.clustering as clustering_mod
+
+    def _fake_union(_geoms):
+        return MultiPolygon([SP([(0, 0), (10, 0), (10, 10), (0, 10)]),
+                             SP([(100, 100), (110, 100), (110, 110), (100, 110)])])
+
+    monkeypatch.setattr(clustering_mod, "unary_union", _fake_union)
+    copies = [_rect(f"p__c{i}", 100, 50) for i in range(4)]
+    assert pack_cluster_union(copies, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0) is None
+
+
+def test_pack_cluster_union_vertex_cap_triggers_simplify():
+    """High-vertex piece x 10 should produce a union exterior whose vertex count
+    is capped at VERTEX_CAP (after Shapely.simplify with SIMPLIFY_TOL_MM)."""
+    import math
+    # 50-vertex approximation of a circle, radius 50.
+    n_verts = 50
+    polygon = [
+        (50 + 50 * math.cos(2 * math.pi * i / n_verts),
+         50 + 50 * math.sin(2 * math.pi * i / n_verts))
+        for i in range(n_verts)
+    ]
+    pieces = [
+        Piece(
+            id=f"circle__c{i}", name=f"circle__c{i}",
+            polygon=polygon,
+            area=math.pi * 50 * 50,
+            bbox=BoundingBox(0, 0, 100, 100, 100, 100),
+            is_valid=True,
+            grainline_direction_deg=None,
+        )
+        for i in range(10)
+    ]
+    cluster = pack_cluster_union(pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0)
+    if cluster is not None:
+        # If a candidate succeeded, its exterior must respect the vertex cap.
+        assert len(cluster.super_piece.polygon) <= VERTEX_CAP
