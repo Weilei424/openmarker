@@ -550,13 +550,16 @@ def test_blf_pack_nfp_override_rotations_replaces_grain_logic():
 def test_blf_pack_nfp_skip_validation_allows_oversize_input():
     """With skip_validation=True the upfront _validate_pieces_fit is not called.
     Caller is trusted (e.g., pack_cluster_union's candidate-width pre-filter).
-    Test: a piece that would fail validation at grain-locked rotation still
-    runs when both override_rotations and skip_validation are set to a rotation
-    that fits."""
+    Test setup: 600x50 piece with grainline_deg=0.0 and grain_mode='single' so
+    _layout_rotations returns [0.0] only — at 0° the piece is 600 wide,
+    600 + 2*EDGE_GAP=620 > fabric=200, so _validate_pieces_fit WILL raise
+    unless skipped. Override forces 90° (50 wide → fits)."""
     from core.layout.heuristic import _blf_pack_nfp
-    # 600 wide piece, fabric 200 — would fail _validate_pieces_fit at 0°.
-    # But at 90° it's 50 wide (fits 200). Override + skip_validation bypasses.
-    piece = _make_rect("p", 600, 50, grainline_deg=None)
+    # grainline=0.0 + grain_mode='single' locks validation to a single
+    # rotation (0°) where the piece truly doesn't fit. This is the only
+    # configuration that proves the skip — with grainline=None, validation
+    # tries all 4 cardinal rotations and 90° passes anyway.
+    piece = _make_rect("p", 600, 50, grainline_deg=0.0)
     placements, marker, util = _blf_pack_nfp(
         [piece], fabric_width_mm=200,
         grain_mode="single", fabric_grain_deg=0.0,
@@ -565,6 +568,16 @@ def test_blf_pack_nfp_skip_validation_allows_oversize_input():
     )
     assert len(placements) == 1
     assert placements[0].rotation_deg == 90.0
+
+    # Regression backstop: without skip_validation, the same call MUST raise.
+    import pytest as _pytest
+    with _pytest.raises(ValueError):
+        _blf_pack_nfp(
+            [piece], fabric_width_mm=200,
+            grain_mode="single", fabric_grain_deg=0.0,
+            override_rotations=[90.0],
+            # skip_validation defaults to False — _validate_pieces_fit must run.
+        )
 
 
 def test_blf_pack_nfp_default_behavior_unchanged():
