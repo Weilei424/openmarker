@@ -804,12 +804,12 @@ Two edits:
 (a) Under "Phase 6 follow-ups — algorithm performance", append a new bullet after the parallel-pruning entry:
 
 ```markdown
-- [x] Engine: identical-piece pre-clustering. Groups copies of the same base piece into a rigid super-piece (bbox of packed grid); outer BLF places clusters as units; per-copy placements expanded after BLF returns. Cluster polygon = bbox approximation (inter-copy bays unused). Measured marker reduction on `sample_2.dxf × 10` (bi grain): <paste Δlen number from bench>. Adds `disable_clustering: bool = False` toggle. Shipped in PR #<n>.
+- [x] Engine: identical-piece pre-clustering. Groups copies of the same base piece into a rigid super-piece (bbox of packed grid); outer BLF places clusters as units; per-copy placements expanded after BLF returns. Cluster polygon = bbox approximation (inter-copy bays unused). Measured marker reduction on `sample_2.dxf × 10` (bi grain): <paste Δlen number from bench>. Adds `disable_clustering: bool = False` toggle. Shipped in PR #9.
 ```
 
-(b) Under "Future / Unscheduled" → "Layout improvements — algorithm", tick off the **Identical-piece pre-clustering** entry by changing `[ ]` to `[x]` and appending `(Shipped in PR #<n>.)` to its text.
+(b) Under "Future / Unscheduled" → "Layout improvements — algorithm", tick off the **Identical-piece pre-clustering** entry by changing `[ ]` to `[x]` and appending `(Shipped in PR #9.)` to its text.
 
-Leave `PR #<n>` as literal placeholders — they'll be filled in after the PR is created.
+Leave `PR #9` as literal placeholders — they'll be filled in after the PR is created.
 
 - [ ] **Step 3: Commit**
 
