@@ -14,6 +14,7 @@ from shapely.geometry import Polygon as ShapelyPolygon, box as shapely_box
 from shapely.ops import unary_union
 
 from core.layout.cancellation import CancellationError, is_cancelled
+from core.layout.clustering import Cluster, pre_cluster_pieces, expand_cluster_placement
 from core.models.piece import Piece
 
 
@@ -594,6 +595,24 @@ def _shorter(a: tuple[list[Placement], float, float] | None,
     return a
 
 
+def _expand_clustered_placements(
+    placements: list[Placement],
+    clusters: list[Cluster],
+) -> list[Placement]:
+    """Convert any super-piece placements back to per-copy placements.
+    Singletons (placements not referencing a super-piece id) pass through."""
+    cluster_by_super_id = {c.super_piece.id: c for c in clusters}
+    expanded: list[Placement] = []
+    for pl in placements:
+        cluster = cluster_by_super_id.get(pl.piece_id)
+        if cluster is None:
+            expanded.append(pl)
+            continue
+        for piece_id, x, y, r in expand_cluster_placement(cluster, pl.x, pl.y, pl.rotation_deg):
+            expanded.append(Placement(piece_id, x, y, r))
+    return expanded
+
+
 def _modes_to_try(grain_mode: str) -> list[str]:
     """Bi mode's rotation set is a strict superset of single's. A greedy BLF
     can therefore produce a worse bi layout than single (a locally-good rotation
@@ -633,6 +652,7 @@ def auto_layout_polygon(
     disable_nfp_cache: bool = False,
     effort: int = 1,
     disable_pruning: bool = False,
+    disable_clustering: bool = True,
 ) -> tuple[list[Placement], float, float]:
     """No-Fit-Polygon-based Bottom-Left-Fill (slow mode, accurate).
 
@@ -658,7 +678,24 @@ def auto_layout_polygon(
     `disable_pruning`: when True, branch pruning is disabled in both serial and
     parallel paths. Identical results, slower — exposed for A/B benchmarking and
     debugging only, mirroring `disable_nfp_cache`.
+
+    `disable_clustering`: defaults to True. Identical-piece pre-clustering
+    (`core.layout.clustering.pre_cluster_pieces`) groups copies of the same base
+    piece into a rigid super-piece (bbox of the packed grid). The mechanism is
+    correct and tested — but bbox approximation forces rigid rectangular blocks
+    that BLF can't interleave with other piece types in shared fabric rows. On
+    homogeneous workloads it ties unclustered BLF; on real garment workloads
+    (e.g. sample_2.dxf × 10) it regresses by 100%+ because the clusters can't
+    share rows with each other. The mechanism is preserved for future use
+    (true-union polygon clusters, filed in BACKLOG) and explicit benchmarking;
+    pass `disable_clustering=False` to opt in.
     """
+    if disable_clustering:
+        blf_input = pieces
+        clusters: list[Cluster] = []
+    else:
+        blf_input, clusters = pre_cluster_pieces(pieces, fabric_width_mm, grain_mode, fabric_grain_deg)
+
     modes = _modes_to_try(grain_mode)
     total_runs = len(modes) * len(_SORT_STRATEGIES)
     workers = _worker_count(effort)
@@ -667,7 +704,7 @@ def auto_layout_polygon(
     # worker) outweighs the parallel win. The threshold is intentionally
     # conservative; benchmarks should refine it but the cost of misjudging
     # is small (a few hundred ms on a job that would have taken <1s anyway).
-    use_pool = workers > 1 and total_runs * len(pieces) >= 20
+    use_pool = workers > 1 and total_runs * len(blf_input) >= 20
 
     if not use_pool:
         # Serial path. NFP cache shared across all strategies/modes for max
@@ -680,7 +717,7 @@ def auto_layout_polygon(
                 cutoff = None if disable_pruning else (best[1] if best is not None else None)
                 try:
                     result = _blf_pack_nfp(
-                        pieces, fabric_width_mm, mode, fabric_grain_deg,
+                        blf_input, fabric_width_mm, mode, fabric_grain_deg,
                         sort_key=_SORT_STRATEGIES[sort_index],
                         nfp_cache=cache,
                         best_marker_so_far=cutoff,
@@ -689,6 +726,10 @@ def auto_layout_polygon(
                     continue
                 best = _shorter(best, result)
         assert best is not None
+        if clusters:
+            placements, marker_length, utilization = best
+            placements = _expand_clustered_placements(placements, clusters)
+            return placements, marker_length, utilization
         return best
 
     # Parallel path. Each worker rebuilds its own NFP cache (lost cross-strategy
@@ -715,7 +756,7 @@ def auto_layout_polygon(
                 for sort_index in range(len(_SORT_STRATEGIES)):
                     futures.append(pool.submit(
                         _run_one_strategy,
-                        pieces, fabric_width_mm, mode, fabric_grain_deg, sort_index,
+                        blf_input, fabric_width_mm, mode, fabric_grain_deg, sort_index,
                     ))
             try:
                 for f in as_completed(futures):
@@ -738,4 +779,8 @@ def auto_layout_polygon(
             _set_current_executor(None)
 
     assert best is not None
+    if clusters:
+        placements, marker_length, utilization = best
+        placements = _expand_clustered_placements(placements, clusters)
+        return placements, marker_length, utilization
     return best

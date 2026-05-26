@@ -160,6 +160,7 @@ Task checklist:
 
 - [x] Engine: branch pruning in serial `auto_layout_polygon` — abort strategies whose partial marker length already meets/exceeds the best complete result. Monotone-bound argument: BLF's partial marker length is non-decreasing in the number of placed pieces. Measured speedup 1.04x–1.65x on synthetic inputs and 1.18x on the sample_2.dxf × 10 real workload (190 pieces, bi grain). Shipped in PR #7.
 - [x] Engine: parallel-path branch pruning via shared `multiprocessing.Value('d')` cutoff. Main process publishes completed-strategy results via `as_completed`; workers read per placement and self-abort once their partial >= shared cutoff. Result identical to serial mode. Measured wall-clock: sample_2.dxf × 10 (190 pieces, bi grain) drops from 25.7s (serial, pruning on) to 11.3s (parallel effort=5, pruning on) — 2.3x speedup from parallelism, plus pruning contributes ~10% within parallel mode (11.3s vs 12.5s no-prune). Also adds `disable_pruning: bool = False` toggle on `auto_layout_polygon` (mirrors `disable_nfp_cache`). Shipped in PR #8.
+- [x] Engine: identical-piece pre-clustering MECHANISM (off by default; `disable_clustering: bool = True`). Groups copies by base id, packs into a rigid bbox super-piece, expands placements after BLF. Implementation correct (116 tests pass including grain-rotation feasibility, bi-grain expansion, oversized-group passthrough). **But bbox approximation regresses sample_2.dxf × 10 by +145%** (29958mm vs 12249mm at fabric=1651mm) because rigid super-pieces block fabric rows that BLF would otherwise interleave with other piece types. Shipped off; will be re-enabled (or replaced) once true-union polygon clusters land. PR #9.
 
 ### Phase 7 — Export
 - [ ] Export layout as DXF or PNG (sourced from any cached layout tab)
@@ -198,6 +199,14 @@ Items not yet assigned to a phase. Rough notes captured to avoid losing context.
 
 ### Layout improvements — algorithm
 
-- [ ] **Identical-piece pre-clustering.** Before the main BLF loop, group pieces by base id. For each group, shelf-pack copies into a compact strip (within fabric width). Pass the strip as a super-piece to NFP-BLF, then expand placements back to individual coordinates at render time. Estimated gain: 5–10pp utilization on real markers (observed 7pp gap vs commercial software on sample_2.dxf). Medium effort.
+> Filed after the sample_2.dxf × 10 commercial-vs-OpenMarker comparison (commercial: 10599 mm @ 86.1%; ours: 11699 mm @ 79.4% — ~7pp gap on the headline workload). Items ranked by gain-per-effort.
+
+- [~] **Identical-piece pre-clustering (true-union polygon clusters).** Mechanism for grouping + expansion shipped in PR #9 but with bbox approximation — that version regresses real garment workloads by +145% because rigid bbox super-pieces can't interleave with other piece types. Next attempt: cluster polygon = Shapely union of the packed copy polygons (with offsets), so inter-copy bays can host smaller pieces from other groups. NFP gets more complex (non-convex / multi-polygon clusters) but reclaims the regression. Medium-high effort. **Wait until basic mechanism is validated by a workload that DOES benefit from bbox clustering before adding union polygons.**
 
 - [ ] **Grain-compatible mirroring.** When `grain_mode == "bi"`, allow horizontal reflection of pieces (flip x-coords within bbox center). Adds reflected copies to the rotation candidate set. Estimated gain: 1–3pp. Medium effort.
+
+- [ ] **Concave-bay fill pass.** Post-pass after primary BLF: for each large piece with a concave bay (e.g., armhole curves on a garment piece), attempt to tuck small unplaced pieces into the bay region. Bays detected via polygon difference of bbox minus polygon. Estimated gain: 1–3pp on garment workloads. High effort — needs bay-detection geometry + a second placement pass.
+
+- [ ] **GA / SA meta-heuristic wrapper.** Wrap the existing NFP-BLF as the fitness function inside a genetic or simulated-annealing search over piece-ordering permutations and per-piece rotation choices. Iterative — runs BLF many times with budget bounded by a time/iteration cap. Estimated gain: 3–8pp. High effort — adds an entire outer search loop; needs parallelization design to keep wall-clock reasonable. Combines naturally with the other items (they all become inner-loop primitives the meta-heuristic explores).
+
+- [ ] **More sort strategies (8–12 instead of 4).** Add e.g. perimeter-DESC, diagonal-DESC, aspect-ratio-extremes-first, hilbert-curve ordering. Cheap to add (one named function each); benefits compose with parallel pruning. Estimated gain: 0.5–2pp. Low effort.
