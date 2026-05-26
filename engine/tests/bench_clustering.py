@@ -118,10 +118,10 @@ if __name__ == "__main__":
         pieces_real = _load_dxf_pieces(dxf_path, copies=10)
         _bench(
             f"sample_2.dxf x 10 copies ({len(pieces_real)} pieces), bi",
-            pieces_real, 1500.0, "bi",
+            pieces_real, 1651.0, "bi",
         )
         # Also at effort=5 to compare against PR #8's parallel baseline.
         _bench(
             f"sample_2.dxf x 10 copies ({len(pieces_real)} pieces), bi [par]",
-            pieces_real, 1500.0, "bi", effort=5,
+            pieces_real, 1651.0, "bi", effort=5,
         )

@@ -652,7 +652,7 @@ def auto_layout_polygon(
     disable_nfp_cache: bool = False,
     effort: int = 1,
     disable_pruning: bool = False,
-    disable_clustering: bool = False,
+    disable_clustering: bool = True,
 ) -> tuple[list[Placement], float, float]:
     """No-Fit-Polygon-based Bottom-Left-Fill (slow mode, accurate).
 
@@ -679,10 +679,16 @@ def auto_layout_polygon(
     parallel paths. Identical results, slower — exposed for A/B benchmarking and
     debugging only, mirroring `disable_nfp_cache`.
 
-    `disable_clustering`: when True, identical-piece pre-clustering is disabled.
-    Identical results to legacy behavior, slower on workloads with many copies of
-    the same base piece — exposed for A/B benchmarking and debugging, mirroring
-    `disable_nfp_cache` and `disable_pruning`.
+    `disable_clustering`: defaults to True. Identical-piece pre-clustering
+    (`core.layout.clustering.pre_cluster_pieces`) groups copies of the same base
+    piece into a rigid super-piece (bbox of the packed grid). The mechanism is
+    correct and tested — but bbox approximation forces rigid rectangular blocks
+    that BLF can't interleave with other piece types in shared fabric rows. On
+    homogeneous workloads it ties unclustered BLF; on real garment workloads
+    (e.g. sample_2.dxf × 10) it regresses by 100%+ because the clusters can't
+    share rows with each other. The mechanism is preserved for future use
+    (true-union polygon clusters, filed in BACKLOG) and explicit benchmarking;
+    pass `disable_clustering=False` to opt in.
     """
     if disable_clustering:
         blf_input = pieces
