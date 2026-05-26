@@ -432,15 +432,21 @@ def pre_cluster_pieces(
     fabric_width_mm: float,
     grain_mode: str = "single",
     fabric_grain_deg: float = 0.0,
+    cluster_polygon: str = "union",
 ) -> tuple[list[Piece], list[Cluster]]:
-    """Group identical pieces and pack each group into a super-piece cluster.
+    """Group identical pieces and pack each group via the selected cluster method.
+
+    Fallback ladder per group:
+        cluster_polygon="union" → pack_cluster_union → pack_cluster_bbox → singletons
+        cluster_polygon="bbox"  → pack_cluster_bbox → singletons
 
     Returns (clustered_input, clusters):
-      - clustered_input: list[Piece] containing singletons + super-pieces, to
-        be passed to the existing BLF unchanged.
-      - clusters: list[Cluster], one per super-piece — used to expand
-        placements back to per-copy after BLF returns.
+      - clustered_input: list[Piece] containing singletons + super-pieces.
+      - clusters: list[Cluster], one per super-piece.
     """
+    if cluster_polygon not in ("union", "bbox"):
+        raise ValueError(f"cluster_polygon must be 'union' or 'bbox', got: {cluster_polygon!r}")
+
     groups = group_pieces_by_base_id(pieces)
     clustered_input: list[Piece] = []
     clusters: list[Cluster] = []
@@ -448,11 +454,17 @@ def pre_cluster_pieces(
         if len(group) < 2:
             clustered_input.extend(group)
             continue
-        cluster = pack_cluster_bbox(group, fabric_width_mm, grain_mode, fabric_grain_deg)
+
+        cluster: Cluster | None = None
+        if cluster_polygon == "union":
+            cluster = pack_cluster_union(group, fabric_width_mm, grain_mode, fabric_grain_deg)
         if cluster is None:
-            # Couldn't cluster (group's piece too wide for fabric); pass through.
+            cluster = pack_cluster_bbox(group, fabric_width_mm, grain_mode, fabric_grain_deg)
+        if cluster is None:
+            # Both union and bbox failed (group's piece too wide for fabric).
             clustered_input.extend(group)
             continue
+
         clustered_input.append(cluster.super_piece)
         clusters.append(cluster)
     return clustered_input, clusters

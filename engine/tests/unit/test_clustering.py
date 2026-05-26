@@ -445,3 +445,44 @@ def test_pack_cluster_union_vertex_cap_triggers_simplify():
     if cluster is not None:
         # If a candidate succeeded, its exterior must respect the vertex cap.
         assert len(cluster.super_piece.polygon) <= VERTEX_CAP
+
+
+# --- pre_cluster_pieces dispatch (Task 5) ---
+
+def test_pre_cluster_pieces_dispatch_union_default():
+    """Without specifying cluster_polygon, pre_cluster_pieces uses the union path."""
+    copies = [_rect(f"p__c{i}", 100, 50) for i in range(4)]
+    clustered_input, clusters = pre_cluster_pieces(copies, fabric_width_mm=500)
+    assert len(clusters) == 1
+    # Union of touching rects collapses to a single rectangle, NOT a multi-vertex polygon.
+    # Check via the super_piece's polygon: 4 vertices = rectangle, more = union with bays.
+    # For 4 axis-aligned 100x50 rects in any feasible grid, union == bbox rectangle.
+    assert len(clusters[0].super_piece.polygon) == 4
+
+
+def test_pre_cluster_pieces_dispatch_bbox_explicit():
+    """cluster_polygon='bbox' forces the bbox path."""
+    copies = [_rect(f"p__c{i}", 100, 50) for i in range(4)]
+    clustered_input, clusters = pre_cluster_pieces(
+        copies, fabric_width_mm=500, cluster_polygon="bbox",
+    )
+    assert len(clusters) == 1
+    # Bbox path always produces a 4-vertex rectangle.
+    assert len(clusters[0].super_piece.polygon) == 4
+    # Bbox copy_local_rotations are uniform zeros.
+    assert clusters[0].copy_local_rotations == [0.0, 0.0, 0.0, 0.0]
+
+
+def test_pre_cluster_pieces_falls_back_to_bbox_on_union_failure(monkeypatch):
+    """When pack_cluster_union returns None, pre_cluster_pieces falls back to
+    pack_cluster_bbox for that group. We monkeypatch pack_cluster_union to force
+    a None return, then assert that the resulting Cluster still has 4 copies and
+    a 4-vertex (bbox-rectangle) polygon."""
+    import core.layout.clustering as clustering_mod
+    monkeypatch.setattr(clustering_mod, "pack_cluster_union", lambda *args, **kwargs: None)
+
+    copies = [_rect(f"p__c{i}", 100, 50) for i in range(4)]
+    clustered_input, clusters = pre_cluster_pieces(copies, fabric_width_mm=500)
+    assert len(clusters) == 1  # Bbox fallback engaged
+    assert len(clusters[0].super_piece.polygon) == 4
+    assert len(clusters[0].copy_offsets) == 4
