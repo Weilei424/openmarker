@@ -278,6 +278,13 @@ def pack_cluster_union(
     usable_width = fabric_width_mm - 2 * EDGE_GAP
     best_candidate: tuple[float, float, float, float, Cluster] | None = None  # (sort_h, sort_w, cluster_h, cluster_w, cluster)
 
+    # NFP cache shared across all `cols` iterations. NFPs depend only on
+    # (piece_shape, rotation_pair) — not on fabric width — so a cache populated
+    # at cols=1 fully serves cols=2..N. For N identical copies this collapses
+    # to len(cluster_local_rotations)^2 unique NFPs across the entire candidate
+    # loop instead of recomputing them per cols iteration.
+    inner_nfp_cache: dict = {}
+
     for cols in range(1, n + 1):
         # Conservative upper-bound: cluster bbox width <= cols * piece_w
         # (true for grid; true for tight-pack since copies fit inside their bbox column).
@@ -305,6 +312,7 @@ def pack_cluster_union(
                 grain_mode="single", fabric_grain_deg=0.0,
                 override_rotations=cluster_local_rotations,
                 skip_validation=True,
+                nfp_cache=inner_nfp_cache,
             )
         except ValueError:
             # Inner BLF couldn't place all copies at this mini-width — skip.
@@ -336,9 +344,12 @@ def pack_cluster_union(
 
         # Remove collinear vertices left by unary_union at merged edges.
         # simplify(0) removes co-linear points without distorting the polygon.
+        # If simplify collapses the polygon to a degenerate (line, empty), skip
+        # this candidate — the union is unusable as a cluster super-piece.
         decollinear = union.simplify(0)
-        if decollinear.geom_type == "Polygon" and not decollinear.is_empty:
-            union = ShapelyPolygon(decollinear.exterior)
+        if not (decollinear.geom_type == "Polygon" and not decollinear.is_empty):
+            continue
+        union = ShapelyPolygon(decollinear.exterior)
 
         # Simplify if over vertex cap.
         exterior_coords = list(union.exterior.coords)
@@ -352,13 +363,23 @@ def pack_cluster_union(
                 continue  # still too complex; skip this candidate
             union = simplified
 
-        # Drop closing duplicate; Piece.polygon convention is no closing vertex.
-        polygon_coords = [(round(x, 4), round(y, 4)) for x, y in exterior_coords[:-1]]
-
-        # Cluster bbox from union bounds.
+        # Cluster bbox from union bounds — derive cluster_w / cluster_h BEFORE
+        # origin-normalizing so the size is unaffected.
         minx, miny, maxx, maxy = union.bounds
         cluster_w = maxx - minx
         cluster_h = maxy - miny
+
+        # Origin-normalize: translate polygon coords AND copy_offsets so the
+        # cluster polygon starts at (0, 0). The first piece placed by inner BLF
+        # always lands at (0, 0) under the current invariants (lowest-leftmost
+        # IFP corner = (EDGE_GAP, EDGE_GAP), shifted to (0, 0)), so this is
+        # usually a no-op. The explicit translation makes the
+        # `BoundingBox(0, 0, w, h, w, h)` claim accurate even if a future
+        # change to inner BLF or the shift logic breaks the implicit invariant.
+        # Drop closing duplicate; Piece.polygon convention is no closing vertex.
+        polygon_coords = [
+            (round(x - minx, 4), round(y - miny, 4)) for x, y in exterior_coords[:-1]
+        ]
 
         # Sort key (mirror pack_cluster_bbox): minimize marker-length contribution
         # at the cluster's best feasible outer rotation.
@@ -380,7 +401,10 @@ def pack_cluster_union(
             grainline_direction_deg=base.grainline_direction_deg,
         )
 
-        copy_offsets = [(pl.x, pl.y) for pl in shifted]
+        # copy_offsets are shifted by the same (-minx, -miny) translation applied
+        # to polygon_coords so they remain consistent with the origin-normalized
+        # cluster polygon. (See origin-normalize comment above.)
+        copy_offsets = [(pl.x - minx, pl.y - miny) for pl in shifted]
         copy_local_rotations = [pl.rotation_deg for pl in shifted]
         # Rebuild original_pieces in placement order (pieces are identical, so
         # the order is purely cosmetic — but we keep it consistent with
