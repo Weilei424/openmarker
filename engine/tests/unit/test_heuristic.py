@@ -441,9 +441,11 @@ def test_auto_layout_disable_pruning_parallel_matches_serial():
 
 # --- identical-piece clustering tests ---
 
-def test_auto_layout_disable_clustering_yields_pre_cluster_behavior():
-    """With disable_clustering=True, the result must equal pre-clustering
-    behavior — same input, same chosen layout."""
+def test_auto_layout_disable_clustering_is_deterministic():
+    """disable_clustering=True on identical inputs must be bitwise-deterministic
+    (legacy-path determinism guard). Doesn't test cross-mode equivalence —
+    test_auto_layout_clustering_does_not_increase_marker_length and
+    test_auto_layout_clustering_singletons_unchanged cover that."""
     pieces = [_make_rect(f"p__c{i}", 100, 80) for i in range(4)]
     a = auto_layout_polygon(
         pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
@@ -455,6 +457,10 @@ def test_auto_layout_disable_clustering_yields_pre_cluster_behavior():
     )
     assert a[1] == b[1] and a[2] == b[2]
     assert len(a[0]) == 4
+    # Per-placement determinism, not just metrics.
+    for x, y in zip(a[0], b[0]):
+        assert x.piece_id == y.piece_id
+        assert x.x == y.x and x.y == y.y and x.rotation_deg == y.rotation_deg
 
 
 def test_auto_layout_clustering_singletons_unchanged():
@@ -515,3 +521,9 @@ def test_auto_layout_clustering_with_bi_grain():
     )
     assert len(placements) == 4
     assert length > 0
+    # Bi-grain at fabric_grain=0 with piece_grainline=0 produces target rotation
+    # 0° (and 180° as the bi alternative). The cluster picks one of the two as
+    # a unit, and every expanded copy must share that rotation.
+    rotations = {pl.rotation_deg for pl in placements}
+    assert len(rotations) == 1, f"copies in a rigid cluster should share rotation, got {rotations}"
+    assert rotations.pop() in (0.0, 180.0)
