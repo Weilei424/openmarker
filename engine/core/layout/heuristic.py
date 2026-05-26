@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import multiprocessing
 import os
 import threading
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from typing import NamedTuple
@@ -60,6 +61,23 @@ def kill_current_executor() -> None:
         ex.shutdown(wait=False, cancel_futures=True)
     except Exception:
         pass
+
+# ---------------------------------------------------------------------------
+# Cross-worker shared cutoff (parallel pruning)
+# ---------------------------------------------------------------------------
+# Set in each worker process by `_init_worker` at pool spawn time. The main
+# process publishes completed-strategy marker lengths into this Value as a
+# running min, and workers read it during BLF to prune their own execution
+# (see `shared_best_value` in `_blf_pack_nfp`).
+_worker_shared_best = None
+
+
+def _init_worker(value) -> None:
+    """ProcessPoolExecutor initializer. Stashes the shared `Value` in a
+    worker-process module global so `_run_one_strategy` can pass it down."""
+    global _worker_shared_best
+    _worker_shared_best = value
+
 
 # Integer scale for pyclipper. Preserves 3 decimal places of mm precision;
 # polygons up to ~2 km square stay within int32 range.
@@ -361,6 +379,7 @@ def _blf_pack_nfp(
     sort_key=None,
     nfp_cache: NfpCache | None = None,
     best_marker_so_far: float | None = None,
+    shared_best_value=None,  # multiprocessing.Value('d', ...) or None
 ) -> tuple[list[Placement], float, float]:
     """Bottom-Left-Fill using polygon set algebra over NFPs.
 
@@ -515,7 +534,15 @@ def _blf_pack_nfp(
         # monotone non-decreasing — once it meets the cutoff, this run cannot win.
         if candidate_poly.bounds[3] > current_max_bottom:
             current_max_bottom = candidate_poly.bounds[3]
-        if best_marker_so_far is not None and current_max_bottom + EDGE_GAP >= best_marker_so_far:
+        # Effective cutoff = min(caller-supplied initial, shared cross-worker).
+        # `.value` reads through the Value's internal lock (~1-5µs on Windows);
+        # negligible vs the placement work done above.
+        effective_cutoff = best_marker_so_far
+        if shared_best_value is not None:
+            sv = shared_best_value.value
+            if effective_cutoff is None or sv < effective_cutoff:
+                effective_cutoff = sv
+        if effective_cutoff is not None and current_max_bottom + EDGE_GAP >= effective_cutoff:
             raise _PrunedRun()
 
     marker_length, utilization = _compute_metrics(placements, pieces, fabric_width_mm, _polygon_dims)
@@ -545,9 +572,14 @@ def _run_one_strategy(
 ) -> tuple[list[Placement], float, float]:
     """Module-level entry for ProcessPoolExecutor. sort_index selects from
     _SORT_STRATEGIES so we don't have to pickle the callable across the
-    process boundary."""
+    process boundary. Reads `_worker_shared_best` (set by `_init_worker`)
+    so this strategy can prune via the cross-worker shared cutoff."""
     sort_key = _SORT_STRATEGIES[sort_index]
-    return _blf_pack_nfp(pieces, fabric_width_mm, mode, fabric_grain_deg, sort_key=sort_key)
+    return _blf_pack_nfp(
+        pieces, fabric_width_mm, mode, fabric_grain_deg,
+        sort_key=sort_key,
+        shared_best_value=_worker_shared_best,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -600,6 +632,7 @@ def auto_layout_polygon(
     fabric_grain_deg: float,
     disable_nfp_cache: bool = False,
     effort: int = 1,
+    disable_pruning: bool = False,
 ) -> tuple[list[Placement], float, float]:
     """No-Fit-Polygon-based Bottom-Left-Fill (slow mode, accurate).
 
@@ -621,6 +654,10 @@ def auto_layout_polygon(
     cost, sort strategies and bi-mode's secondary single run are dispatched
     across worker processes via ProcessPoolExecutor. Cancellation is
     best-effort on the parallel path (in-flight workers run to completion).
+
+    `disable_pruning`: when True, branch pruning is disabled in both serial and
+    parallel paths. Identical results, slower — exposed for A/B benchmarking and
+    debugging only, mirroring `disable_nfp_cache`.
     """
     modes = _modes_to_try(grain_mode)
     total_runs = len(modes) * len(_SORT_STRATEGIES)
@@ -640,12 +677,13 @@ def auto_layout_polygon(
         for mode in modes:
             for sort_index in range(len(_SORT_STRATEGIES)):
                 cache = {} if disable_nfp_cache else shared_cache
+                cutoff = None if disable_pruning else (best[1] if best is not None else None)
                 try:
                     result = _blf_pack_nfp(
                         pieces, fabric_width_mm, mode, fabric_grain_deg,
                         sort_key=_SORT_STRATEGIES[sort_index],
                         nfp_cache=cache,
-                        best_marker_so_far=best[1] if best is not None else None,
+                        best_marker_so_far=cutoff,
                     )
                 except _PrunedRun:
                     continue
@@ -657,8 +695,20 @@ def auto_layout_polygon(
     # reuse) but we get N-way parallelism. /cancel-layout terminates the worker
     # processes via kill_current_executor (see module top); the resulting
     # BrokenProcessPool from future.result() is translated to CancellationError.
+    #
+    # Cross-worker pruning: a shared `multiprocessing.Value` carries a running
+    # min of completed-strategy marker lengths. Workers read it per placement
+    # and abort (raise _PrunedRun) once their partial passes the cutoff. Main
+    # process publishes via as_completed so the cutoff tightens as workers finish.
+    shared_best = None if disable_pruning else multiprocessing.Value("d", float("inf"))
+
+    best: tuple[list[Placement], float, float] | None = None
     futures = []
-    with ProcessPoolExecutor(max_workers=workers) as pool:
+    with ProcessPoolExecutor(
+        max_workers=workers,
+        initializer=_init_worker,
+        initargs=(shared_best,),
+    ) as pool:
         _set_current_executor(pool)
         try:
             for mode in modes:
@@ -668,14 +718,24 @@ def auto_layout_polygon(
                         pieces, fabric_width_mm, mode, fabric_grain_deg, sort_index,
                     ))
             try:
-                results = [f.result() for f in futures]
+                for f in as_completed(futures):
+                    try:
+                        result = f.result()
+                    except _PrunedRun:
+                        continue  # worker self-aborted via the shared cutoff; ignore
+                    if shared_best is not None:
+                        # Lock so worker-process reads (via shared_best_value.value) can't
+                        # see a partial write while the main thread updates the shared cutoff.
+                        # as_completed itself is single-threaded, so there are no concurrent
+                        # writers — the lock exists solely to serialize against reader workers.
+                        with shared_best.get_lock():
+                            if result[1] < shared_best.value:
+                                shared_best.value = result[1]
+                    best = _shorter(best, result)
             except BrokenProcessPool as e:
                 raise CancellationError("Auto-layout cancelled (workers terminated).") from e
         finally:
             _set_current_executor(None)
 
-    best: tuple[list[Placement], float, float] | None = None
-    for r in results:
-        best = _shorter(best, r)
     assert best is not None
     return best

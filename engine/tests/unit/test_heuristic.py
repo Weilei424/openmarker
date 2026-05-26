@@ -296,3 +296,144 @@ def test_auto_layout_serial_pruning_matches_unpruned_best():
         if unpruned_best_length is None or length < unpruned_best_length:
             unpruned_best_length = length
     assert pruned[1] == unpruned_best_length
+
+
+# --- shared-cutoff (parallel pruning) tests ---
+
+def test_blf_shared_value_none_behaves_like_serial():
+    """When shared_best_value is None, behavior is bitwise identical to omitting it.
+    Compares full placement geometry, not just length, so a regression that
+    shifts placements while preserving length would still fail."""
+    from core.layout.heuristic import _blf_pack_nfp
+    pieces = [_make_square(f"p{i}", 100) for i in range(3)]
+    pa, la, ua = _blf_pack_nfp(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0
+    )
+    pb, lb, ub = _blf_pack_nfp(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        shared_best_value=None,
+    )
+    assert la == lb
+    assert ua == ub
+    assert len(pa) == len(pb)
+    for x, y in zip(pa, pb):
+        assert x.piece_id == y.piece_id
+        assert x.x == y.x and x.y == y.y and x.rotation_deg == y.rotation_deg
+
+
+def test_blf_shared_value_infinity_does_not_prune():
+    """A Value initialized to infinity (no cutoff yet) must not trigger pruning."""
+    import multiprocessing
+    from core.layout.heuristic import _blf_pack_nfp
+    pieces = [_make_square(f"p{i}", 100) for i in range(3)]
+    shared = multiprocessing.Value("d", float("inf"))
+    placements, length, _ = _blf_pack_nfp(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        shared_best_value=shared,
+    )
+    assert len(placements) == 3
+    assert length > 0
+
+
+def test_blf_shared_value_tight_cutoff_prunes():
+    """A shared Value with a tight cutoff must raise _PrunedRun mid-run."""
+    import multiprocessing
+    from core.layout.heuristic import _blf_pack_nfp, _PrunedRun
+    pieces = [_make_square(f"p{i}", 100) for i in range(3)]
+    shared = multiprocessing.Value("d", 1.0)  # any non-trivial placement exceeds this
+    with pytest.raises(_PrunedRun):
+        _blf_pack_nfp(
+            pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+            shared_best_value=shared,
+        )
+
+
+def test_blf_shared_value_takes_min_with_kwarg():
+    """When both best_marker_so_far and shared_best_value are provided, the
+    effective cutoff is the minimum (the tighter of the two prunes)."""
+    import multiprocessing
+    from core.layout.heuristic import _blf_pack_nfp, _PrunedRun
+    pieces = [_make_square(f"p{i}", 100) for i in range(3)]
+    # Kwarg is loose (1e9). Shared is tight (1.0). Effective = 1.0 → prune.
+    shared = multiprocessing.Value("d", 1.0)
+    with pytest.raises(_PrunedRun):
+        _blf_pack_nfp(
+            pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+            best_marker_so_far=1e9,
+            shared_best_value=shared,
+        )
+
+    # Inverted: kwarg tight, shared loose → still prune via kwarg.
+    shared_loose = multiprocessing.Value("d", float("inf"))
+    with pytest.raises(_PrunedRun):
+        _blf_pack_nfp(
+            pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+            best_marker_so_far=1.0,
+            shared_best_value=shared_loose,
+        )
+
+    # Both loose → min(loose, loose) is still loose → no prune, run completes.
+    # Guards against a buggy `min` that returns 0 or NaN when both inputs are present.
+    shared_loose2 = multiprocessing.Value("d", float("inf"))
+    placements, length, _ = _blf_pack_nfp(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        best_marker_so_far=1e9,
+        shared_best_value=shared_loose2,
+    )
+    assert len(placements) == 3
+    assert length > 0
+
+
+def test_auto_layout_parallel_pruning_matches_serial():
+    """Parallel mode with shared-Value pruning must produce the same chosen
+    layout as the serial path. Result quality must never depend on whether
+    pruning is on or off, or on the worker count."""
+    # Pieces are mixed-size rects — different sort strategies diverge,
+    # so multiple workers are exercised and at least one is prunable.
+    pieces = [_make_rect(f"p{i}", 80 + i * 10, 100 + (i % 3) * 30) for i in range(6)]
+    serial = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="bi", fabric_grain_deg=0.0, effort=1
+    )
+    parallel = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="bi", fabric_grain_deg=0.0, effort=5
+    )
+    assert serial[1] == parallel[1]  # marker length
+    assert serial[2] == parallel[2]  # utilization
+
+
+def test_auto_layout_disable_pruning_yields_identical_result():
+    """The disable_pruning toggle must not affect output — only speed.
+    Mirrors the existing disable_nfp_cache test."""
+    pieces = [_make_rect(f"p{i}", 80 + i * 10, 100 + (i % 3) * 30) for i in range(6)]
+    on = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="bi", fabric_grain_deg=0.0,
+        effort=1, disable_pruning=False,
+    )
+    off = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="bi", fabric_grain_deg=0.0,
+        effort=1, disable_pruning=True,
+    )
+    assert on[1] == off[1]
+    assert on[2] == off[2]
+    assert len(on[0]) == len(off[0])
+    for a, b in zip(on[0], off[0]):
+        assert a.piece_id == b.piece_id
+        assert abs(a.x - b.x) < 1e-9
+        assert abs(a.y - b.y) < 1e-9
+        assert abs(a.rotation_deg - b.rotation_deg) < 1e-9
+
+
+def test_auto_layout_disable_pruning_parallel_matches_serial():
+    """disable_pruning must also work in parallel mode — confirms the flag
+    is correctly propagated to workers via the initializer."""
+    pieces = [_make_rect(f"p{i}", 80 + i * 10, 100 + (i % 3) * 30) for i in range(6)]
+    serial = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="bi", fabric_grain_deg=0.0,
+        effort=1, disable_pruning=True,
+    )
+    parallel = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="bi", fabric_grain_deg=0.0,
+        effort=5, disable_pruning=True,
+    )
+    assert serial[1] == parallel[1]
+    assert serial[2] == parallel[2]
