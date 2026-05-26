@@ -27,16 +27,22 @@ class Cluster:
     """A pre-packed group of identical pieces, ready to be placed as a super-piece.
 
     Attributes:
-        super_piece: Synthetic Piece whose polygon is the bbox of the packed
-            grid. Its `area` field is the SUM of original copy areas (so
-            utilization math stays correct downstream).
+        super_piece: Synthetic Piece whose polygon represents the packed cluster
+            (bbox rectangle for `pack_cluster_bbox`; union exterior for
+            `pack_cluster_union`). Its `area` field is the SUM of original copy
+            areas (so utilization math stays correct downstream).
         copy_offsets: For each copy, its (dx, dy) in cluster-local coords
-            (origin = cluster's bbox top-left, axis-aligned, no rotation).
+            (top-left of the copy's rotated bbox in cluster-local frame).
+        copy_local_rotations: For each copy, its local rotation in degrees within
+            the cluster. Bbox path uses zeros (copies all at outer rotation).
+            Union path may use {0, 180} (bi-mode) or {0, 90, 180, 270} (no-grain).
         original_pieces: Original Piece objects in the same order as
-            copy_offsets — used to look up id/polygon/area for expansion.
+            copy_offsets/copy_local_rotations — used to look up id/polygon/area
+            for expansion.
     """
     super_piece: Piece
     copy_offsets: list[tuple[float, float]]
+    copy_local_rotations: list[float]
     original_pieces: list[Piece]
 
 
@@ -60,13 +66,13 @@ def group_pieces_by_base_id(pieces: list[Piece]) -> dict[str, list[Piece]]:
     return groups
 
 
-def pack_cluster(
+def pack_cluster_bbox(
     pieces: list[Piece],
     fabric_width_mm: float,
     grain_mode: str = "single",
     fabric_grain_deg: float = 0.0,
 ) -> Cluster | None:
-    """Pack N copies of an identical piece into a compact super-piece.
+    """Pack N copies of an identical piece into a bbox super-piece.
 
     Returns None when:
       - N < 2 (single copy: no clustering benefit)
@@ -189,7 +195,12 @@ def pack_cluster(
         grainline_direction_deg=base.grainline_direction_deg,
     )
 
-    return Cluster(super_piece=super_piece, copy_offsets=offsets, original_pieces=pieces)
+    return Cluster(
+        super_piece=super_piece,
+        copy_offsets=offsets,
+        copy_local_rotations=[0.0] * n,  # bbox path uses uniform 0° local rotation
+        original_pieces=pieces,
+    )
 
 
 def pre_cluster_pieces(
@@ -213,7 +224,7 @@ def pre_cluster_pieces(
         if len(group) < 2:
             clustered_input.extend(group)
             continue
-        cluster = pack_cluster(group, fabric_width_mm, grain_mode, fabric_grain_deg)
+        cluster = pack_cluster_bbox(group, fabric_width_mm, grain_mode, fabric_grain_deg)
         if cluster is None:
             # Couldn't cluster (group's piece too wide for fabric); pass through.
             clustered_input.extend(group)

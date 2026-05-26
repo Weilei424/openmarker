@@ -3,7 +3,7 @@ from core.models.piece import Piece, BoundingBox
 from core.layout.clustering import (
     Cluster,
     group_pieces_by_base_id,
-    pack_cluster,
+    pack_cluster_bbox,
     pre_cluster_pieces,
     expand_cluster_placement,
 )
@@ -44,7 +44,7 @@ def test_group_no_suffix_passes_through():
 
 def test_pack_cluster_singleton_returns_none():
     """N=1 → no clustering, return None."""
-    assert pack_cluster([_rect("p__c0", 100, 50)], fabric_width_mm=300) is None
+    assert pack_cluster_bbox([_rect("p__c0", 100, 50)], fabric_width_mm=300) is None
 
 
 def test_pack_cluster_perfect_grid():
@@ -56,7 +56,7 @@ def test_pack_cluster_perfect_grid():
     2×2: cluster_w=200 + 20 = 220 ≤ 300, cluster_h=100.
     Sort by (cluster_h, cluster_w): 2×2 wins (cluster_h=100 < 200)."""
     copies = [_rect(f"p__c{i}", 100, 50, grainline=0.0) for i in range(4)]
-    cluster = pack_cluster(copies, fabric_width_mm=300, grain_mode="single", fabric_grain_deg=0.0)
+    cluster = pack_cluster_bbox(copies, fabric_width_mm=300, grain_mode="single", fabric_grain_deg=0.0)
     assert cluster is not None
     assert cluster.super_piece.bbox.width == 200
     assert cluster.super_piece.bbox.height == 100
@@ -72,7 +72,7 @@ def test_pack_cluster_narrow_fabric_forces_single_column():
     4×1: cluster_w=400+20=420 > 150; infeasible.
     1×4: cluster_w=100+20=120 ≤ 150; only feasible aspect ratio."""
     copies = [_rect(f"p__c{i}", 100, 50, grainline=0.0) for i in range(4)]
-    cluster = pack_cluster(copies, fabric_width_mm=150, grain_mode="single", fabric_grain_deg=0.0)
+    cluster = pack_cluster_bbox(copies, fabric_width_mm=150, grain_mode="single", fabric_grain_deg=0.0)
     assert cluster is not None
     assert cluster.super_piece.bbox.width == 100
     assert cluster.super_piece.bbox.height == 200
@@ -85,14 +85,14 @@ def test_pack_cluster_too_big_returns_none():
     Any cluster layout in 0° orientation: min cluster_w=200 (1×4). 200+20>150.
     Even 1-column layout doesn't fit; pack_cluster returns None."""
     copies = [_rect(f"p__c{i}", 200, 50, grainline=0.0) for i in range(4)]
-    cluster = pack_cluster(copies, fabric_width_mm=150, grain_mode="single", fabric_grain_deg=0.0)
+    cluster = pack_cluster_bbox(copies, fabric_width_mm=150, grain_mode="single", fabric_grain_deg=0.0)
     assert cluster is None
 
 
 def test_pack_cluster_preserves_grainline():
     """The super-piece inherits the original pieces' grainline (they're identical)."""
     copies = [_rect(f"p__c{i}", 100, 50, grainline=90.0) for i in range(4)]
-    cluster = pack_cluster(copies, fabric_width_mm=300)
+    cluster = pack_cluster_bbox(copies, fabric_width_mm=300)
     assert cluster is not None
     assert cluster.super_piece.grainline_direction_deg == 90.0
 
@@ -101,7 +101,7 @@ def test_pack_cluster_prime_count_picks_strip():
     """7 copies of 100×50: aspect ratios (1,7) and (7,1) have no dead space; both have area 7*100*50.
     (2,4)=8 slots wastes 1 slot. Prefer (1,7) or (7,1)."""
     copies = [_rect(f"p__c{i}", 100, 50) for i in range(7)]
-    cluster = pack_cluster(copies, fabric_width_mm=1000)
+    cluster = pack_cluster_bbox(copies, fabric_width_mm=1000)
     assert cluster is not None
     # Must be one of the perfect-fit options
     assert (cluster.super_piece.bbox.width, cluster.super_piece.bbox.height) in [
@@ -149,7 +149,7 @@ def test_expand_cluster_at_rotation_zero():
     Uses grainline=0° + single mode so only 0° is allowed; fabric=300 forces 2×2 grid
     (4×1 cluster_w=400+20=420>300 infeasible; 2×2 cluster_w=200+20=220≤300 wins)."""
     copies = [_rect(f"p__c{i}", 100, 50, grainline=0.0) for i in range(4)]
-    cluster = pack_cluster(copies, fabric_width_mm=300, grain_mode="single", fabric_grain_deg=0.0)  # 2×2 grid
+    cluster = pack_cluster_bbox(copies, fabric_width_mm=300, grain_mode="single", fabric_grain_deg=0.0)  # 2×2 grid
     # Place super-piece at (500, 1000) with rotation 0°
     placements = list(expand_cluster_placement(cluster, super_x=500, super_y=1000, super_rotation=0.0))
     assert len(placements) == 4
@@ -166,7 +166,7 @@ def test_expand_cluster_at_rotation_180():
     """At rotation 180°, the cluster flips. Copies end up at mirrored positions
     within the cluster's bbox. Each copy also gets rotation 180°."""
     copies = [_rect(f"p__c{i}", 100, 50) for i in range(2)]
-    cluster = pack_cluster(copies, fabric_width_mm=500)  # 2×1 grid, bbox 200×50
+    cluster = pack_cluster_bbox(copies, fabric_width_mm=500)  # 2×1 grid, bbox 200×50
     # Place super-piece at (0, 0) with rotation 180°
     placements = list(expand_cluster_placement(cluster, super_x=0, super_y=0, super_rotation=180.0))
     assert len(placements) == 2
@@ -177,7 +177,7 @@ def test_expand_cluster_at_rotation_180():
 def test_expand_returns_original_piece_ids():
     """Expanded placements reference the original (not super-piece) piece IDs."""
     copies = [_rect(f"piece_a__c{i}", 100, 50) for i in range(2)]
-    cluster = pack_cluster(copies, fabric_width_mm=300)
+    cluster = pack_cluster_bbox(copies, fabric_width_mm=300)
     placements = list(expand_cluster_placement(cluster, 0.0, 0.0, 0.0))
     expanded_ids = {p[0] for p in placements}
     assert expanded_ids == {"piece_a__c0", "piece_a__c1"}
@@ -200,7 +200,7 @@ def test_expand_cluster_non_rectangular_polygon():
         )
         for i in range(2)
     ]
-    cluster = pack_cluster(pieces, fabric_width_mm=300)
+    cluster = pack_cluster_bbox(pieces, fabric_width_mm=300)
     assert cluster is not None
     placements = list(
         expand_cluster_placement(cluster, super_x=100.0, super_y=200.0, super_rotation=0.0)
@@ -228,7 +228,7 @@ def test_pack_cluster_tall_pieces_with_grain_rejected_when_rotation_doesnt_fit()
     # 1×10 grid: cluster_w = 400 (fits); cluster_h = 6000.
     # 5×2 grid: cluster_w = 2000 (doesn't fit); 2×5: cluster_w = 800 (fits).
     # So 1×10 or 2×5 are the only candidates. Either is valid.
-    cluster = pack_cluster(pieces, fabric_width_mm=1500, grain_mode="single", fabric_grain_deg=90.0)
+    cluster = pack_cluster_bbox(pieces, fabric_width_mm=1500, grain_mode="single", fabric_grain_deg=90.0)
     assert cluster is not None
     # Should pick the shortest feasible — 5x2 (cluster_h=1200) over 1×10 (cluster_h=6000).
     # Wait actually: 2×5 has cluster_w=800, cluster_h=3000. 5×2 isn't feasible.
@@ -262,7 +262,7 @@ def test_pack_cluster_grain_rotates_cluster_to_fit():
     Placed at 90°: width=400mm (cluster_h), marker contribution=600mm (cluster_w).
     """
     pieces = [_rect(f"wide__c{i}", 200, 100, grainline=0.0) for i in range(10)]
-    cluster = pack_cluster(pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=90.0)
+    cluster = pack_cluster_bbox(pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=90.0)
     assert cluster is not None
     # 3×4 wins: smallest sort_h (= cluster_w = 600) among feasible grids.
     assert cluster.super_piece.bbox.width == 600
