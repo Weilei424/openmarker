@@ -442,8 +442,15 @@ def test_pack_cluster_union_vertex_cap_triggers_simplify():
         for i in range(10)
     ]
     cluster = pack_cluster_union(pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0)
+    # Two valid outcomes:
+    # (a) simplify reduced exterior to <= VERTEX_CAP and the cluster shipped,
+    # (b) every candidate stayed over cap even after simplify, so pack_cluster_union
+    #     returned None and the caller will fall back to pack_cluster_bbox.
+    # Both prove the cap+simplify guard is wired up; the conditional avoids
+    # over-constraining behavior that legitimately depends on the input's
+    # geometry richness (10 × 50-vertex circles can exceed 200 verts even
+    # after 0.5 mm simplify).
     if cluster is not None:
-        # If a candidate succeeded, its exterior must respect the vertex cap.
         assert len(cluster.super_piece.polygon) <= VERTEX_CAP
 
 

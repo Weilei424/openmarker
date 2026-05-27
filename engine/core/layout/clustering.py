@@ -134,7 +134,10 @@ def pack_cluster_bbox(
             return w
         return max(w, h)
 
-    candidates: list[tuple[float, float, int, int]] = []
+    # Each candidate: (sort_h, sort_w, cluster_h, cluster_w, cols, rows). sort_h/sort_w
+    # use float (height_at_rotation can return either piece_w or piece_h, both float);
+    # cluster_h/cluster_w are also float (piece_w * cols / piece_h * rows).
+    candidates: list[tuple[float, float, float, float, int, int]] = []
     usable_width = fabric_width_mm - 2 * EDGE_GAP
     for cols in range(1, n + 1):
         rows = math.ceil(n / cols)
