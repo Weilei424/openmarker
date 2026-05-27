@@ -158,20 +158,16 @@ Task checklist:
 
 ### Phase 6 follow-ups — algorithm performance
 
-- [x] Engine: branch pruning in serial `auto_layout_polygon` — abort strategies whose partial marker length already meets/exceeds the best complete result. Monotone-bound argument: BLF's partial marker length is non-decreasing in the number of placed pieces. Measured speedup 1.04x–1.65x on synthetic inputs and 1.18x on the sample_2.dxf × 10 real workload (190 pieces, bi grain). Shipped in PR #7.
-- [x] Engine: parallel-path branch pruning via shared `multiprocessing.Value('d')` cutoff. Main process publishes completed-strategy results via `as_completed`; workers read per placement and self-abort once their partial >= shared cutoff. Result identical to serial mode. Measured wall-clock: sample_2.dxf × 10 (190 pieces, bi grain) drops from 25.7s (serial, pruning on) to 11.3s (parallel effort=5, pruning on) — 2.3x speedup from parallelism, plus pruning contributes ~10% within parallel mode (11.3s vs 12.5s no-prune). Also adds `disable_pruning: bool = False` toggle on `auto_layout_polygon` (mirrors `disable_nfp_cache`). Shipped in PR #8.
-- [x] Engine: identical-piece pre-clustering MECHANISM (off by default; `disable_clustering: bool = True`). Groups copies by base id, packs into a rigid bbox super-piece, expands placements after BLF. Implementation correct (116 tests pass including grain-rotation feasibility, bi-grain expansion, oversized-group passthrough). **But bbox approximation regresses sample_2.dxf × 10 by +145%** (29958mm vs 12249mm at fabric=1651mm) because rigid super-pieces block fabric rows that BLF would otherwise interleave with other piece types. Shipped off; will be re-enabled (or replaced) once true-union polygon clusters land. PR #9.
-- [x] Engine: true-union polygon clusters (opt-in alternative to PR #9's bbox path). Adds `cluster_polygon: 'union' | 'bbox' = 'union'` to `auto_layout_polygon`. `pack_cluster_union` runs an inner NFP-BLF on each group's copies with cluster-local rotations, Shapely-unions them, strips holes, simplifies to `VERTEX_CAP=200` exterior vertices. `pack_cluster_bbox` (PR #9 path) kept as per-group fallback for MultiPolygon / vertex-cap overshoot. `Cluster` gains `copy_local_rotations` so bi-mode clusters can mix 0° and 180° copies internally. `_blf_pack_nfp` gains `override_rotations` + `skip_validation` plumbing for the inner-BLF call. NFP cache shared across cols iterations.
+> **Detail lives in `docs/planning/PERFORMANCE.md`.** Per-PR measurements,
+> opt-in code map for the disabled clustering paths, the full ranked list of
+> open follow-ups, and a chronological design-decisions log are all there.
+> This section is progress-tracking only — keep entries to one line.
 
-  **Shipped opt-in, not default** — the acceptance gate (strictly beat unclustered 12249mm on `sample_2.dxf × 10` at fabric=1651mm bi-grain) was NOT met: union=27336mm, bbox=29958mm, off=12249mm. Root cause is structural, not a bug: when every base id has copies (the typical garment-marker case), every group gets clustered, leaving no singletons to slot into cluster perimeter bays — the union polygon's bay-exposure benefit is unrealized while rigid clusters still block row interleaving. Union still beats bbox by ~8% on the headline workload, validating that the union mechanism works; bench gate relaxed from `union < off` to `union <= bbox` (the realistic floor) before shipping. Spec: `docs/superpowers/specs/2026-05-26-true-union-polygon-clusters-design.md`. Plan: `docs/superpowers/plans/2026-05-26-true-union-polygon-clusters.md`. PR #10.
-
-### Layout improvements — algorithm follow-ups (filed after PR #10 acceptance gate slipped)
-
-The true-union mechanism is shipped opt-in; flipping the default requires a workload where union beats unclustered BLF. The fundamental constraint: a workload must have BOTH clusters (multi-copy base pieces) AND singletons (base pieces with copies=1) so BLF can slot the singletons into the cluster perimeter bays. Garment markers (`sample_2.dxf × 10`) fail this — every base piece has 10 copies, no singletons. Three approaches could break the structural barrier:
-
-- [ ] **Heterogeneous clustering.** Cluster pieces with *different* base_ids together so the marker still has "loose" pieces left over. Combinatorial search over which pieces to cluster; needs care to avoid blowup. Medium-high effort. Replaces the per-base-id grouping in `pre_cluster_pieces`.
-- [ ] **Partial clustering (cluster fewer copies per group).** Instead of clustering ALL N copies, cluster only N-k (where k ≥ 1) and leave k as singletons. The k singletons can then slot into cluster bays. Trade-off: smaller cluster vs more singletons in outer BLF. Easier than heterogeneous clustering; could be added as a `cluster_fraction: float = 1.0` knob. Low-medium effort.
-- [ ] **Cluster-aware outer sort.** When clusters and singletons coexist, sort to interleave them (cluster, then small singleton into bay, then next cluster). Composes with both other items. Low effort, but only useful once one of the above is in.
+- [x] Serial branch pruning (PR #7). See PERFORMANCE.md § 2.
+- [x] Parallel branch pruning + `disable_pruning` toggle (PR #8). See PERFORMANCE.md § 2.
+- [x] Identical-piece clustering — bbox path. Opt-in only (regresses garment workloads). PR #9. See PERFORMANCE.md § 2 + § 4.1.
+- [x] Identical-piece clustering — union path. Opt-in only (structural barrier documented). PR #10. See PERFORMANCE.md § 2 + § 4.2.
+- [ ] Algorithm follow-ups (clustering structural-barrier + general wins + pruning meta-improvements). Ranked list in PERFORMANCE.md § 5.
 
 ### Phase 7 — Export
 - [ ] Export layout as DXF or PNG (sourced from any cached layout tab)
@@ -202,22 +198,8 @@ Items not yet assigned to a phase. Rough notes captured to avoid losing context.
 - [ ] Remove `includeEffortInKey` param from `useAutoLayout.runAutoLayout`
 - [ ] Remove `TEMP(phase6-bench)` comments throughout
 
-### Branch-pruning follow-ups (filed when PR #7 shipped)
+### Algorithm / performance follow-ups
 
-- [x] **Parallel-path pruning.** Workers in `ProcessPoolExecutor` don't share `best_so_far`. Options: `multiprocessing.Value` for an atomic shared cutoff (checked every N placements to amortize IPC), or tournament staging (run 2 scout strategies serially first, then dispatch the rest with the established cutoff). Defer until benchmarks justify the IPC cost on real workloads. (Shipped in PR #8.)
-- [ ] **Smart strategy ordering.** Run the historically-best sort strategy first so the cutoff tightens sooner for the remaining runs. Needs telemetry on which sort wins most often (currently no data).
-- [ ] **Cutoff slack.** Accept runs within `epsilon` of best for diversity (e.g., to keep "almost as good" results for future export/comparison). Not needed today; file here so it's not lost.
-
-### Layout improvements — algorithm
-
-> Filed after the sample_2.dxf × 10 commercial-vs-OpenMarker comparison (commercial: 10599 mm @ 86.1%; ours: 11699 mm @ 79.4% — ~7pp gap on the headline workload). Items ranked by gain-per-effort.
-
-- [x] **Identical-piece pre-clustering (true-union polygon clusters).** Mechanism shipped opt-in in PR #10. Union path beats bbox (~8% on `sample_2.dxf × 10`) but neither beats unclustered BLF on workloads where every base id has copies. Default flip deferred — see "Layout improvements — algorithm follow-ups" under Phase 6 follow-ups for the structural fixes that could break the barrier (heterogeneous clustering, partial clustering, cluster-aware sort).
-
-- [ ] **Grain-compatible mirroring.** When `grain_mode == "bi"`, allow horizontal reflection of pieces (flip x-coords within bbox center). Adds reflected copies to the rotation candidate set. Estimated gain: 1–3pp. Medium effort.
-
-- [ ] **Concave-bay fill pass.** Post-pass after primary BLF: for each large piece with a concave bay (e.g., armhole curves on a garment piece), attempt to tuck small unplaced pieces into the bay region. Bays detected via polygon difference of bbox minus polygon. Estimated gain: 1–3pp on garment workloads. High effort — needs bay-detection geometry + a second placement pass.
-
-- [ ] **GA / SA meta-heuristic wrapper.** Wrap the existing NFP-BLF as the fitness function inside a genetic or simulated-annealing search over piece-ordering permutations and per-piece rotation choices. Iterative — runs BLF many times with budget bounded by a time/iteration cap. Estimated gain: 3–8pp. High effort — adds an entire outer search loop; needs parallelization design to keep wall-clock reasonable. Combines naturally with the other items (they all become inner-loop primitives the meta-heuristic explores).
-
-- [ ] **More sort strategies (8–12 instead of 4).** Add e.g. perimeter-DESC, diagonal-DESC, aspect-ratio-extremes-first, hilbert-curve ordering. Cheap to add (one named function each); benefits compose with parallel pruning. Estimated gain: 0.5–2pp. Low effort.
+> All detail (ranked open items, branch-pruning follow-ups, layout-algorithm
+> wins, shipped-but-disabled mechanisms) lives in
+> `docs/planning/PERFORMANCE.md`. Edit perf items there, not here.
