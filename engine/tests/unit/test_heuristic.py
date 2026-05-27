@@ -596,13 +596,13 @@ def test_blf_pack_nfp_default_behavior_unchanged():
 
 # --- cluster_polygon dispatch + default-on tests ---
 
-def test_auto_layout_cluster_polygon_union_default():
-    """cluster_polygon defaults to 'union'. Smoke test: 4 copies of a small rect
-    in a large fabric — auto_layout returns the right number of placements."""
+def test_auto_layout_cluster_polygon_union_opt_in():
+    """Opt-in: disable_clustering=False + cluster_polygon='union' returns the
+    right number of placements with original (not super-piece) ids."""
     pieces = [_make_rect(f"p__c{i}", 100, 80) for i in range(4)]
     placements, marker, util = auto_layout_polygon(
         pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
-        effort=1,
+        effort=1, disable_clustering=False, cluster_polygon="union",
     )
     assert len(placements) == 4
     assert marker > 0
@@ -610,13 +610,13 @@ def test_auto_layout_cluster_polygon_union_default():
     assert {pl.piece_id for pl in placements} == {f"p__c{i}" for i in range(4)}
 
 
-def test_auto_layout_cluster_polygon_bbox_matches_pr9_behavior():
-    """With cluster_polygon='bbox' and disable_clustering=False, behavior matches
-    PR #9 exactly: super-piece is the bbox rectangle, all copies at zero local rot."""
+def test_auto_layout_cluster_polygon_bbox_opt_in_matches_pr9():
+    """Opt-in: disable_clustering=False + cluster_polygon='bbox' matches PR #9
+    exactly: super-piece is the bbox rectangle, all copies at zero local rot."""
     pieces = [_make_rect(f"p__c{i}", 100, 80) for i in range(4)]
     placements, marker, util = auto_layout_polygon(
         pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
-        effort=1, cluster_polygon="bbox",
+        effort=1, disable_clustering=False, cluster_polygon="bbox",
     )
     assert len(placements) == 4
     # For 4 axis-aligned identical rects in a generous fabric, union and bbox
@@ -625,23 +625,24 @@ def test_auto_layout_cluster_polygon_bbox_matches_pr9_behavior():
     assert marker > 0
 
 
-def test_auto_layout_clustering_default_on():
-    """disable_clustering defaults to False — calling without the flag activates
-    clustering. Verify by checking that the result equals the union-default result."""
+def test_auto_layout_clustering_default_off_matches_pr9():
+    """disable_clustering defaults to True — clustering is opt-in. The Q1
+    success bar (beat unclustered baseline on sample_2.dxf x 10) was not met
+    in Task 7's bench, so the default flip from PR #9 is reverted. This test
+    is the regression guard: default behavior MUST equal disable_clustering=True
+    (unclustered BLF) — bit-for-bit, not just <=."""
     pieces = [_make_rect(f"p__c{i}", 100, 80) for i in range(4)]
-    placements_default, marker_default, _ = auto_layout_polygon(
+    placements_default, marker_default, util_default = auto_layout_polygon(
         pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
         effort=1,
     )
-    placements_off, marker_off, _ = auto_layout_polygon(
+    placements_off, marker_off, util_off = auto_layout_polygon(
         pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
         effort=1, disable_clustering=True,
     )
-    # Both runs produce 4 placements. Marker should be equal-or-less when clustered on
-    # (cannot regress for axis-aligned identical rects).
-    assert len(placements_default) == 4
-    assert len(placements_off) == 4
-    assert marker_default <= marker_off + 1e-6
+    assert marker_default == marker_off
+    assert util_default == util_off
+    assert len(placements_default) == len(placements_off)
 
 
 def test_auto_layout_union_no_worse_than_bbox_on_homogeneous():

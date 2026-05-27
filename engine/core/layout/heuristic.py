@@ -666,8 +666,8 @@ def auto_layout_polygon(
     disable_nfp_cache: bool = False,
     effort: int = 1,
     disable_pruning: bool = False,
-    disable_clustering: bool = False,         # CHANGED: was True
-    cluster_polygon: str = "union",            # NEW
+    disable_clustering: bool = True,          # PR #9 default preserved; see docstring
+    cluster_polygon: str = "union",            # selects bbox vs union path WHEN enabled
 ) -> tuple[list[Placement], float, float]:
     """No-Fit-Polygon-based Bottom-Left-Fill (slow mode, accurate).
 
@@ -694,18 +694,24 @@ def auto_layout_polygon(
     parallel paths. Identical results, slower — exposed for A/B benchmarking and
     debugging only, mirroring `disable_nfp_cache`.
 
-    `disable_clustering`: defaults to False. Identical-piece pre-clustering
-    (`core.layout.clustering.pre_cluster_pieces`) is on by default and uses the
-    union polygon path (see `cluster_polygon`). Pass True to bypass clustering
-    entirely (input pieces go to BLF directly).
+    `disable_clustering`: defaults to True (matches PR #9 behavior). Identical-
+    piece pre-clustering is OPT-IN until a benchmark shows it beats unclustered
+    BLF on real workloads. On garment workloads where every base id has copies
+    (e.g. sample_2.dxf x 10), all pieces get clustered — there are no
+    singletons to slot into the cluster bays, so the perimeter-bay benefit is
+    unrealized and the rigid clusters block row interleaving. Pass
+    `disable_clustering=False` to opt in (see `cluster_polygon` for path).
 
-    `cluster_polygon`: 'union' (default) or 'bbox'. Selects the cluster polygon
-    construction strategy. Union runs an inner NFP-BLF on each group's copies and
-    uses the Shapely union (holes stripped, simplified to VERTEX_CAP) as the
-    super-piece polygon — exposes perimeter bays to outer BLF for interleaving.
-    Bbox uses the rigid bbox of the grid-packed copies — preserved for
-    benchmarking and as a per-group fallback when union produces a MultiPolygon
-    or exceeds VERTEX_CAP.
+    `cluster_polygon`: 'union' (default when clustering is enabled) or 'bbox'.
+    Selects the cluster polygon construction strategy. Union runs an inner
+    NFP-BLF on each group's copies and uses the Shapely union (holes stripped,
+    simplified to VERTEX_CAP) as the super-piece polygon — exposes perimeter
+    bays to outer BLF for interleaving. Bbox uses the rigid bbox of the
+    grid-packed copies — preserved for benchmarking and as a per-group fallback
+    when union produces a MultiPolygon or exceeds VERTEX_CAP. Union strictly
+    beats bbox on workloads with bay-exposable perimeters; on the headline
+    sample_2.dxf x 10 (fabric=1651mm, bi-grain), union is 27336mm vs bbox
+    29958mm (still both worse than off=12249mm — clustering remains opt-in).
     """
     if disable_clustering:
         blf_input = pieces

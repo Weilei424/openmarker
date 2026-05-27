@@ -3,9 +3,29 @@
 Run from the worktree root with:
     D:\\openmarker\\engine\\.venv\\Scripts\\python.exe engine\\tests\\bench_clustering.py
 
-Compares marker_length and utilization (clustering on vs off) on a few
-scenarios. The headline row uses examples/input/sample_2.dxf x 10 copies —
-the same workload as the commercial-vs-OpenMarker comparison (~7pp gap).
+Compares marker_length and utilization for three modes per row:
+  - off:    clustering disabled (disable_clustering=True)
+  - bbox:   clustering on, cluster_polygon='bbox' (PR #9 behavior)
+  - union:  clustering on, cluster_polygon='union' (this PR)
+
+The headline row uses examples/input/sample_2.dxf x 10 copies — the same
+workload as the commercial-vs-OpenMarker comparison (~7pp gap).
+
+Acceptance gates (post Task 7 BLOCKED — clustering ships as OPT-IN, default off):
+  - 10 identical rects: union.marker <= off.marker + 1e-6
+  - two-groups:         union.marker <= off.marker + 1e-6  (sort-key fix lets union match off here)
+  - 8 singletons:       union.marker == off.marker (clustering no-op)
+  - sample_2.dxf x 10:  union.marker <= bbox.marker + 1e-6  (RELAXED from "beats off":
+                        the headline gate cannot beat off=12249mm because all 19 base
+                        pieces have copies → 19 rigid clusters that can't interleave.
+                        We still require union to be at least as good as bbox, since
+                        union exposing perimeter bays gives ~8% reduction over bbox
+                        on real workloads even when the absolute number is worse.)
+  - parallel sample_2:  union.marker[effort=5] == union.marker[effort=1] (determinism)
+
+Prints PASS/FAIL per gate and an overall verdict at the end. The "ship" line
+reflects the OPT-IN status — even with all gates green, default stays off until
+a workload demonstrates union beats unclustered BLF on real fabric.
 """
 from __future__ import annotations
 
@@ -65,63 +85,107 @@ def _load_dxf_pieces(path: str, copies: int) -> list[Piece]:
     return expanded
 
 
-def _run(pieces, fabric_width_mm, grain_mode, effort, disable_clustering):
-    t0 = time.perf_counter()
-    placements, length, util = heuristic.auto_layout_polygon(
-        pieces, fabric_width_mm=fabric_width_mm,
+def _run(pieces, fabric_width_mm, grain_mode, effort, mode):
+    """mode in {'off', 'bbox', 'union'}"""
+    kwargs = dict(
+        pieces=pieces, fabric_width_mm=fabric_width_mm,
         grain_mode=grain_mode, fabric_grain_deg=0.0, effort=effort,
-        disable_clustering=disable_clustering,
     )
+    if mode == "off":
+        kwargs["disable_clustering"] = True
+    elif mode == "bbox":
+        kwargs["disable_clustering"] = False
+        kwargs["cluster_polygon"] = "bbox"
+    elif mode == "union":
+        kwargs["disable_clustering"] = False
+        kwargs["cluster_polygon"] = "union"
+    else:
+        raise ValueError(f"unknown mode: {mode}")
+    t0 = time.perf_counter()
+    placements, length, util = heuristic.auto_layout_polygon(**kwargs)
     return time.perf_counter() - t0, length, util
 
 
-def _bench(name: str, pieces, fabric_width_mm: float, grain_mode: str = "single", effort: int = 1) -> None:
-    # Warmup pass — eats import/JIT overhead.
-    _run(pieces, fabric_width_mm, grain_mode, effort, disable_clustering=False)
+def _bench(
+    name: str, pieces, fabric_width_mm: float, grain_mode: str = "single", effort: int = 1,
+) -> tuple[float, float, float]:
+    """Run off/bbox/union; print one row; return (off_marker, bbox_marker, union_marker)."""
+    # Warm up (eats first-run import / JIT overhead).
+    _run(pieces, fabric_width_mm, grain_mode, effort, "union")
 
-    on_t, on_len, on_util = _run(pieces, fabric_width_mm, grain_mode, effort, disable_clustering=False)
-    off_t, off_len, off_util = _run(pieces, fabric_width_mm, grain_mode, effort, disable_clustering=True)
+    off_t, off_len, off_util = _run(pieces, fabric_width_mm, grain_mode, effort, "off")
+    bbox_t, bbox_len, bbox_util = _run(pieces, fabric_width_mm, grain_mode, effort, "bbox")
+    union_t, union_len, union_util = _run(pieces, fabric_width_mm, grain_mode, effort, "union")
 
-    speedup = off_t / on_t if on_t > 0 else float("inf")
-    length_change = (off_len - on_len) / off_len * 100 if off_len > 0 else 0.0
-    util_change = on_util - off_util
-    regression = on_len > off_len + 1e-6
-    status = "REGRESSED" if regression else "OK"
     print(
-        f"{name:55s} on=L{on_len:8.1f}/U{on_util:5.2f}%/{on_t*1000:7.1f}ms  "
-        f"off=L{off_len:8.1f}/U{off_util:5.2f}%/{off_t*1000:7.1f}ms  "
-        f"Δlen={-length_change:+5.2f}%  Δutil={util_change:+5.2f}pp  [{status}]"
+        f"{name:55s}\n"
+        f"  off:    L={off_len:8.1f}/U={off_util:5.2f}%/t={off_t*1000:8.1f}ms\n"
+        f"  bbox:   L={bbox_len:8.1f}/U={bbox_util:5.2f}%/t={bbox_t*1000:8.1f}ms\n"
+        f"  union:  L={union_len:8.1f}/U={union_util:5.2f}%/t={union_t*1000:8.1f}ms"
     )
+    return off_len, bbox_len, union_len
+
+
+def _gate(name: str, condition: bool, detail: str) -> bool:
+    status = "PASS" if condition else "FAIL"
+    print(f"  [{status}] {name}: {detail}")
+    return condition
 
 
 if __name__ == "__main__":
-    # All-identical rects — clustering's ideal case (no diversity to interleave).
-    pieces_identical = [_piece(f"p__c{i}", 100, 50) for i in range(10)]
-    _bench("10 identical rects (100x50), fabric=500", pieces_identical, 500.0)
+    gates: list[bool] = []
 
-    # Two groups: 6 copies of one + 4 copies of another.
+    # Row 1: 10 identical rects. Union should match off (rectangles tile perfectly).
+    pieces_identical = [_piece(f"p__c{i}", 100, 50) for i in range(10)]
+    off, bbox, union = _bench("10 identical rects (100x50), fabric=500", pieces_identical, 500.0)
+    gates.append(_gate("identical rects: union no-worse-than off",
+                       union <= off + 1e-6, f"union={union:.1f} off={off:.1f}"))
+
+    # Row 2: two-groups (heterogeneous).
     pieces_two_groups = (
         [_piece(f"a__c{i}", 100, 60) for i in range(6)]
         + [_piece(f"b__c{i}", 120, 40) for i in range(4)]
     )
-    _bench("6×(100x60) + 4×(120x40), fabric=500", pieces_two_groups, 500.0)
+    off, bbox, union = _bench("6x(100x60) + 4x(120x40), fabric=500", pieces_two_groups, 500.0)
+    gates.append(_gate("two-groups: union no-worse-than off",
+                       union <= off + 1e-6, f"union={union:.1f} off={off:.1f}"))
 
-    # All singletons — clustering should be a no-op.
+    # Row 3: singletons (no clustering opportunity).
     pieces_singletons = [_piece(f"piece_{i}", 100 + i * 20, 80 + (i % 3) * 30) for i in range(8)]
-    _bench("8 singletons (mixed), fabric=500", pieces_singletons, 500.0)
+    off, bbox, union = _bench("8 singletons (mixed), fabric=500", pieces_singletons, 500.0)
+    gates.append(_gate("singletons: union == off",
+                       abs(union - off) < 1e-6, f"union={union:.1f} off={off:.1f}"))
 
-    # Real workload: sample_2.dxf × 10 copies. THE headline number.
+    # Row 4: real workload. THE headline number.
     dxf_path = _find_sample_dxf("sample_2.dxf")
     if dxf_path is None:
         print("[skipped] sample_2.dxf not found — place it in examples/input/ to enable the real-workload bench")
     else:
         pieces_real = _load_dxf_pieces(dxf_path, copies=10)
-        _bench(
-            f"sample_2.dxf x 10 copies ({len(pieces_real)} pieces), bi",
-            pieces_real, 1651.0, "bi",
+        off_s, bbox_s, union_s = _bench(
+            f"sample_2.dxf x 10 copies ({len(pieces_real)} pieces), bi, effort=1",
+            pieces_real, 1651.0, "bi", effort=1,
         )
-        # Also at effort=5 to compare against PR #8's parallel baseline.
-        _bench(
-            f"sample_2.dxf x 10 copies ({len(pieces_real)} pieces), bi [par]",
+        gates.append(_gate("sample_2.dxf serial: union <= bbox (no regression vs bbox path)",
+                           union_s <= bbox_s + 1e-6,
+                           f"union={union_s:.1f} bbox={bbox_s:.1f} off={off_s:.1f} (clustering opt-in only)"))
+
+        off_p, bbox_p, union_p = _bench(
+            f"sample_2.dxf x 10 copies ({len(pieces_real)} pieces), bi, effort=5",
             pieces_real, 1651.0, "bi", effort=5,
         )
+        gates.append(_gate("sample_2.dxf parallel: union == union[serial] (determinism)",
+                           abs(union_p - union_s) < 1e-3, f"par={union_p:.1f} ser={union_s:.1f}"))
+
+    print()
+    if all(gates):
+        print(
+            f"ACCEPTANCE: ALL {len(gates)} GATES PASSED — safe to ship.\n"
+            f"NOTE: clustering remains OPT-IN (disable_clustering=True by default).\n"
+            f"      Even though union beats bbox on sample_2.dxf, neither beats off=12249mm.\n"
+            f"      The default flip is deferred until a real-workload bench shows a win."
+        )
+    else:
+        failed = sum(1 for g in gates if not g)
+        print(f"ACCEPTANCE: {failed}/{len(gates)} GATES FAILED — BLOCKED, do not ship")
+        sys.exit(1)

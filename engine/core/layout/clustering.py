@@ -381,14 +381,16 @@ def pack_cluster_union(
             (round(x - minx, 4), round(y - miny, 4)) for x, y in exterior_coords[:-1]
         ]
 
-        # Sort key (mirror pack_cluster_bbox): minimize marker-length contribution
-        # at the cluster's best feasible outer rotation.
-        sort_h = min(
-            _height_at_rotation(cluster_w, cluster_h, r) for r in feasible_outer_rots
-        )
-        sort_w = min(
-            _width_at_rotation(cluster_w, cluster_h, r) for r in feasible_outer_rots
-        )
+        # Sort key. Predict outer BLF's actual placement: it tries `outer_rotations`
+        # in order; cross-rotation pruning skips a later rotation when an earlier
+        # one already yielded the same lowest-leftmost position. So the cluster's
+        # real placed height = height at the FIRST feasible outer rotation (which
+        # is `feasible_outer_rots[0]`, since that list preserves outer_rotations'
+        # order). For no-grainline pieces, this picks cluster_h (natural) when 0°
+        # fits — the only case where outer BLF's cross-rotation pruning would
+        # actually trigger. For grain-locked pieces, this is the target rotation.
+        sort_h = _height_at_rotation(cluster_w, cluster_h, feasible_outer_rots[0])
+        sort_w = _width_at_rotation(cluster_w, cluster_h, feasible_outer_rots[0])
 
         super_piece = Piece(
             id=f"cluster_{_base_id(base.id)}_x{n}",
