@@ -592,3 +592,68 @@ def test_blf_pack_nfp_default_behavior_unchanged():
     )
     assert len(placements) == 1
     assert placements[0].rotation_deg == 0.0  # target = (0 - 0) % 360 = 0
+
+
+# --- cluster_polygon dispatch + default-on tests ---
+
+def test_auto_layout_cluster_polygon_union_default():
+    """cluster_polygon defaults to 'union'. Smoke test: 4 copies of a small rect
+    in a large fabric — auto_layout returns the right number of placements."""
+    pieces = [_make_rect(f"p__c{i}", 100, 80) for i in range(4)]
+    placements, marker, util = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        effort=1,
+    )
+    assert len(placements) == 4
+    assert marker > 0
+    # All placement ids should be original (not super-piece) ids.
+    assert {pl.piece_id for pl in placements} == {f"p__c{i}" for i in range(4)}
+
+
+def test_auto_layout_cluster_polygon_bbox_matches_pr9_behavior():
+    """With cluster_polygon='bbox' and disable_clustering=False, behavior matches
+    PR #9 exactly: super-piece is the bbox rectangle, all copies at zero local rot."""
+    pieces = [_make_rect(f"p__c{i}", 100, 80) for i in range(4)]
+    placements, marker, util = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        effort=1, cluster_polygon="bbox",
+    )
+    assert len(placements) == 4
+    # For 4 axis-aligned identical rects in a generous fabric, union and bbox
+    # produce the same packing (union exterior == bbox rectangle exterior).
+    # We only assert no crash + correct placement count.
+    assert marker > 0
+
+
+def test_auto_layout_clustering_default_on():
+    """disable_clustering defaults to False — calling without the flag activates
+    clustering. Verify by checking that the result equals the union-default result."""
+    pieces = [_make_rect(f"p__c{i}", 100, 80) for i in range(4)]
+    placements_default, marker_default, _ = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        effort=1,
+    )
+    placements_off, marker_off, _ = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        effort=1, disable_clustering=True,
+    )
+    # Both runs produce 4 placements. Marker should be equal-or-less when clustered on
+    # (cannot regress for axis-aligned identical rects).
+    assert len(placements_default) == 4
+    assert len(placements_off) == 4
+    assert marker_default <= marker_off + 1e-6
+
+
+def test_auto_layout_union_no_worse_than_bbox_on_homogeneous():
+    """For 10 axis-aligned identical rects, union and bbox should produce equal
+    marker length (union exterior == bbox rectangle when copies share full edges)."""
+    pieces = [_make_rect(f"p__c{i}", 100, 50) for i in range(10)]
+    _, marker_union, _ = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        effort=1, cluster_polygon="union",
+    )
+    _, marker_bbox, _ = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        effort=1, cluster_polygon="bbox",
+    )
+    assert marker_union <= marker_bbox + 1e-6

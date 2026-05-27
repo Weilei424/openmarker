@@ -666,7 +666,8 @@ def auto_layout_polygon(
     disable_nfp_cache: bool = False,
     effort: int = 1,
     disable_pruning: bool = False,
-    disable_clustering: bool = True,
+    disable_clustering: bool = False,         # CHANGED: was True
+    cluster_polygon: str = "union",            # NEW
 ) -> tuple[list[Placement], float, float]:
     """No-Fit-Polygon-based Bottom-Left-Fill (slow mode, accurate).
 
@@ -693,22 +694,27 @@ def auto_layout_polygon(
     parallel paths. Identical results, slower — exposed for A/B benchmarking and
     debugging only, mirroring `disable_nfp_cache`.
 
-    `disable_clustering`: defaults to True. Identical-piece pre-clustering
-    (`core.layout.clustering.pre_cluster_pieces`) groups copies of the same base
-    piece into a rigid super-piece (bbox of the packed grid). The mechanism is
-    correct and tested — but bbox approximation forces rigid rectangular blocks
-    that BLF can't interleave with other piece types in shared fabric rows. On
-    homogeneous workloads it ties unclustered BLF; on real garment workloads
-    (e.g. sample_2.dxf × 10) it regresses by 100%+ because the clusters can't
-    share rows with each other. The mechanism is preserved for future use
-    (true-union polygon clusters, filed in BACKLOG) and explicit benchmarking;
-    pass `disable_clustering=False` to opt in.
+    `disable_clustering`: defaults to False. Identical-piece pre-clustering
+    (`core.layout.clustering.pre_cluster_pieces`) is on by default and uses the
+    union polygon path (see `cluster_polygon`). Pass True to bypass clustering
+    entirely (input pieces go to BLF directly).
+
+    `cluster_polygon`: 'union' (default) or 'bbox'. Selects the cluster polygon
+    construction strategy. Union runs an inner NFP-BLF on each group's copies and
+    uses the Shapely union (holes stripped, simplified to VERTEX_CAP) as the
+    super-piece polygon — exposes perimeter bays to outer BLF for interleaving.
+    Bbox uses the rigid bbox of the grid-packed copies — preserved for
+    benchmarking and as a per-group fallback when union produces a MultiPolygon
+    or exceeds VERTEX_CAP.
     """
     if disable_clustering:
         blf_input = pieces
         clusters: list[Cluster] = []
     else:
-        blf_input, clusters = pre_cluster_pieces(pieces, fabric_width_mm, grain_mode, fabric_grain_deg)
+        blf_input, clusters = pre_cluster_pieces(
+            pieces, fabric_width_mm, grain_mode, fabric_grain_deg,
+            cluster_polygon=cluster_polygon,
+        )
 
     modes = _modes_to_try(grain_mode)
     total_runs = len(modes) * len(_SORT_STRATEGIES)
