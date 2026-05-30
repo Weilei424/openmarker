@@ -85,8 +85,9 @@ def _load_dxf_pieces(path: str, copies: int) -> list[Piece]:
     return expanded
 
 
-def _run(pieces, fabric_width_mm, grain_mode, effort, mode):
-    """mode in {'off', 'bbox', 'union'}"""
+def _run(pieces, fabric_width_mm, grain_mode, effort, mode, cluster_fraction=1.0):
+    """mode in {'off', 'bbox', 'union', 'union_f'}.
+    'union_f' is the same as 'union' but passes cluster_fraction through."""
     kwargs = dict(
         pieces=pieces, fabric_width_mm=fabric_width_mm,
         grain_mode=grain_mode, fabric_grain_deg=0.0, effort=effort,
@@ -99,6 +100,10 @@ def _run(pieces, fabric_width_mm, grain_mode, effort, mode):
     elif mode == "union":
         kwargs["disable_clustering"] = False
         kwargs["cluster_polygon"] = "union"
+    elif mode == "union_f":
+        kwargs["disable_clustering"] = False
+        kwargs["cluster_polygon"] = "union"
+        kwargs["cluster_fraction"] = cluster_fraction
     else:
         raise ValueError(f"unknown mode: {mode}")
     t0 = time.perf_counter()
@@ -177,13 +182,42 @@ if __name__ == "__main__":
         gates.append(_gate("sample_2.dxf parallel: union == union[serial] (determinism)",
                            abs(union_p - union_s) < 1e-3, f"par={union_p:.1f} ser={union_s:.1f}"))
 
+        # Partial-cluster sweep (Task 7 of partial-clustering plan).
+        # cluster_fraction in (0, 1]; 1.0 == current union behavior. Lower fractions
+        # hold back leftover singletons for the outer BLF.
+        print(f"sample_2.dxf x 10 copies ({len(pieces_real)} pieces), bi, effort=5, partial-cluster sweep")
+        sweep_fractions = [1.0, 0.9, 0.8, 0.7, 0.5]
+        sweep_results: list[tuple[float, float, float, float]] = []  # (f, length, util, time)
+        for f in sweep_fractions:
+            t, length, util = _run(pieces_real, 1651.0, "bi", 5, "union_f", cluster_fraction=f)
+            print(f"  union f={f}:  L={length:8.1f}/U={util:5.2f}%/t={t*1000:8.1f}ms")
+            sweep_results.append((f, length, util, t))
+
+        best_f, best_l, _, _ = min(sweep_results, key=lambda r: r[1])
+        print(f"  (off baseline:  L={off_p:8.1f} for comparison)")
+        if best_l < off_p - 1e-6:
+            print(f"  >> best partial fraction = {best_f} (L={best_l:.1f}) BEATS off baseline ({off_p:.1f}) — candidate for default flip")
+        else:
+            print(f"  >> best partial fraction = {best_f} (L={best_l:.1f}); off still wins ({off_p:.1f})")
+
+        # New gate: regression check. union_f at fraction=1.0 must match same-run union mode
+        # (mode='union' uses implicit cluster_fraction=1.0 — the new no-op leftover branch).
+        union_f_at_1 = next(L for f, L, _u, _t in sweep_results if f == 1.0)
+        gates.append(_gate(
+            "partial-cluster fraction=1.0 matches union baseline (regression)",
+            abs(union_f_at_1 - union_p) < 1e-6,
+            f"union_f[1.0]={union_f_at_1:.6f} union[parallel]={union_p:.6f}",
+        ))
+
     print()
     if all(gates):
         print(
             f"ACCEPTANCE: ALL {len(gates)} GATES PASSED — safe to ship.\n"
             f"NOTE: clustering remains OPT-IN (disable_clustering=True by default).\n"
-            f"      Even though union beats bbox on sample_2.dxf, neither beats off=12249mm.\n"
-            f"      The default flip is deferred until a real-workload bench shows a win."
+            f"      Sweep above shows whether any cluster_fraction beats off=12249mm.\n"
+            f"      If yes, file a follow-up PR to flip the default with the winning fraction.\n"
+            f"      If no, the result is recorded in PERFORMANCE.md § 6 as a confirmed\n"
+            f"      data point about the structural barrier."
         )
     else:
         failed = sum(1 for g in gates if not g)
