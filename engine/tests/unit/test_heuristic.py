@@ -658,3 +658,53 @@ def test_auto_layout_union_no_worse_than_bbox_on_homogeneous():
         effort=1, cluster_polygon="bbox",
     )
     assert marker_union <= marker_bbox + 1e-6
+
+
+# --- cluster_fraction (partial clustering) integration tests ---
+
+def test_auto_layout_polygon_default_cluster_fraction_is_one():
+    """The cluster_fraction parameter defaults to 1.0 (current behavior).
+    Verified via signature inspection."""
+    import inspect
+    sig = inspect.signature(auto_layout_polygon)
+    assert sig.parameters["cluster_fraction"].default == 1.0
+
+
+def test_auto_layout_polygon_cluster_fraction_passes_through():
+    """Plumbing test: with disable_clustering=False, lowering cluster_fraction
+    causes leftover singletons to enter the BLF input. We verify the placement
+    count is the same (all original pieces still get placed) and the marker
+    length CAN differ because the split changes BLF's input."""
+    pieces = [_make_rect(f"p__c{i}", 100, 80) for i in range(6)]
+    placements_full, marker_full, _ = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        effort=1, disable_clustering=False, cluster_polygon="union", cluster_fraction=1.0,
+    )
+    placements_partial, marker_partial, _ = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        effort=1, disable_clustering=False, cluster_polygon="union", cluster_fraction=0.5,
+    )
+    # Both paths place all 6 pieces.
+    assert len(placements_full) == 6
+    assert len(placements_partial) == 6
+    # The split changes the BLF input (1 super + 3 singletons vs 1 super of 6),
+    # which can change marker length. We only assert the call doesn't crash and
+    # all pieces are placed — the actual marker comparison is workload-dependent.
+    assert marker_full > 0
+    assert marker_partial > 0
+
+
+def test_auto_layout_polygon_cluster_fraction_ignored_when_clustering_disabled():
+    """With disable_clustering=True, cluster_fraction has no effect — the
+    pre_cluster_pieces call is skipped entirely in auto_layout_polygon."""
+    pieces = [_make_rect(f"p__c{i}", 100, 80) for i in range(6)]
+    _, marker_default, _ = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        effort=1, disable_clustering=True, cluster_fraction=1.0,
+    )
+    _, marker_low, _ = auto_layout_polygon(
+        pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        effort=1, disable_clustering=True, cluster_fraction=0.5,
+    )
+    # Bit-identical: cluster_fraction is moot when clustering is off.
+    assert marker_default == marker_low
