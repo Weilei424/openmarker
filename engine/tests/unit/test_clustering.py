@@ -628,3 +628,19 @@ def test_partial_cluster_falls_back_on_pack_failure(monkeypatch):
     assert clusters == []
     assert len(clustered_input) == 10
     assert all(p.id.startswith("p__c") for p in clustered_input)
+
+
+def test_partial_cluster_bbox_path_splits_correctly():
+    """cluster_polygon="bbox" + cluster_fraction=0.7 on N=10:
+    7 copies in bbox cluster + 3 leftover singletons. Same split behavior as
+    union path — the knob lives in pre_cluster_pieces, before path dispatch."""
+    copies = [_rect(f"p__c{i}", 100, 50) for i in range(10)]
+    clustered_input, clusters = pre_cluster_pieces(
+        copies, fabric_width_mm=2000, cluster_polygon="bbox", cluster_fraction=0.7,
+    )
+    assert len(clusters) == 1
+    assert len(clusters[0].original_pieces) == 7
+    # bbox cluster polygon is always a 4-vertex rectangle.
+    assert len(clusters[0].super_piece.polygon) == 4
+    # 1 super-piece + 3 leftover singletons
+    assert len(clustered_input) == 4
