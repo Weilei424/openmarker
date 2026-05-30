@@ -609,3 +609,22 @@ def test_partial_cluster_per_group_fractions():
     assert cluster_sizes == [2, 7]
     # 2 super-pieces + (3 + 1) leftover singletons = 6 total in clustered_input.
     assert len(clustered_input) == 6
+
+
+def test_partial_cluster_falls_back_on_pack_failure(monkeypatch):
+    """When BOTH pack_cluster_union and pack_cluster_bbox return None on the
+    k-slice, the WHOLE group (k + leftover) falls back to singletons.
+    Monkeypatched to force both to None so the test doesn't depend on geometry
+    that actually breaks both pack paths."""
+    import core.layout.clustering as clustering_mod
+    monkeypatch.setattr(clustering_mod, "pack_cluster_union", lambda *args, **kwargs: None)
+    monkeypatch.setattr(clustering_mod, "pack_cluster_bbox", lambda *args, **kwargs: None)
+
+    copies = [_rect(f"p__c{i}", 100, 50) for i in range(10)]
+    clustered_input, clusters = pre_cluster_pieces(
+        copies, fabric_width_mm=2000, cluster_fraction=0.7,
+    )
+    # No cluster constructed; whole group (k=7 + leftover=3) = 10 singletons.
+    assert clusters == []
+    assert len(clustered_input) == 10
+    assert all(p.id.startswith("p__c") for p in clustered_input)
