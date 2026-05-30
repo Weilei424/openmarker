@@ -207,6 +207,20 @@ bench where `union.marker < off.marker` strictly. The clustering follow-ups
 each target the structural barrier; landing any one of them and re-running
 the bench is the path to flipping the default.
 
+### 4.5 Partial clustering (`cluster_fraction < 1.0`)
+
+- **Code:** `engine/core/layout/clustering.py::pre_cluster_pieces` — per-group split: `k = floor(N * cluster_fraction)` copies enter the cluster, last `N - k` join the outer BLF as singletons. When `k < 2`, the whole group passes through as singletons (no cluster). Applies to both `cluster_polygon="union"` and `cluster_polygon="bbox"` because the split lives in `pre_cluster_pieces`, before path dispatch.
+- **Why disabled by default:** `cluster_fraction=1.0` (the default) is bit-identical to pre-PR behavior. Lower values are opt-in.
+- **Opt-in invocation:**
+  ```python
+  placements, marker, util = auto_layout_polygon(
+      pieces, fabric_width_mm=1651, grain_mode="bi", fabric_grain_deg=0.0,
+      disable_clustering=False, cluster_polygon="union", cluster_fraction=0.7,
+  )
+  ```
+- **Tests:** 13 unit tests in `engine/tests/unit/test_clustering.py` (validation, split math, min-cluster promotion, heterogeneous groups, fallback ladder, bbox-path coverage) + 3 integration tests in `engine/tests/unit/test_heuristic.py`.
+- **Bench:** `engine/tests/bench_clustering.py` sweeps `[1.0, 0.9, 0.8, 0.7, 0.5]` on `sample_2.dxf × 10` at `effort=5`. Best fraction reported in § 6's 2026-05-30 entry below.
+
 ---
 
 ## 5. Open follow-ups (ranked by gain-per-effort)
@@ -220,11 +234,7 @@ the bench is the path to flipping the default.
 > cluster perimeter bays. Garment markers fail this — every base piece has
 > 10 copies. Three approaches could break the barrier:
 
-- [ ] **Partial clustering (`cluster_fraction < 1.0`).** Cluster only N-k of
-  each group's copies; leave k as singletons. The k singletons can slot
-  into cluster bays. Trade-off: smaller cluster vs more singletons in outer
-  BLF. Easiest of the three; add as a `cluster_fraction: float = 1.0` knob
-  on `pack_cluster_union`. **Low-medium effort.**
+- [x] **Partial clustering (`cluster_fraction < 1.0`).** Shipped opt-in; see § 4.5. Bench sweep on `sample_2.dxf × 10` confirms no fraction beats off=12249mm — structural barrier holds. Best fraction `0.5` at `L=13512.3mm` cuts the full-cluster baseline of 27336mm in HALF (and beats bbox's 29958mm by ~55%), but unclustered NFP-BLF still wins. Filed for posterity in § 6 [2026-05-30 entry].
 - [ ] **Heterogeneous clustering.** Cluster pieces with *different* base_ids
   together so the marker still has "loose" pieces left over. Combinatorial
   search over which pieces to cluster; needs care to avoid blowup.
@@ -281,3 +291,27 @@ Add new entries here as work progresses. Each entry should record:
   `union < off` to `union <= bbox`.
 - **Mechanism preserved at:** `engine/core/layout/clustering.py::pack_cluster_union`.
   Opt-in instructions in §4.2.
+
+### 2026-05-30 — Partial clustering shipped opt-in; structural barrier confirmed
+
+- **What:** Added `cluster_fraction: float = 1.0` knob to `pre_cluster_pieces` (and forwarded through `auto_layout_polygon`). Per-group split: `k = floor(N * cluster_fraction)` copies cluster; remaining `N - k` join outer BLF as singletons. Min-cluster promotion: `k < 2` → whole group becomes singletons.
+- **Why:** PR #10's § 6 entry's structural finding ("on `sample_2.dxf × 10`, every base id has 10 copies → no singletons left to fill cluster bays") implied that holding back some copies as singletons might let the outer BLF interleave them into the cluster perimeter bays.
+- **Result:** Bench sweep on `sample_2.dxf × 10` at fabric=1651mm bi-grain, effort=5:
+
+  | `cluster_fraction` | Marker length (mm) | Utilization | Time (ms) |
+  |---|---|---|---|
+  | 1.0 (= existing union baseline) | 27336.3 | 33.98% | 10960 |
+  | 0.9 | 35842.3 | 25.91% | 29261 |
+  | 0.8 | 13688.6 | 67.85% | 28526 |
+  | 0.7 | 14705.4 | 63.16% | 27377 |
+  | 0.5 | 13512.3 | 68.74% | 27459 |
+
+  Best fraction: `0.5` at `L=13512.3mm`. `off` baseline (unclustered NFP-BLF) = 12249.1mm. **Best partial fraction does NOT beat off.**
+
+  Notable: the curve is non-monotonic — f=0.9 (35842mm) is WORSE than f=1.0 (27336mm). Likely explanation: with only 1 singleton per 9-piece cluster, singletons can't relieve the rigid clustering's row-blocking; instead they add scheduling pressure. By f=0.8 (2 singletons per 8-piece cluster), the outer BLF has enough flexibility to slot them effectively, dropping marker length by ~60%. From f=0.8 onward the curve is roughly flat / mildly improving.
+
+- **Decision:** Structural barrier confirmed at all tested fractions on this workload. The knob remains opt-in. Two interpretations worth noting:
+  1. Partial clustering DOES dramatically improve over full clustering (best fraction ~ ½ the f=1.0 marker length), so for workloads where unclustered is somehow infeasible, partial clustering with f=0.5–0.8 is meaningfully better than f=1.0 or bbox.
+  2. Future workloads with mixed copy counts (some base ids with copies, some without — exposing real "natural" singletons) may still let some `cluster_fraction` value win. The current finding is specific to homogeneous garment workloads where every base id has the same copy count.
+
+- **Mechanism preserved at:** `engine/core/layout/clustering.py::pre_cluster_pieces` (split logic) + `engine/core/layout/heuristic.py::auto_layout_polygon` (parameter forwarding). Opt-in instructions in § 4.5.
