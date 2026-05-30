@@ -589,3 +589,23 @@ def test_partial_cluster_promotes_pair():
     clustered_input, clusters = pre_cluster_pieces(copies, fabric_width_mm=2000, cluster_fraction=0.5)
     assert clusters == []
     assert len(clustered_input) == 2
+
+
+def test_partial_cluster_per_group_fractions():
+    """cluster_fraction=0.7 on a mixed input with one group of N=10 and one of N=3:
+    each group computes its own k independently.
+      - Group A (N=10): floor(10 * 0.7) = 7 in cluster, 3 leftover.
+      - Group B (N=3):  floor(3 * 0.7)  = 2 in cluster, 1 leftover.
+    Two clusters total, 4 leftover singletons total."""
+    group_a = [_rect(f"a__c{i}", 100, 50) for i in range(10)]
+    group_b = [_rect(f"b__c{i}", 120, 40) for i in range(3)]
+    clustered_input, clusters = pre_cluster_pieces(
+        group_a + group_b, fabric_width_mm=2000, cluster_fraction=0.7,
+    )
+    assert len(clusters) == 2
+    # Verify per-group sizes (groups preserve input order via OrderedDict in
+    # group_pieces_by_base_id).
+    cluster_sizes = sorted(len(c.original_pieces) for c in clusters)
+    assert cluster_sizes == [2, 7]
+    # 2 super-pieces + (3 + 1) leftover singletons = 6 total in clustered_input.
+    assert len(clustered_input) == 6
