@@ -438,6 +438,7 @@ def pre_cluster_pieces(
     grain_mode: str = "single",
     fabric_grain_deg: float = 0.0,
     cluster_polygon: str = "union",
+    cluster_fraction: float = 1.0,
 ) -> tuple[list[Piece], list[Cluster]]:
     """Group identical pieces and pack each group via the selected cluster method.
 
@@ -445,12 +446,19 @@ def pre_cluster_pieces(
         cluster_polygon="union" → pack_cluster_union → pack_cluster_bbox → singletons
         cluster_polygon="bbox"  → pack_cluster_bbox → singletons
 
+    `cluster_fraction` (default 1.0) holds back the last N - floor(N * fraction)
+    copies of each group as singletons in the outer BLF input. When the computed
+    cluster size is < 2, the whole group passes through as singletons (no cluster
+    is constructed). Must be in (0.0, 1.0]; out-of-range raises ValueError.
+
     Returns (clustered_input, clusters):
       - clustered_input: list[Piece] containing singletons + super-pieces.
       - clusters: list[Cluster], one per super-piece.
     """
     if cluster_polygon not in ("union", "bbox"):
         raise ValueError(f"cluster_polygon must be 'union' or 'bbox', got: {cluster_polygon!r}")
+    if not (0.0 < cluster_fraction <= 1.0):
+        raise ValueError(f"cluster_fraction must be in (0.0, 1.0], got: {cluster_fraction!r}")
 
     groups = group_pieces_by_base_id(pieces)
     clustered_input: list[Piece] = []

@@ -493,3 +493,33 @@ def test_pre_cluster_pieces_falls_back_to_bbox_on_union_failure(monkeypatch):
     assert len(clusters) == 1  # Bbox fallback engaged
     assert len(clusters[0].super_piece.polygon) == 4
     assert len(clusters[0].copy_offsets) == 4
+
+
+# --- cluster_fraction validation (partial clustering) ---
+
+def test_pre_cluster_pieces_rejects_fraction_zero():
+    """cluster_fraction=0.0 is out of the (0.0, 1.0] range."""
+    copies = [_rect(f"p__c{i}", 100, 50) for i in range(4)]
+    with pytest.raises(ValueError, match="cluster_fraction"):
+        pre_cluster_pieces(copies, fabric_width_mm=500, cluster_fraction=0.0)
+
+
+def test_pre_cluster_pieces_rejects_fraction_negative():
+    """cluster_fraction=-0.1 is out of the (0.0, 1.0] range."""
+    copies = [_rect(f"p__c{i}", 100, 50) for i in range(4)]
+    with pytest.raises(ValueError, match="cluster_fraction"):
+        pre_cluster_pieces(copies, fabric_width_mm=500, cluster_fraction=-0.1)
+
+
+def test_pre_cluster_pieces_rejects_fraction_above_one():
+    """cluster_fraction=1.5 is out of the (0.0, 1.0] range."""
+    copies = [_rect(f"p__c{i}", 100, 50) for i in range(4)]
+    with pytest.raises(ValueError, match="cluster_fraction"):
+        pre_cluster_pieces(copies, fabric_width_mm=500, cluster_fraction=1.5)
+
+
+def test_pre_cluster_pieces_accepts_fraction_one():
+    """cluster_fraction=1.0 (the default) must not raise."""
+    copies = [_rect(f"p__c{i}", 100, 50) for i in range(4)]
+    clustered_input, clusters = pre_cluster_pieces(copies, fabric_width_mm=500, cluster_fraction=1.0)
+    assert len(clusters) == 1
