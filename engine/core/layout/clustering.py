@@ -464,22 +464,34 @@ def pre_cluster_pieces(
     clustered_input: list[Piece] = []
     clusters: list[Cluster] = []
     for group in groups.values():
-        if len(group) < 2:
+        n = len(group)
+        if n < 2:
             clustered_input.extend(group)
             continue
 
+        k = math.floor(n * cluster_fraction)
+        if k < 2:
+            # Cluster would be degenerate (< 2 copies). Promote whole group to singletons.
+            clustered_input.extend(group)
+            continue
+
+        cluster_pieces = group[:k]
+        leftover_pieces = group[k:]   # may be empty when k == n (cluster_fraction == 1.0)
+
         cluster: Cluster | None = None
         if cluster_polygon == "union":
-            cluster = pack_cluster_union(group, fabric_width_mm, grain_mode, fabric_grain_deg)
+            cluster = pack_cluster_union(cluster_pieces, fabric_width_mm, grain_mode, fabric_grain_deg)
         if cluster is None:
-            cluster = pack_cluster_bbox(group, fabric_width_mm, grain_mode, fabric_grain_deg)
+            cluster = pack_cluster_bbox(cluster_pieces, fabric_width_mm, grain_mode, fabric_grain_deg)
         if cluster is None:
-            # Both union and bbox failed (group's piece too wide for fabric).
+            # Both pack paths failed on the k-slice. Whole group (k + leftover)
+            # falls back to singletons.
             clustered_input.extend(group)
             continue
 
         clustered_input.append(cluster.super_piece)
         clusters.append(cluster)
+        clustered_input.extend(leftover_pieces)
     return clustered_input, clusters
 
 

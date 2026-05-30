@@ -523,3 +523,69 @@ def test_pre_cluster_pieces_accepts_fraction_one():
     copies = [_rect(f"p__c{i}", 100, 50) for i in range(4)]
     clustered_input, clusters = pre_cluster_pieces(copies, fabric_width_mm=500, cluster_fraction=1.0)
     assert len(clusters) == 1
+
+
+# --- cluster_fraction split logic (partial clustering) ---
+
+def test_partial_cluster_fraction_one_matches_full_cluster():
+    """cluster_fraction=1.0 (default) is bit-identical to current behavior:
+    every copy enters the cluster, no leftover singletons appended."""
+    copies = [_rect(f"p__c{i}", 100, 50) for i in range(10)]
+    clustered_input, clusters = pre_cluster_pieces(copies, fabric_width_mm=2000, cluster_fraction=1.0)
+    assert len(clusters) == 1
+    assert len(clusters[0].original_pieces) == 10
+    # clustered_input has exactly 1 super_piece, no extra singletons.
+    assert len(clustered_input) == 1
+    assert clustered_input[0] is clusters[0].super_piece
+
+
+def test_partial_cluster_fraction_half_splits_5_5():
+    """cluster_fraction=0.5 on N=10: floor(10 * 0.5) = 5 in cluster, 5 leftover.
+    clustered_input should have 1 super-piece + 5 singletons = 6 elements."""
+    copies = [_rect(f"p__c{i}", 100, 50) for i in range(10)]
+    clustered_input, clusters = pre_cluster_pieces(copies, fabric_width_mm=2000, cluster_fraction=0.5)
+    assert len(clusters) == 1
+    assert len(clusters[0].original_pieces) == 5
+    # 1 super-piece + 5 leftover singletons
+    assert len(clustered_input) == 6
+
+
+def test_partial_cluster_fraction_holds_back_last_copies():
+    """The cluster takes group[:k] (first k copies); leftover is group[k:]
+    (last N - k copies). Determinism guard: relied on for bench run-to-run stability."""
+    copies = [_rect(f"p__c{i}", 100, 50) for i in range(10)]
+    clustered_input, clusters = pre_cluster_pieces(copies, fabric_width_mm=2000, cluster_fraction=0.7)
+    assert len(clusters) == 1
+    # Cluster has the first 7 copies (by input order).
+    assert [p.id for p in clusters[0].original_pieces] == [f"p__c{i}" for i in range(7)]
+    # Leftover singletons are the last 3 copies, appended after the super-piece.
+    leftover_ids = [p.id for p in clustered_input if not p.id.startswith("cluster_")]
+    assert leftover_ids == [f"p__c{i}" for i in range(7, 10)]
+
+
+def test_partial_cluster_promotes_when_k_below_two():
+    """cluster_fraction=0.1 on N=10: floor(10 * 0.1) = 1 < 2.
+    Whole group passes through as 10 singletons; no cluster constructed."""
+    copies = [_rect(f"p__c{i}", 100, 50) for i in range(10)]
+    clustered_input, clusters = pre_cluster_pieces(copies, fabric_width_mm=2000, cluster_fraction=0.1)
+    assert clusters == []
+    assert len(clustered_input) == 10
+    assert all(p.id.startswith("p__c") for p in clustered_input)
+
+
+def test_partial_cluster_promotes_small_group():
+    """cluster_fraction=0.5 on N=3: floor(3 * 0.5) = 1 < 2.
+    Whole group passes through as 3 singletons; no cluster."""
+    copies = [_rect(f"p__c{i}", 100, 50) for i in range(3)]
+    clustered_input, clusters = pre_cluster_pieces(copies, fabric_width_mm=2000, cluster_fraction=0.5)
+    assert clusters == []
+    assert len(clustered_input) == 3
+
+
+def test_partial_cluster_promotes_pair():
+    """cluster_fraction=0.5 on N=2: floor(2 * 0.5) = 1 < 2.
+    Whole group passes through as 2 singletons; no cluster (regression case)."""
+    copies = [_rect(f"p__c{i}", 100, 50) for i in range(2)]
+    clustered_input, clusters = pre_cluster_pieces(copies, fabric_width_mm=2000, cluster_fraction=0.5)
+    assert clusters == []
+    assert len(clustered_input) == 2
