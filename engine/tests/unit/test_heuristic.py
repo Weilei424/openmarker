@@ -744,3 +744,36 @@ def test_blf_pack_nfp_presorted_true_uses_input_order():
         presorted=True,
     )
     assert placements_presorted[0].piece_id == "small"
+
+
+def test_blf_pack_nfp_override_rotations_per_piece_shape():
+    """When override_rotations is list[list[float]] with len matching pieces,
+    BLF must use per-piece rotation lists rather than uniform. Verified by
+    forcing two identical no-grainline pieces to take DIFFERENT rotations."""
+    from core.layout.heuristic import _blf_pack_nfp
+
+    # Two identical rectangles, no grainline (so allowed rotations = full 360).
+    a = Piece(
+        id="a", name="a",
+        polygon=[(0, 0), (100, 0), (100, 40), (0, 40)],
+        area=4000.0,
+        bbox=BoundingBox(0, 0, 100, 40, 100, 40),
+        is_valid=True, validation_notes=[], grainline_direction_deg=None,
+    )
+    b = Piece(
+        id="b", name="b",
+        polygon=[(0, 0), (100, 0), (100, 40), (0, 40)],
+        area=4000.0,
+        bbox=BoundingBox(0, 0, 100, 40, 100, 40),
+        is_valid=True, validation_notes=[], grainline_direction_deg=None,
+    )
+
+    # Per-piece: a at 0°, b at 90° (a is 100x40 wide, b is 40x100 tall).
+    placements, _, _ = _blf_pack_nfp(
+        [a, b], fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        presorted=True,
+        override_rotations=[[0.0], [90.0]],
+    )
+    by_id = {p.piece_id: p for p in placements}
+    assert by_id["a"].rotation_deg == 0.0
+    assert by_id["b"].rotation_deg == 90.0

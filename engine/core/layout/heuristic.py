@@ -407,8 +407,13 @@ def _blf_pack_nfp(
     (shape, rotation) pairs — the dominant cost when copies > 1.
 
     `override_rotations`: when set, replaces the per-piece grain-derived rotation
-    set with this list verbatim. Used by `pack_cluster_union` to drive inner BLF
-    with cluster-local rotation sets that don't depend on piece grainline.
+    set. Two accepted shapes:
+      - list[float]: uniform — applied to every piece. Used by `pack_cluster_union`
+        to drive inner BLF with cluster-local rotation sets.
+      - list[list[float]]: per-piece — entry `i` is the rotation list to try for
+        the piece at position `i` in the sort order. Activated when the outer
+        list's length matches `len(sorted_pieces)` AND its first element is a
+        list. Used by the SA meta-heuristic to force one rotation per piece.
 
     `skip_validation`: skip the upfront `_validate_pieces_fit` call. The caller
     must have pre-filtered piece widths. Used by `pack_cluster_union`'s
@@ -436,10 +441,22 @@ def _blf_pack_nfp(
     placed: list[_Placed] = []
     current_max_bottom: float = 0.0
 
-    for piece in sorted_pieces:
+    # Detect per-piece override shape once, outside the loop. Per-piece is
+    # signaled by a list whose length matches the piece count AND whose first
+    # element is itself a list. Uniform shape (list[float]) is unchanged.
+    per_piece_override = (
+        override_rotations is not None
+        and len(override_rotations) == len(sorted_pieces)
+        and len(sorted_pieces) > 0
+        and isinstance(override_rotations[0], list)
+    )
+
+    for piece_index, piece in enumerate(sorted_pieces):
         if is_cancelled():
             raise CancellationError("Auto-layout cancelled by user.")
-        if override_rotations is not None:
+        if per_piece_override:
+            rotations = override_rotations[piece_index]
+        elif override_rotations is not None:
             rotations = override_rotations
         else:
             rotations = _layout_rotations(
