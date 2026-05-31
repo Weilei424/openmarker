@@ -15,6 +15,7 @@ from shapely.ops import unary_union
 
 from core.layout.cancellation import CancellationError, is_cancelled
 from core.layout.clustering import Cluster, pre_cluster_pieces, expand_cluster_placement
+from core.layout.sa import WarmStart
 from core.models.piece import Piece
 
 
@@ -805,6 +806,7 @@ def auto_layout_polygon(
         # reuse — this is the dominant win when copies > 1.
         shared_cache: NfpCache = {}
         best: tuple[list[Placement], float, float] | None = None
+        warm_starts: list[WarmStart] = []  # populated only when sa_iterations > 0
         for mode in modes:
             for sort_index in range(len(_SORT_STRATEGIES)):
                 cache = {} if disable_nfp_cache else shared_cache
@@ -819,7 +821,17 @@ def auto_layout_polygon(
                 except _PrunedRun:
                     continue
                 best = _shorter(best, result)
+                if sa_iterations > 0:
+                    warm_starts.append(_build_warm_start(
+                        blf_input, _SORT_STRATEGIES[sort_index], mode, result
+                    ))
         assert best is not None
+        if sa_iterations > 0:
+            return _run_sa_phase(
+                best, warm_starts, blf_input, fabric_width_mm, grain_mode,
+                fabric_grain_deg, sa_iterations, sa_max_time_s, sa_seed,
+                effort, disable_nfp_cache, disable_pruning, clusters,
+            )
         if clusters:
             placements, marker_length, utilization = best
             placements = _expand_clustered_placements(placements, clusters)
@@ -838,7 +850,12 @@ def auto_layout_polygon(
     shared_best = None if disable_pruning else multiprocessing.Value("d", float("inf"))
 
     best: tuple[list[Placement], float, float] | None = None
+    warm_starts: list[WarmStart] = []  # populated only when sa_iterations > 0
     futures = []
+    # Track (future → mode, sort_index) so we can reconstruct the warm-start tuple
+    # when a future completes (mode/sort_index aren't carried in `_run_one_strategy`'s
+    # return value).
+    future_meta: dict = {}
     with ProcessPoolExecutor(
         max_workers=workers,
         initializer=_init_worker,
@@ -848,10 +865,12 @@ def auto_layout_polygon(
         try:
             for mode in modes:
                 for sort_index in range(len(_SORT_STRATEGIES)):
-                    futures.append(pool.submit(
+                    fut = pool.submit(
                         _run_one_strategy,
                         blf_input, fabric_width_mm, mode, fabric_grain_deg, sort_index,
-                    ))
+                    )
+                    futures.append(fut)
+                    future_meta[fut] = (mode, sort_index)
             try:
                 for f in as_completed(futures):
                     try:
@@ -867,14 +886,73 @@ def auto_layout_polygon(
                             if result[1] < shared_best.value:
                                 shared_best.value = result[1]
                     best = _shorter(best, result)
+                    if sa_iterations > 0:
+                        mode, sort_index = future_meta[f]
+                        warm_starts.append(_build_warm_start(
+                            blf_input, _SORT_STRATEGIES[sort_index], mode, result
+                        ))
             except BrokenProcessPool as e:
                 raise CancellationError("Auto-layout cancelled (workers terminated).") from e
         finally:
             _set_current_executor(None)
 
     assert best is not None
+    if sa_iterations > 0:
+        return _run_sa_phase(
+            best, warm_starts, blf_input, fabric_width_mm, grain_mode,
+            fabric_grain_deg, sa_iterations, sa_max_time_s, sa_seed,
+            effort, disable_nfp_cache, disable_pruning, clusters,
+        )
     if clusters:
         placements, marker_length, utilization = best
         placements = _expand_clustered_placements(placements, clusters)
         return placements, marker_length, utilization
     return best
+
+
+def _build_warm_start(
+    blf_input: list[Piece],
+    sort_key,
+    mode: str,
+    result: tuple[list[Placement], float, float],
+) -> WarmStart:
+    """Reconstruct the per-piece order + rotations used in a completed warm-start
+    run. `sort_key` is the same callable BLF used; `result` is its return value."""
+    sorted_pieces = sorted(blf_input, key=sort_key, reverse=True)
+    placements, marker, util = result
+    # placements is in the order pieces were placed (== sorted_pieces order).
+    # Build rotations_used parallel to sorted_pieces.
+    pid_to_rot = {pl.piece_id: pl.rotation_deg for pl in placements}
+    rotations_used = [pid_to_rot[p.id] for p in sorted_pieces]
+    return WarmStart(
+        mode=mode,
+        sorted_pieces=sorted_pieces,
+        rotations_used=rotations_used,
+        placements=placements,
+        marker=marker,
+        util=util,
+    )
+
+
+def _run_sa_phase(
+    warm_start_best: tuple[list[Placement], float, float],
+    warm_starts: list[WarmStart],
+    blf_input: list[Piece],
+    fabric_width_mm: float,
+    grain_mode: str,
+    fabric_grain_deg: float,
+    sa_iterations: int,
+    sa_max_time_s: float | None,
+    sa_seed: int,
+    effort: int,
+    disable_nfp_cache: bool,
+    disable_pruning: bool,
+    clusters: list,
+) -> tuple[list[Placement], float, float]:
+    """Stub — filled in Task 9. For now returns warm_start_best unchanged so
+    Task 8's commit passes the regression suite."""
+    if clusters:
+        placements, marker_length, utilization = warm_start_best
+        placements = _expand_clustered_placements(placements, clusters)
+        return placements, marker_length, utilization
+    return warm_start_best

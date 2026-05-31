@@ -839,3 +839,16 @@ def test_auto_layout_default_sa_params_unchanged_behavior():
     assert len(placements) == 2
     assert marker > 0
     assert 0 < util <= 100
+
+
+def test_warm_start_retention_unused_when_sa_disabled():
+    """sa_iterations=0 must NOT trigger warm-start retention bookkeeping.
+    Regression guard: result of a default call must match itself across two runs
+    with the same inputs (no nondeterminism introduced)."""
+    from core.layout.heuristic import auto_layout_polygon
+    pieces = _two_simple_pieces()
+    p1, m1, u1 = auto_layout_polygon(pieces, 500, "single", 0.0)
+    p2, m2, u2 = auto_layout_polygon(pieces, 500, "single", 0.0)
+    assert m1 == m2
+    assert u1 == u2
+    assert [pl.piece_id for pl in p1] == [pl.piece_id for pl in p2]
