@@ -15,7 +15,8 @@ from shapely.ops import unary_union
 
 from core.layout.cancellation import CancellationError, is_cancelled
 from core.layout.clustering import Cluster, pre_cluster_pieces, expand_cluster_placement
-from core.layout.sa import WarmStart
+from core.layout.grain import allowed_rotations
+from core.layout.sa import WarmStart, run_sa, NO_GRAINLINE_ROTATION_CAP
 from core.models.piece import Piece
 
 
@@ -79,6 +80,92 @@ def _init_worker(value) -> None:
     worker-process module global so `_run_one_strategy` can pass it down."""
     global _worker_shared_best
     _worker_shared_best = value
+
+
+# ---------------------------------------------------------------------------
+# SA worker globals — set by _init_sa_worker, read by _run_sa_chain.
+# ---------------------------------------------------------------------------
+_worker_sa_shared_best = None
+_worker_sa_warm_starts: list[WarmStart] = []
+_worker_sa_blf_input: list[Piece] = []
+_worker_sa_fabric_width_mm: float = 0.0
+_worker_sa_fabric_grain_deg: float = 0.0
+_worker_sa_allowed_rotations: list[list[float]] = []
+_worker_sa_disable_nfp_cache: bool = False
+_worker_sa_disable_pruning: bool = False
+
+
+def _init_sa_worker(
+    shared_best_value,
+    warm_starts,
+    blf_input,
+    fabric_width_mm,
+    fabric_grain_deg,
+    allowed_rotations_per_piece,
+    disable_nfp_cache,
+    disable_pruning,
+):
+    global _worker_sa_shared_best, _worker_sa_warm_starts, _worker_sa_blf_input
+    global _worker_sa_fabric_width_mm, _worker_sa_fabric_grain_deg
+    global _worker_sa_allowed_rotations, _worker_sa_disable_nfp_cache
+    global _worker_sa_disable_pruning
+    _worker_sa_shared_best = shared_best_value
+    _worker_sa_warm_starts = warm_starts
+    _worker_sa_blf_input = blf_input
+    _worker_sa_fabric_width_mm = fabric_width_mm
+    _worker_sa_fabric_grain_deg = fabric_grain_deg
+    _worker_sa_allowed_rotations = allowed_rotations_per_piece
+    _worker_sa_disable_pruning = disable_pruning
+    _worker_sa_disable_nfp_cache = disable_nfp_cache
+
+
+def _run_sa_chain(worker_index: int, iterations: int, max_time_s: float | None, seed: int):
+    """Module-level entry for ProcessPoolExecutor. Reads globals set by
+    _init_sa_worker, picks its warm-start, builds the evaluator closure,
+    and calls sa.run_sa."""
+    from core.layout.sa import run_sa  # local import in case of pickle quirks
+
+    if not _worker_sa_warm_starts:
+        return None
+    chosen_warm = _worker_sa_warm_starts[worker_index % len(_worker_sa_warm_starts)]
+
+    # Build initial_order as indices into _worker_sa_blf_input matching
+    # chosen_warm.sorted_pieces.
+    pid_to_index = {p.id: i for i, p in enumerate(_worker_sa_blf_input)}
+    initial_order = [pid_to_index[p.id] for p in chosen_warm.sorted_pieces]
+    initial_rotations = [0.0] * len(_worker_sa_blf_input)
+    for sorted_idx, p in enumerate(chosen_warm.sorted_pieces):
+        initial_rotations[pid_to_index[p.id]] = chosen_warm.rotations_used[sorted_idx]
+
+    # NFP cache: per-worker, reused across SA iterations.
+    nfp_cache: NfpCache = {}
+
+    def evaluator(pieces_in_order, per_piece_rotations):
+        cache = {} if _worker_sa_disable_nfp_cache else nfp_cache
+        shared = None if _worker_sa_disable_pruning else _worker_sa_shared_best
+        return _blf_pack_nfp(
+            pieces_in_order,
+            _worker_sa_fabric_width_mm,
+            chosen_warm.mode,
+            _worker_sa_fabric_grain_deg,
+            nfp_cache=cache,
+            shared_best_value=shared,
+            override_rotations=per_piece_rotations,
+            presorted=True,
+            skip_validation=True,  # pieces already validated by warm-start
+        )
+
+    return run_sa(
+        initial_order=initial_order,
+        initial_rotations=initial_rotations,
+        pieces=_worker_sa_blf_input,
+        allowed_rotations_per_piece=_worker_sa_allowed_rotations,
+        iterations=iterations,
+        max_time_s=max_time_s,
+        seed=seed,
+        evaluator=evaluator,
+        shared_best_value=_worker_sa_shared_best,
+    )
 
 
 # Integer scale for pyclipper. Preserves 3 decimal places of mm precision;
@@ -949,10 +1036,103 @@ def _run_sa_phase(
     disable_pruning: bool,
     clusters: list,
 ) -> tuple[list[Placement], float, float]:
-    """Stub — filled in Task 9. For now returns warm_start_best unchanged so
-    Task 8's commit passes the regression suite."""
+    """Run multi-restart SA chains and aggregate with warm_start_best as a
+    retained candidate. SA cannot regress (best returned is always <= warm-start)."""
+    warm_starts_sorted = sorted(warm_starts, key=lambda ws: ws.marker)
+    if not warm_starts_sorted:
+        # Shouldn't happen since at least one warm-start must complete to reach
+        # here (assert best is not None upstream), but be defensive.
+        if clusters:
+            placements, marker_length, utilization = warm_start_best
+            placements = _expand_clustered_placements(placements, clusters)
+            return placements, marker_length, utilization
+        return warm_start_best
+
+    # Compute per-piece allowed rotations once, from the user's grain_mode.
+    allowed_rotations_per_piece: list[list[float]] = []
+    for p in blf_input:
+        rots = allowed_rotations(grain_mode, fabric_grain_deg, p.grainline_direction_deg)
+        if len(rots) > NO_GRAINLINE_ROTATION_CAP:
+            # No-grainline case: cap to evenly-spaced angles.
+            step = 360.0 / NO_GRAINLINE_ROTATION_CAP
+            rots = [step * i for i in range(NO_GRAINLINE_ROTATION_CAP)]
+        allowed_rotations_per_piece.append(rots)
+
+    workers = _worker_count(effort)
+    # Seed the SA shared cutoff at infinity, not at warm_start_best[1]. The
+    # initial BLF evaluation inside each SA chain evaluates the warm-start
+    # state verbatim; if we set the cutoff = warm_start_best[1], the pruning
+    # condition (>= cutoff) fires and kills the initial evaluation. SA chains
+    # update the shared value as they find improvements; cross-chain pruning
+    # then tightens naturally.
+    sa_shared_best = (
+        None if disable_pruning
+        else multiprocessing.Value("d", float("inf"))
+    )
+
+    # Decide pool use: same threshold rationale as warm-start.
+    sa_use_pool = workers > 1 and sa_iterations >= 50
+
+    chain_results: list = []  # list[SAResult]
+
+    if not sa_use_pool:
+        # Serial SA (single chain). Initialize worker globals manually.
+        _init_sa_worker(
+            sa_shared_best, warm_starts_sorted, blf_input, fabric_width_mm,
+            fabric_grain_deg, allowed_rotations_per_piece, disable_nfp_cache,
+            disable_pruning,
+        )
+        try:
+            result = _run_sa_chain(0, sa_iterations, sa_max_time_s, sa_seed)
+            if result is not None:
+                chain_results.append(result)
+        except CancellationError:
+            pass  # fall through to aggregation with whatever we have
+    else:
+        with ProcessPoolExecutor(
+            max_workers=workers,
+            initializer=_init_sa_worker,
+            initargs=(
+                sa_shared_best, warm_starts_sorted, blf_input, fabric_width_mm,
+                fabric_grain_deg, allowed_rotations_per_piece,
+                disable_nfp_cache, disable_pruning,
+            ),
+        ) as pool:
+            _set_current_executor(pool)
+            try:
+                sa_futures = [
+                    pool.submit(_run_sa_chain, k, sa_iterations, sa_max_time_s, sa_seed + k)
+                    for k in range(workers)
+                ]
+                try:
+                    for f in as_completed(sa_futures):
+                        try:
+                            result = f.result()
+                        except _PrunedRun:
+                            continue
+                        if result is None:
+                            continue
+                        chain_results.append(result)
+                        if sa_shared_best is not None:
+                            with sa_shared_best.get_lock():
+                                if result.best_marker < sa_shared_best.value:
+                                    sa_shared_best.value = result.best_marker
+                except BrokenProcessPool as e:
+                    raise CancellationError("SA cancelled (workers terminated).") from e
+            finally:
+                _set_current_executor(None)
+
+    # Aggregate. Warm-start always retained as a candidate.
+    best_marker = warm_start_best[1]
+    final = warm_start_best
+    for cr in chain_results:
+        if cr.best_marker < best_marker:
+            best_marker = cr.best_marker
+            # cr.best_placements is already a list[Placement] from the evaluator.
+            final = (cr.best_placements, cr.best_marker, cr.best_util)
+
     if clusters:
-        placements, marker_length, utilization = warm_start_best
+        placements, marker_length, utilization = final
         placements = _expand_clustered_placements(placements, clusters)
         return placements, marker_length, utilization
-    return warm_start_best
+    return final

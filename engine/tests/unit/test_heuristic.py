@@ -852,3 +852,62 @@ def test_warm_start_retention_unused_when_sa_disabled():
     assert m1 == m2
     assert u1 == u2
     assert [pl.piece_id for pl in p1] == [pl.piece_id for pl in p2]
+
+
+def test_sa_iterations_50_monotone_against_warmstart():
+    """SA with iterations > 0 must produce marker <= the warm-start (sa_iterations=0)
+    marker for the same input + same seed. Sound by construction (warm-start
+    always retained as a candidate)."""
+    from core.layout.heuristic import auto_layout_polygon
+    pieces = _two_simple_pieces()
+    _, marker_baseline, _ = auto_layout_polygon(
+        pieces, 500, "single", 0.0, sa_iterations=0,
+    )
+    _, marker_sa, _ = auto_layout_polygon(
+        pieces, 500, "single", 0.0, sa_iterations=50, sa_seed=7,
+    )
+    assert marker_sa <= marker_baseline + 1e-9
+
+
+def test_sa_parallel_determinism():
+    """Two parallel SA runs with same sa_seed must produce identical results."""
+    from core.layout.heuristic import auto_layout_polygon
+    pieces = _two_simple_pieces()
+    _, m1, _ = auto_layout_polygon(
+        pieces, 500, "single", 0.0, effort=2, sa_iterations=20, sa_seed=42,
+    )
+    _, m2, _ = auto_layout_polygon(
+        pieces, 500, "single", 0.0, effort=2, sa_iterations=20, sa_seed=42,
+    )
+    assert m1 == m2
+
+
+def test_sa_with_disable_pruning_runs():
+    """sa_iterations + disable_pruning=True must run to completion (composability)."""
+    from core.layout.heuristic import auto_layout_polygon
+    pieces = _two_simple_pieces()
+    placements, marker, util = auto_layout_polygon(
+        pieces, 500, "single", 0.0,
+        sa_iterations=20, disable_pruning=True, sa_seed=1,
+    )
+    assert len(placements) == 2
+    assert marker > 0
+
+
+def test_sa_max_time_s_terminates_fast():
+    """sa_max_time_s=0.1 with sa_iterations=10000 must return within ~1s
+    (well under what 10k BLF iterations would take), with at minimum the warm-start."""
+    import time as _t
+    from core.layout.heuristic import auto_layout_polygon
+    pieces = _two_simple_pieces()
+    _, marker_warm, _ = auto_layout_polygon(
+        pieces, 500, "single", 0.0, sa_iterations=0,
+    )
+    start = _t.perf_counter()
+    _, marker_sa, _ = auto_layout_polygon(
+        pieces, 500, "single", 0.0,
+        sa_iterations=10_000, sa_max_time_s=0.1, sa_seed=3,
+    )
+    elapsed = _t.perf_counter() - start
+    assert elapsed < 2.0, f"SA took {elapsed:.2f}s (cap was 0.1s)"
+    assert marker_sa <= marker_warm + 1e-9
