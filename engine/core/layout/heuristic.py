@@ -414,6 +414,10 @@ def _blf_pack_nfp(
         the piece at position `i` in the sort order. Activated when the outer
         list's length matches `len(sorted_pieces)` AND its first element is a
         list. Used by the SA meta-heuristic to force one rotation per piece.
+        Note: index `i` refers to the order in `sorted_pieces` AFTER any
+        internal sort. Callers passing per-piece overrides should set
+        `presorted=True` so their candidate's piece ordering is preserved;
+        otherwise the internal sort will scramble their index alignment.
 
     `skip_validation`: skip the upfront `_validate_pieces_fit` call. The caller
     must have pre-filtered piece widths. Used by `pack_cluster_union`'s

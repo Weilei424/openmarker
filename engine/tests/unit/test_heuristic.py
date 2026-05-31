@@ -774,6 +774,7 @@ def test_blf_pack_nfp_override_rotations_per_piece_shape():
         presorted=True,
         override_rotations=[[0.0], [90.0]],
     )
+    assert len(placements) == 2
     by_id = {p.piece_id: p for p in placements}
     assert by_id["a"].rotation_deg == 0.0
     assert by_id["b"].rotation_deg == 90.0
