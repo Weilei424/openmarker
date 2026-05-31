@@ -188,3 +188,191 @@ def test_metropolis_accept_rates_at_t0_and_tmin():
     accepts_tmin = sum(1 for _ in range(2000)
                        if sa._metropolis_accept(delta, sa.T_MIN, rng2))
     assert accepts_tmin == 0, f"accept rate at T_MIN: {accepts_tmin}/2000"
+
+
+def test_run_sa_zero_iterations_returns_warmstart_unchanged():
+    """iterations=0 → SA must not call the evaluator. Return the initial
+    state as best-seen."""
+    pieces = [_p(f"p{i}") for i in range(5)]
+    initial_order = [0, 1, 2, 3, 4]
+    initial_rotations = [0.0] * 5
+    allowed = [[0.0, 180.0]] * 5
+    call_count = {"n": 0}
+
+    def stub_evaluator(pieces_in_order, per_piece_rotations):
+        call_count["n"] += 1
+        return ([], 999.0, 0.0)  # would-be result; should never be called
+
+    result = sa.run_sa(
+        initial_order=initial_order,
+        initial_rotations=initial_rotations,
+        pieces=pieces,
+        allowed_rotations_per_piece=allowed,
+        iterations=0,
+        max_time_s=None,
+        seed=42,
+        evaluator=stub_evaluator,
+    )
+    assert call_count["n"] == 0
+    assert result.best_order == initial_order
+    assert result.best_rotations == initial_rotations
+    assert result.iterations_executed == 0
+
+
+def test_run_sa_returns_best_seen_not_final():
+    """SA must track best-seen separately. Stub fitness landscape:
+    iteration 1 returns marker=5 (improvement); iterations 2-9 return
+    marker=50 (worse). Final state is at marker=50 but best is marker=5."""
+    pieces = [_p(f"p{i}") for i in range(5)]
+    initial_order = [0, 1, 2, 3, 4]
+    initial_rotations = [0.0] * 5
+    allowed = [[0.0, 180.0]] * 5
+
+    iteration = {"n": 0}
+
+    def stub_evaluator(pieces_in_order, per_piece_rotations):
+        iteration["n"] += 1
+        if iteration["n"] == 1:
+            return ([("placement", iteration["n"])], 5.0, 0.95)  # the gold one
+        return ([("placement", iteration["n"])], 50.0, 0.1)  # all subsequent worse
+
+    # We need initial evaluation too — run_sa evaluates the initial state once
+    # (to get the marker for T0 calibration). That's iteration 0.
+    def stub_eval_with_init(pieces_in_order, per_piece_rotations):
+        iteration["n"] += 1
+        if iteration["n"] == 1:
+            return ([("init",)], 100.0, 0.05)  # initial marker -> T0 = 5.0
+        if iteration["n"] == 2:
+            return ([("gold",)], 5.0, 0.95)
+        return ([("bad",)], 50.0, 0.1)
+
+    result = sa.run_sa(
+        initial_order=initial_order,
+        initial_rotations=initial_rotations,
+        pieces=pieces,
+        allowed_rotations_per_piece=allowed,
+        iterations=10,
+        max_time_s=None,
+        seed=42,
+        evaluator=stub_eval_with_init,
+    )
+    assert result.best_marker == 5.0
+    assert ("gold",) in result.best_placements
+
+
+def test_run_sa_monotone_non_worsening():
+    """Across 50 random seeds, best_marker <= initial_marker always."""
+    pieces = [_p(f"p{i}") for i in range(10)]
+    initial_order = list(range(10))
+    initial_rotations = [0.0] * 10
+    allowed = [[0.0, 180.0]] * 10
+
+    def random_marker_evaluator(pieces_in_order, per_piece_rotations):
+        # Marker proportional to a stable hash of the candidate so SA has
+        # a real landscape to descend. Initial state (first call) gets a
+        # known-large marker.
+        key = tuple(p.id for p in pieces_in_order)
+        h = abs(hash(key)) % 1000
+        return ([], 100.0 + h, 0.5)  # range [100, 1099]
+
+    for seed in range(50):
+        result = sa.run_sa(
+            initial_order=initial_order,
+            initial_rotations=initial_rotations,
+            pieces=pieces,
+            allowed_rotations_per_piece=allowed,
+            iterations=20,
+            max_time_s=None,
+            seed=seed,
+            evaluator=random_marker_evaluator,
+        )
+        # Initial marker = 100 + hash(initial order tuple) % 1000.
+        # Best must be <= that.
+        initial_key = tuple(pieces[i].id for i in initial_order)
+        initial_marker = 100.0 + (abs(hash(initial_key)) % 1000)
+        assert result.best_marker <= initial_marker, \
+            f"seed {seed}: best {result.best_marker} > initial {initial_marker}"
+
+
+def test_run_sa_terminates_at_max_time_with_injected_clock():
+    """With an injected clock that jumps to 1.0s after the 3rd call,
+    run_sa must terminate after iteration 3 even if iterations=10000."""
+    pieces = [_p(f"p{i}") for i in range(5)]
+    allowed = [[0.0, 180.0]] * 5
+
+    # Clock returns 0.0 for first 4 reads (init + iter1 + iter2 + iter3 starts),
+    # then jumps to 1.0 (over max_time_s=0.5).
+    clock_calls = {"n": 0}
+    def fake_clock():
+        clock_calls["n"] += 1
+        if clock_calls["n"] <= 4:
+            return 0.0
+        return 1.0
+
+    def stub_evaluator(pieces_in_order, per_piece_rotations):
+        return ([], 50.0, 0.5)
+
+    result = sa.run_sa(
+        initial_order=list(range(5)),
+        initial_rotations=[0.0] * 5,
+        pieces=pieces,
+        allowed_rotations_per_piece=allowed,
+        iterations=10_000,
+        max_time_s=0.5,
+        seed=1,
+        evaluator=stub_evaluator,
+        clock=fake_clock,
+    )
+    # Iteration count cap not hit; time cap fired after iteration 3.
+    assert result.iterations_executed < 10
+    assert result.iterations_executed >= 1
+
+
+def test_run_sa_invalid_candidate_rejected_without_crash():
+    """Evaluator raising ValueError → neighbor rejected, chain continues."""
+    pieces = [_p(f"p{i}") for i in range(5)]
+    allowed = [[0.0, 180.0]] * 5
+
+    call_count = {"n": 0}
+    def flaky_evaluator(pieces_in_order, per_piece_rotations):
+        call_count["n"] += 1
+        # Iteration 0 (initial): OK. Iteration 1: explode. Iteration 2+: OK with worse marker.
+        if call_count["n"] == 1:
+            return ([("init",)], 100.0, 0.5)
+        if call_count["n"] == 2:
+            raise ValueError("synthetic placement failure")
+        return ([("ok",)], 110.0, 0.5)
+
+    result = sa.run_sa(
+        initial_order=list(range(5)),
+        initial_rotations=[0.0] * 5,
+        pieces=pieces,
+        allowed_rotations_per_piece=allowed,
+        iterations=5,
+        max_time_s=None,
+        seed=1,
+        evaluator=flaky_evaluator,
+    )
+    # No crash; best is the initial (since 110 > 100, descent never finds better).
+    assert result.best_marker == 100.0
+
+
+def test_run_sa_terminates_at_iteration_cap():
+    """With max_time_s=None and iterations=5, exactly 5 iterations run."""
+    pieces = [_p(f"p{i}") for i in range(5)]
+    allowed = [[0.0, 180.0]] * 5
+
+    def stub_evaluator(pieces_in_order, per_piece_rotations):
+        return ([], 50.0, 0.5)
+
+    result = sa.run_sa(
+        initial_order=list(range(5)),
+        initial_rotations=[0.0] * 5,
+        pieces=pieces,
+        allowed_rotations_per_piece=allowed,
+        iterations=5,
+        max_time_s=None,
+        seed=1,
+        evaluator=stub_evaluator,
+    )
+    assert result.iterations_executed == 5

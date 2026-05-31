@@ -197,4 +197,118 @@ def run_sa(
       shared_best_value: multiprocessing.Value('d') for cross-worker pruning, or None
       clock: time source (injected for test determinism)
     """
-    raise NotImplementedError  # Filled in Task 6
+    n = len(pieces)
+    rng = _random.Random(seed)
+
+    # Capture start_time BEFORE any work (including initial evaluation) so
+    # max_time_s genuinely bounds wall-clock from caller's perspective.
+    start_time = clock()
+
+    # Fast-path: no iterations requested — return initial state without
+    # touching the evaluator (some tests assert zero evaluator calls here).
+    if iterations == 0:
+        return SAResult(
+            best_order=list(initial_order),
+            best_rotations=list(initial_rotations),
+            best_placements=[],
+            best_marker=float("inf"),
+            best_util=0.0,
+            iterations_executed=0,
+            accept_count=0,
+            improve_count=0,
+        )
+
+    # Evaluate the initial state once to seed `current`/`best`/`T0`.
+    init_pieces_in_order = [pieces[idx] for idx in initial_order]
+    init_per_piece_rots = [[initial_rotations[idx]] for idx in initial_order]
+    init_placements, init_marker, init_util = evaluator(init_pieces_in_order, init_per_piece_rots)
+
+    current_order = list(initial_order)
+    current_rotations = list(initial_rotations)
+    current_marker = init_marker
+
+    best_order = list(initial_order)
+    best_rotations = list(initial_rotations)
+    best_placements = init_placements
+    best_marker = init_marker
+    best_util = init_util
+
+    T0 = max(T_MIN, T0_FACTOR * init_marker)
+    accept_count = 0
+    improve_count = 0
+    iteration = 0
+
+    while iteration < iterations:
+        # Termination checks: cancellation, wall-clock cap.
+        if is_cancelled():
+            break
+        if max_time_s is not None and (clock() - start_time) >= max_time_s:
+            break
+
+        # Sample neighbor. Up to 3 tries to pick a non-no-op move when
+        # rotation_flip lands on a chain of all-1-allowed pieces.
+        new_order = current_order
+        new_rotations = current_rotations
+        for _retry in range(3):
+            move_type = _sample_move_type(rng)
+            if move_type == "swap":
+                new_order = _swap_move(current_order, rng)
+                new_rotations = current_rotations
+                break
+            elif move_type == "reverse":
+                new_order = _reverse_move(current_order, rng)
+                new_rotations = current_rotations
+                break
+            else:  # rotation_flip
+                flipped_rots, flipped_idx = _rotation_flip_move(
+                    current_rotations, allowed_rotations_per_piece, rng
+                )
+                if flipped_idx is not None:
+                    new_order = current_order
+                    new_rotations = flipped_rots
+                    break
+                # else: retry with a different move type
+        else:
+            # All 3 retries hit no-op pieces. Fall through with `current` —
+            # the next iteration will try again. Counts as one iteration burned.
+            iteration += 1
+            continue
+
+        # Evaluate neighbor. Treat ValueError as "infinitely bad" → reject.
+        try:
+            pieces_in_order = [pieces[idx] for idx in new_order]
+            per_piece_rots = [[new_rotations[idx]] for idx in new_order]
+            new_placements, new_marker, new_util = evaluator(pieces_in_order, per_piece_rots)
+        except ValueError:
+            iteration += 1
+            continue
+
+        # Metropolis acceptance.
+        T_k = _temperature_at(T0, iteration)
+        delta = new_marker - current_marker
+        if _metropolis_accept(delta, T_k, rng):
+            current_order = new_order
+            current_rotations = new_rotations
+            current_marker = new_marker
+            accept_count += 1
+            # Track best-seen.
+            if new_marker < best_marker:
+                best_order = list(new_order)
+                best_rotations = list(new_rotations)
+                best_placements = new_placements
+                best_marker = new_marker
+                best_util = new_util
+                improve_count += 1
+
+        iteration += 1
+
+    return SAResult(
+        best_order=best_order,
+        best_rotations=best_rotations,
+        best_placements=best_placements,
+        best_marker=best_marker,
+        best_util=best_util,
+        iterations_executed=iteration,
+        accept_count=accept_count,
+        improve_count=improve_count,
+    )
