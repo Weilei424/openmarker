@@ -383,6 +383,7 @@ def _blf_pack_nfp(
     shared_best_value=None,  # multiprocessing.Value('d', ...) or None
     override_rotations: list[float] | None = None,
     skip_validation: bool = False,
+    presorted: bool = False,
 ) -> tuple[list[Placement], float, float]:
     """Bottom-Left-Fill using polygon set algebra over NFPs.
 
@@ -412,12 +413,19 @@ def _blf_pack_nfp(
     `skip_validation`: skip the upfront `_validate_pieces_fit` call. The caller
     must have pre-filtered piece widths. Used by `pack_cluster_union`'s
     candidate-width loop.
+
+    `presorted`: when True, skip the internal sort and use `pieces` verbatim.
+    Used by the SA meta-heuristic so chains can drive piece ordering directly.
+    `sort_key` is ignored when `presorted=True`.
     """
-    if sort_key is None:
-        sort_key = lambda p: p.area
     if nfp_cache is None:
         nfp_cache = {}
-    sorted_pieces = sorted(pieces, key=sort_key, reverse=True)
+    if presorted:
+        sorted_pieces = list(pieces)  # caller already ordered; copy defensively
+    else:
+        if sort_key is None:
+            sort_key = lambda p: p.area
+        sorted_pieces = sorted(pieces, key=sort_key, reverse=True)
     if not skip_validation:
         _validate_pieces_fit(sorted_pieces, fabric_width_mm, grain_mode, fabric_grain_deg, _polygon_dims)
 

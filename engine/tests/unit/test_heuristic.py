@@ -708,3 +708,39 @@ def test_auto_layout_polygon_cluster_fraction_ignored_when_clustering_disabled()
     )
     # Bit-identical: cluster_fraction is moot when clustering is off.
     assert marker_default == marker_low
+
+
+def test_blf_pack_nfp_presorted_true_uses_input_order():
+    """When presorted=True, _blf_pack_nfp must NOT re-sort the input.
+    Verified by passing pieces in a known-bad order (smallest-first) and
+    observing that the first placed piece is the small one — the default
+    area-DESC sort would have placed the largest first."""
+    from core.layout.heuristic import _blf_pack_nfp
+
+    small = Piece(
+        id="small", name="small",
+        polygon=[(0, 0), (50, 0), (50, 30), (0, 30)],
+        area=1500.0,
+        bbox=BoundingBox(0, 0, 50, 30, 50, 30),
+        is_valid=True, validation_notes=[], grainline_direction_deg=None,
+    )
+    large = Piece(
+        id="large", name="large",
+        polygon=[(0, 0), (200, 0), (200, 150), (0, 150)],
+        area=30000.0,
+        bbox=BoundingBox(0, 0, 200, 150, 200, 150),
+        is_valid=True, validation_notes=[], grainline_direction_deg=None,
+    )
+
+    # Default sort (presorted=False) places large first.
+    placements_default, _, _ = _blf_pack_nfp(
+        [small, large], fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+    )
+    assert placements_default[0].piece_id == "large"
+
+    # presorted=True respects input order — small placed first.
+    placements_presorted, _, _ = _blf_pack_nfp(
+        [small, large], fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        presorted=True,
+    )
+    assert placements_presorted[0].piece_id == "small"
