@@ -1086,6 +1086,10 @@ def _run_sa_phase(
             result = _run_sa_chain(0, sa_iterations, sa_max_time_s, sa_seed)
             if result is not None:
                 chain_results.append(result)
+        except _PrunedRun:
+            pass  # defensive: cannot trigger today (sa_shared_best stays at inf
+                  # in serial mode), but mirrors the parallel branch's handling
+                  # so a future change updating the shared value mid-run won't crash
         except CancellationError:
             pass  # fall through to aggregation with whatever we have
     else:
