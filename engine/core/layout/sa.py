@@ -10,6 +10,8 @@ _blf_pack_nfp) is constructed at the call site inside heuristic.py.
 """
 from __future__ import annotations
 
+import math
+import random as _random
 import time
 from typing import Callable, NamedTuple, TYPE_CHECKING
 
@@ -79,6 +81,70 @@ class SAResult(NamedTuple):
     iterations_executed: int
     accept_count: int
     improve_count: int
+
+
+# ---------------------------------------------------------------------------
+# Move operators. Each takes the current state plus an RNG and returns
+# the proposed neighbor state. Operators are pure — they do not mutate inputs.
+# ---------------------------------------------------------------------------
+
+
+def _swap_move(order: list[int], rng: _random.Random) -> list[int]:
+    """Pick two distinct indices uniformly at random and swap them."""
+    n = len(order)
+    if n < 2:
+        return list(order)
+    i, j = rng.sample(range(n), 2)
+    new_order = list(order)
+    new_order[i], new_order[j] = new_order[j], new_order[i]
+    return new_order
+
+
+def _reverse_move(order: list[int], rng: _random.Random) -> list[int]:
+    """Reverse a contiguous slice of `order`. Window length is uniform in
+    [2, cap] where cap = ceil(N * REVERSE_WINDOW_FRACTION). Window position
+    is uniform-random subject to staying within bounds."""
+    n = len(order)
+    if n < 2:
+        return list(order)
+    cap = max(2, math.ceil(n * REVERSE_WINDOW_FRACTION))
+    cap = min(cap, n)
+    window_len = rng.randint(2, cap)
+    start = rng.randint(0, n - window_len)
+    new_order = list(order)
+    new_order[start : start + window_len] = reversed(new_order[start : start + window_len])
+    return new_order
+
+
+def _rotation_flip_move(
+    rotations: list[float],
+    allowed_per_piece: list[list[float]],
+    rng: _random.Random,
+) -> tuple[list[float], int | None]:
+    """Pick a piece uniformly at random whose allowed list has 2+ options,
+    and resample its rotation from that list excluding the current value.
+
+    Returns (new_rotations, flipped_piece_index). If NO piece has 2+ options,
+    returns (unchanged_rotations, None) so the caller can pick a different move."""
+    flippable = [i for i, alts in enumerate(allowed_per_piece) if len(alts) >= 2]
+    if not flippable:
+        return list(rotations), None
+    piece_index = rng.choice(flippable)
+    alternatives = [r for r in allowed_per_piece[piece_index] if r != rotations[piece_index]]
+    if not alternatives:
+        # This piece's "allowed" list has 2+ entries but all equal the current value
+        # (shouldn't happen with normal grain data, but be defensive).
+        return list(rotations), None
+    new_rotations = list(rotations)
+    new_rotations[piece_index] = rng.choice(alternatives)
+    return new_rotations, piece_index
+
+
+def _sample_move_type(rng: _random.Random) -> str:
+    """Pick a move type per MOVE_WEIGHTS distribution."""
+    move_types = list(MOVE_WEIGHTS.keys())
+    weights = [MOVE_WEIGHTS[m] for m in move_types]
+    return rng.choices(move_types, weights=weights, k=1)[0]
 
 
 # ---------------------------------------------------------------------------
