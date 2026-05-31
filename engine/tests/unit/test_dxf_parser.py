@@ -241,7 +241,7 @@ def test_grainline_absent_when_no_layer7_line():
 
 _FIXTURE_PATH = os.path.join(
     os.path.dirname(__file__),
-    "..", "..", "..", "..", "..", "..", "..",
+    "..", "..", "..",
     "examples", "input",
     "2_pieces_x_2_with_grainline.dxf"
 )
