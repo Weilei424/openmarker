@@ -262,6 +262,21 @@ the bench is the path to flipping the default.
 - [ ] **Cutoff slack.** Accept runs within `epsilon` of best for diversity
   (e.g., to keep "almost as good" results for future export/comparison).
   Not needed today; filed so it's not lost.
+- [ ] **Bench-vs-GUI variance on the unclustered path (filed 2026-05-30).**
+  `bench_clustering.py off` returns 12249.1mm on `sample_2.dxf × 10` at
+  `effort=1` and `effort=5` (deterministic). A 2026-05-30 manual GUI run on
+  the same workload + effort=Max returned 11699mm. Both paths invoke
+  `auto_layout_polygon(disable_clustering=True)` and should produce identical
+  results. Likely suspects: (1) bench's `_load_dxf_pieces`
+  (`engine/tests/bench_clustering.py:70`) vs the API's
+  `parse_dxf` + `normalize_piece` may yield subtly different `Piece.polygon`
+  lists (vertex ordering, normalization tolerance, grainline angle);
+  (2) PR #8's "result identical to serial mode" claim may not hold across
+  all worker counts; (3) the `POST /auto-layout` cache
+  (`engine/api/main.py:179`) could have served a stale entry. Repro starting
+  point: call `auto_layout_polygon` directly with effort=Max-equivalent and
+  diff against a `requests.post('/auto-layout', ...)` result on the same
+  pieces — vertex-by-vertex polygon diff first.
 
 ---
 
@@ -315,3 +330,5 @@ Add new entries here as work progresses. Each entry should record:
   2. Future workloads with mixed copy counts (some base ids with copies, some without — exposing real "natural" singletons) may still let some `cluster_fraction` value win. The current finding is specific to homogeneous garment workloads where every base id has the same copy count.
 
 - **Mechanism preserved at:** `engine/core/layout/clustering.py::pre_cluster_pieces` (split logic) + `engine/core/layout/heuristic.py::auto_layout_polygon` (parameter forwarding). Opt-in instructions in § 4.5.
+
+- **Manual GUI verification (2026-05-30):** sample_2 × 10 at fabric=1651mm bi-grain returned 11699mm/79.4% (17s parallel-Max, ~34s Eco serial). This run does **NOT** validate partial clustering — `POST /auto-layout` does not accept `cluster_fraction`/`cluster_polygon`/`disable_clustering` (see § 4.3), so the GUI always hits the unclustered default path. The 11699mm number happens to match the historical "pre-PR-#7 baseline" row in § 1 while diverging from this PR's bench `off`=12249mm on the same parameters. Bench-vs-GUI variance investigation filed as a §5.C bullet.
