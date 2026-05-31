@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a `cluster_fraction: float = 1.0` opt-in knob to identical-piece pre-clustering that holds back the last `N - floor(N * fraction)` copies of each group as singletons in the outer BLF input, testing PR #10's "singletons in cluster bays" hypothesis.
+**Goal:** Add a `cluster_fraction: float = 1.0` opt-in knob to identical-piece pre-clustering that holds back the last `N - floor(N * fraction)` copies of each group as singletons in the outer BLF input, testing the true-union polygon clusters work's (2026-05-26) "singletons in cluster bays" hypothesis.
 
 **Architecture:** Single parameter threaded through two layers (`auto_layout_polygon` → `pre_cluster_pieces`). The per-group split lives inside `pre_cluster_pieces`'s existing loop — `pack_cluster_union` / `pack_cluster_bbox` receive a smaller `cluster_pieces` slice and have no awareness of the split. Default `cluster_fraction=1.0` is bit-identical to current behavior (the new `leftover_pieces.extend()` is a no-op).
 
@@ -751,7 +751,7 @@ At the bottom of PERFORMANCE.md (after the existing `### 2026-05-26 — Union cl
 ### YYYY-MM-DD — Partial clustering shipped opt-in
 
 - **What:** Added `cluster_fraction: float = 1.0` knob to `pre_cluster_pieces` (and forwarded through `auto_layout_polygon`). Per-group split: `k = floor(N * cluster_fraction)` copies cluster; remaining `N - k` join outer BLF as singletons. Min-cluster promotion: `k < 2` → whole group becomes singletons.
-- **Why:** PR #10 § 6 entry's structural finding ("on `sample_2.dxf × 10`, every base id has 10 copies → no singletons left to fill cluster bays") implies that holding back some copies as singletons might let the outer BLF interleave them into the cluster perimeter bays.
+- **Why:** The 2026-05-26 § 6 entry's structural finding ("on `sample_2.dxf × 10`, every base id has 10 copies → no singletons left to fill cluster bays") implies that holding back some copies as singletons might let the outer BLF interleave them into the cluster perimeter bays.
 - **Result:** Bench sweep on `sample_2.dxf × 10` at fabric=1651mm bi-grain, effort=5:
 
   | `cluster_fraction` | Marker length (mm) | Utilization | Time (ms) |

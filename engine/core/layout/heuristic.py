@@ -668,6 +668,7 @@ def auto_layout_polygon(
     disable_pruning: bool = False,
     disable_clustering: bool = True,          # PR #9 default preserved; see docstring
     cluster_polygon: str = "union",            # selects bbox vs union path WHEN enabled
+    cluster_fraction: float = 1.0,
 ) -> tuple[list[Placement], float, float]:
     """No-Fit-Polygon-based Bottom-Left-Fill (slow mode, accurate).
 
@@ -712,6 +713,14 @@ def auto_layout_polygon(
     beats bbox on workloads with bay-exposable perimeters; on the headline
     sample_2.dxf x 10 (fabric=1651mm, bi-grain), union is 27336mm vs bbox
     29958mm (still both worse than off=12249mm — clustering remains opt-in).
+
+    `cluster_fraction`: float in (0.0, 1.0], default 1.0. Holds back the last
+    N - floor(N * fraction) copies of each group as singletons in the outer BLF
+    input, allowing them to potentially slot into cluster perimeter bays. When
+    the computed cluster size is < 2, the whole group passes through as
+    singletons. Out-of-range values raise ValueError from pre_cluster_pieces.
+    Has no effect when disable_clustering=True (the pre_cluster_pieces call is
+    skipped entirely). See PERFORMANCE.md § 4.5.
     """
     if disable_clustering:
         blf_input = pieces
@@ -720,6 +729,7 @@ def auto_layout_polygon(
         blf_input, clusters = pre_cluster_pieces(
             pieces, fabric_width_mm, grain_mode, fabric_grain_deg,
             cluster_polygon=cluster_polygon,
+            cluster_fraction=cluster_fraction,
         )
 
     modes = _modes_to_try(grain_mode)

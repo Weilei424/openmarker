@@ -1391,10 +1391,10 @@ Two edits:
 (a) Under "Phase 6 follow-ups — algorithm performance", append:
 
 ```markdown
-- [x] Engine: true-union polygon clusters. Inner NFP-BLF packs each group; Shapely union → cluster polygon. Outer BLF interleaves other pieces into perimeter bays. Replaces PR #9's bbox approximation (which regressed sample_2.dxf x 10 by +145%). Adds `cluster_polygon: 'union' | 'bbox' = 'union'` to `auto_layout_polygon`; flips `disable_clustering=False` default. Bench (sample_2.dxf x 10, fabric=1651, bi): union <= off + improvement, full numbers in PR. Shipped in PR #10.
+- [x] Engine: true-union polygon clusters. Inner NFP-BLF packs each group; Shapely union → cluster polygon. Outer BLF interleaves other pieces into perimeter bays. Replaces PR #9's bbox approximation (which regressed sample_2.dxf x 10 by +145%). Adds `cluster_polygon: 'union' | 'bbox' = 'union'` to `auto_layout_polygon`; flips `disable_clustering=False` default. Bench (sample_2.dxf x 10, fabric=1651, bi): union <= off + improvement, full numbers in PR. Committed direct-to-main 2026-05-26 (no GitHub PR).
 ```
 
-(b) Under "Future / Unscheduled" → "Layout improvements — algorithm", change the in-progress entry `[~] Identical-piece pre-clustering (true-union polygon clusters)` to `[x]` and append `(Shipped in PR #10.)`. Move the entry to the resolved-list section if your BACKLOG uses one.
+(b) Under "Future / Unscheduled" → "Layout improvements — algorithm", change the in-progress entry `[~] Identical-piece pre-clustering (true-union polygon clusters)` to `[x]` and append `(Committed direct-to-main 2026-05-26, no GitHub PR.)`. Move the entry to the resolved-list section if your BACKLOG uses one.
 
 Also add follow-up items to "Future / Unscheduled" under the algorithm section:
 

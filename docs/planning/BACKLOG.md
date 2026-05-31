@@ -166,8 +166,9 @@ Task checklist:
 - [x] Serial branch pruning (PR #7). See PERFORMANCE.md § 2.
 - [x] Parallel branch pruning + `disable_pruning` toggle (PR #8). See PERFORMANCE.md § 2.
 - [x] Identical-piece clustering — bbox path. Opt-in only (regresses garment workloads). PR #9. See PERFORMANCE.md § 2 + § 4.1.
-- [x] Identical-piece clustering — union path. Opt-in only (structural barrier documented). PR #10. See PERFORMANCE.md § 2 + § 4.2.
-- [ ] Algorithm follow-ups (clustering structural-barrier + general wins + pruning meta-improvements). Ranked list in PERFORMANCE.md § 5.
+- [x] Identical-piece clustering — union path. Opt-in only (structural barrier documented). Committed direct-to-main 2026-05-26 (no GitHub PR). See PERFORMANCE.md § 2 + § 4.2.
+- [x] Partial clustering (`cluster_fraction` knob). Opt-in only (structural barrier holds — best fraction 0.5 cuts full-cluster baseline in half but unclustered still wins). PR #10. See PERFORMANCE.md § 4.5 + § 6 [2026-05-30].
+- [ ] Remaining clustering follow-ups (heterogeneous clustering, cluster-aware sort) + open meta items. See PERFORMANCE.md § 5.
 
 ### Phase 7 — Export
 - [ ] Export layout as DXF or PNG (sourced from any cached layout tab)

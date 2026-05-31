@@ -438,6 +438,7 @@ def pre_cluster_pieces(
     grain_mode: str = "single",
     fabric_grain_deg: float = 0.0,
     cluster_polygon: str = "union",
+    cluster_fraction: float = 1.0,
 ) -> tuple[list[Piece], list[Cluster]]:
     """Group identical pieces and pack each group via the selected cluster method.
 
@@ -445,33 +446,52 @@ def pre_cluster_pieces(
         cluster_polygon="union" → pack_cluster_union → pack_cluster_bbox → singletons
         cluster_polygon="bbox"  → pack_cluster_bbox → singletons
 
+    `cluster_fraction` (default 1.0) holds back the last N - floor(N * fraction)
+    copies of each group as singletons in the outer BLF input. When the computed
+    cluster size is < 2, the whole group passes through as singletons (no cluster
+    is constructed). Must be in (0.0, 1.0]; out-of-range raises ValueError.
+
     Returns (clustered_input, clusters):
       - clustered_input: list[Piece] containing singletons + super-pieces.
       - clusters: list[Cluster], one per super-piece.
     """
     if cluster_polygon not in ("union", "bbox"):
         raise ValueError(f"cluster_polygon must be 'union' or 'bbox', got: {cluster_polygon!r}")
+    if not (0.0 < cluster_fraction <= 1.0):
+        raise ValueError(f"cluster_fraction must be in (0.0, 1.0], got: {cluster_fraction!r}")
 
     groups = group_pieces_by_base_id(pieces)
     clustered_input: list[Piece] = []
     clusters: list[Cluster] = []
     for group in groups.values():
-        if len(group) < 2:
+        n = len(group)
+        if n < 2:
             clustered_input.extend(group)
             continue
 
+        k = math.floor(n * cluster_fraction)
+        if k < 2:
+            # Cluster would be degenerate (< 2 copies). Promote whole group to singletons.
+            clustered_input.extend(group)
+            continue
+
+        cluster_pieces = group[:k]
+        leftover_pieces = group[k:]   # may be empty when k == n (cluster_fraction == 1.0)
+
         cluster: Cluster | None = None
         if cluster_polygon == "union":
-            cluster = pack_cluster_union(group, fabric_width_mm, grain_mode, fabric_grain_deg)
+            cluster = pack_cluster_union(cluster_pieces, fabric_width_mm, grain_mode, fabric_grain_deg)
         if cluster is None:
-            cluster = pack_cluster_bbox(group, fabric_width_mm, grain_mode, fabric_grain_deg)
+            cluster = pack_cluster_bbox(cluster_pieces, fabric_width_mm, grain_mode, fabric_grain_deg)
         if cluster is None:
-            # Both union and bbox failed (group's piece too wide for fabric).
+            # Both pack paths failed on the k-slice. Whole group (k + leftover)
+            # falls back to singletons.
             clustered_input.extend(group)
             continue
 
         clustered_input.append(cluster.super_piece)
         clusters.append(cluster)
+        clustered_input.extend(leftover_pieces)
     return clustered_input, clusters
 
 
