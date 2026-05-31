@@ -698,6 +698,9 @@ def auto_layout_polygon(
     disable_clustering: bool = True,          # PR #9 default preserved; see docstring
     cluster_polygon: str = "union",            # selects bbox vs union path WHEN enabled
     cluster_fraction: float = 1.0,
+    sa_iterations: int = 0,
+    sa_max_time_s: float | None = None,
+    sa_seed: int = 0,
 ) -> tuple[list[Placement], float, float]:
     """No-Fit-Polygon-based Bottom-Left-Fill (slow mode, accurate).
 
@@ -750,7 +753,33 @@ def auto_layout_polygon(
     singletons. Out-of-range values raise ValueError from pre_cluster_pieces.
     Has no effect when disable_clustering=True (the pre_cluster_pieces call is
     skipped entirely). See PERFORMANCE.md § 4.5.
+
+    `sa_iterations`: when > 0, run a Simulated Annealing meta-heuristic on top
+    of the best-of-4 sort-strategies result. SA performs `sa_iterations` move
+    attempts per chain, with K = _worker_count(effort) chains running in
+    parallel (multi-restart). Default 0 (SA disabled). Mutually exclusive with
+    `disable_clustering=False` — raises ValueError. See PERFORMANCE.md § 4.6
+    and engine/core/layout/sa.py for the algorithm details.
+
+    `sa_max_time_s`: optional wall-clock cap per SA chain in seconds. SA stops
+    at whichever of iteration count / wall-clock fires first. Must be > 0 when
+    set. Default None (iteration-cap only).
+
+    `sa_seed`: base RNG seed for SA. Each parallel chain k uses
+    `sa_seed + k` so multi-restart runs are reproducible. Default 0.
     """
+    # SA meta-heuristic parameter validation. Keep cheap checks at the top so
+    # bad calls fail before any layout work happens.
+    if sa_iterations < 0:
+        raise ValueError(f"sa_iterations must be >= 0, got {sa_iterations}")
+    if sa_iterations > 0 and not disable_clustering:
+        raise ValueError(
+            "sa_iterations > 0 cannot be combined with disable_clustering=False; "
+            "see PERFORMANCE.md § 4.6 for the future-work note."
+        )
+    if sa_max_time_s is not None and sa_max_time_s <= 0:
+        raise ValueError(f"sa_max_time_s must be > 0 when set, got {sa_max_time_s}")
+
     if disable_clustering:
         blf_input = pieces
         clusters: list[Cluster] = []

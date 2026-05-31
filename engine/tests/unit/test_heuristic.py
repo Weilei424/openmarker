@@ -778,3 +778,64 @@ def test_blf_pack_nfp_override_rotations_per_piece_shape():
     by_id = {p.piece_id: p for p in placements}
     assert by_id["a"].rotation_deg == 0.0
     assert by_id["b"].rotation_deg == 90.0
+
+
+# --- SA parameter validation tests ---
+
+def _two_simple_pieces():
+    """Helper: two pieces small enough to fit comfortably on a 500mm fabric."""
+    return [
+        Piece(
+            id="a", name="a",
+            polygon=[(0, 0), (50, 0), (50, 30), (0, 30)],
+            area=1500.0,
+            bbox=BoundingBox(0, 0, 50, 30, 50, 30),
+            is_valid=True, validation_notes=[], grainline_direction_deg=0.0,
+        ),
+        Piece(
+            id="b", name="b",
+            polygon=[(0, 0), (60, 0), (60, 40), (0, 40)],
+            area=2400.0,
+            bbox=BoundingBox(0, 0, 60, 40, 60, 40),
+            is_valid=True, validation_notes=[], grainline_direction_deg=0.0,
+        ),
+    ]
+
+
+def test_auto_layout_rejects_negative_sa_iterations():
+    from core.layout.heuristic import auto_layout_polygon
+    with pytest.raises(ValueError, match="sa_iterations"):
+        auto_layout_polygon(
+            _two_simple_pieces(), fabric_width_mm=500, grain_mode="single",
+            fabric_grain_deg=0.0, sa_iterations=-1,
+        )
+
+
+def test_auto_layout_rejects_sa_with_clustering_on():
+    from core.layout.heuristic import auto_layout_polygon
+    with pytest.raises(ValueError, match="cannot be combined"):
+        auto_layout_polygon(
+            _two_simple_pieces(), fabric_width_mm=500, grain_mode="single",
+            fabric_grain_deg=0.0, sa_iterations=10, disable_clustering=False,
+        )
+
+
+def test_auto_layout_rejects_zero_sa_max_time():
+    from core.layout.heuristic import auto_layout_polygon
+    with pytest.raises(ValueError, match="sa_max_time_s"):
+        auto_layout_polygon(
+            _two_simple_pieces(), fabric_width_mm=500, grain_mode="single",
+            fabric_grain_deg=0.0, sa_iterations=10, sa_max_time_s=0.0,
+        )
+
+
+def test_auto_layout_default_sa_params_unchanged_behavior():
+    """Without any sa_* argument, behavior is identical to before this PR.
+    Smoke test: two-piece call returns a valid layout with finite marker."""
+    from core.layout.heuristic import auto_layout_polygon
+    placements, marker, util = auto_layout_polygon(
+        _two_simple_pieces(), fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+    )
+    assert len(placements) == 2
+    assert marker > 0
+    assert 0 < util <= 100
