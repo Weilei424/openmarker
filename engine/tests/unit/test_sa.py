@@ -230,12 +230,6 @@ def test_run_sa_returns_best_seen_not_final():
 
     iteration = {"n": 0}
 
-    def stub_evaluator(pieces_in_order, per_piece_rotations):
-        iteration["n"] += 1
-        if iteration["n"] == 1:
-            return ([("placement", iteration["n"])], 5.0, 0.95)  # the gold one
-        return ([("placement", iteration["n"])], 50.0, 0.1)  # all subsequent worse
-
     # We need initial evaluation too — run_sa evaluates the initial state once
     # (to get the marker for T0 calibration). That's iteration 0.
     def stub_eval_with_init(pieces_in_order, per_piece_rotations):
@@ -300,8 +294,10 @@ def test_run_sa_terminates_at_max_time_with_injected_clock():
     pieces = [_p(f"p{i}") for i in range(5)]
     allowed = [[0.0, 180.0]] * 5
 
-    # Clock returns 0.0 for first 4 reads (init + iter1 + iter2 + iter3 starts),
-    # then jumps to 1.0 (over max_time_s=0.5).
+    # run_sa calls clock() once at start (iteration 0) and once at the top of
+    # each while-loop iteration (for the max_time_s check). Returning 0.0 for
+    # the first 4 calls keeps SA running through iterations 1-3; the 5th call
+    # returns 1.0, which is over max_time_s=0.5 and triggers termination.
     clock_calls = {"n": 0}
     def fake_clock():
         clock_calls["n"] += 1

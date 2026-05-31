@@ -197,12 +197,17 @@ def run_sa(
       shared_best_value: multiprocessing.Value('d') for cross-worker pruning, or None
       clock: time source (injected for test determinism)
     """
-    n = len(pieces)
     rng = _random.Random(seed)
 
     # Capture start_time BEFORE any work (including initial evaluation) so
     # max_time_s genuinely bounds wall-clock from caller's perspective.
     start_time = clock()
+
+    # `shared_best_value` is accepted for parameter symmetry but is NOT read by
+    # run_sa's outer loop. Cross-chain pruning happens INSIDE the evaluator
+    # closure (T9 passes it to _blf_pack_nfp's shared_best_value). Outer-loop
+    # pruning (early-stop a chain when another beats it in the greedy regime)
+    # is a possible future enhancement; not in this PR.
 
     # Fast-path: no iterations requested — return initial state without
     # touching the evaluator (some tests assert zero evaluator calls here).
@@ -229,7 +234,7 @@ def run_sa(
 
     best_order = list(initial_order)
     best_rotations = list(initial_rotations)
-    best_placements = init_placements
+    best_placements = list(init_placements)
     best_marker = init_marker
     best_util = init_util
 
@@ -295,7 +300,7 @@ def run_sa(
             if new_marker < best_marker:
                 best_order = list(new_order)
                 best_rotations = list(new_rotations)
-                best_placements = new_placements
+                best_placements = list(new_placements)
                 best_marker = new_marker
                 best_util = new_util
                 improve_count += 1
