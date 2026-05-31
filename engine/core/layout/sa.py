@@ -148,6 +148,25 @@ def _sample_move_type(rng: _random.Random) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Cooling + acceptance helpers
+# ---------------------------------------------------------------------------
+
+
+def _temperature_at(T0: float, k: int) -> float:
+    """Geometric cooling with T_MIN floor."""
+    return max(T_MIN, T0 * (COOLING_ALPHA ** k))
+
+
+def _metropolis_accept(delta: float, T: float, rng: _random.Random) -> bool:
+    """Standard Metropolis criterion.
+    - delta <= 0  → accept (strictly better OR equal)
+    - delta > 0   → accept with probability exp(-delta / T)"""
+    if delta <= 0:
+        return True
+    return rng.random() < math.exp(-delta / T)
+
+
+# ---------------------------------------------------------------------------
 # Public entry point — implementation in subsequent tasks
 # ---------------------------------------------------------------------------
 

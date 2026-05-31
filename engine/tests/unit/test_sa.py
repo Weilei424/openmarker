@@ -133,3 +133,58 @@ def test_sample_move_type_uses_weights():
         counts[sa._sample_move_type(rng)] += 1
     for move_type, count in counts.items():
         assert 900 < count < 1100, f"{move_type}: {count} (expected ~1000 ± 100)"
+
+
+import math as _math
+
+
+def test_temperature_schedule():
+    """T_k = max(T_MIN, T0 * COOLING_ALPHA ** k) within float epsilon."""
+    T0 = 100.0
+    for k in [0, 1, 10, 50, 100]:
+        expected_unfloored = T0 * (sa.COOLING_ALPHA ** k)
+        expected = max(sa.T_MIN, expected_unfloored)
+        actual = sa._temperature_at(T0, k)
+        assert _math.isclose(actual, expected, rel_tol=1e-9, abs_tol=1e-9), \
+            f"T at k={k}: expected {expected}, got {actual}"
+
+
+def test_temperature_floored_at_t_min():
+    """At very high k, T should clamp to T_MIN, not go to 0."""
+    T0 = 100.0
+    actual = sa._temperature_at(T0, k=10_000)
+    assert actual == sa.T_MIN
+
+
+def test_metropolis_accepts_all_improvements():
+    """Strictly better neighbors are accepted unconditionally."""
+    rng = random.Random(0)
+    for _ in range(100):
+        assert sa._metropolis_accept(delta=-1.0, T=1.0, rng=rng) is True
+        assert sa._metropolis_accept(delta=-100.0, T=0.001, rng=rng) is True
+
+
+def test_metropolis_accepts_equal():
+    """Zero-delta neighbors accepted (allows lateral exploration)."""
+    rng = random.Random(0)
+    for _ in range(100):
+        assert sa._metropolis_accept(delta=0.0, T=1.0, rng=rng) is True
+
+
+def test_metropolis_accept_rates_at_t0_and_tmin():
+    """At T0 with delta = 0.05 * T0 (i.e. ratio = 1/20 = e^-0.05),
+    accept probability is exp(-0.05) ≈ 0.951 — accept-rate over 2000
+    deterministic trials should land near that.
+    At T_MIN with the same delta, accept probability ≈ 0 (delta/T_MIN huge)."""
+    rng = random.Random(123)
+    T0 = 100.0
+    delta = 5.0  # delta/T0 = 0.05
+    accepts = sum(1 for _ in range(2000)
+                  if sa._metropolis_accept(delta, T0, rng))
+    # exp(-0.05) ≈ 0.9512; over 2000 trials, 3σ ≈ ±29
+    assert 1880 < accepts < 1950, f"accept rate at T0: {accepts}/2000"
+
+    rng2 = random.Random(456)
+    accepts_tmin = sum(1 for _ in range(2000)
+                       if sa._metropolis_accept(delta, sa.T_MIN, rng2))
+    assert accepts_tmin == 0, f"accept rate at T_MIN: {accepts_tmin}/2000"
