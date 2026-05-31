@@ -8,6 +8,26 @@
 
 ---
 
+## 0. Optimization priorities (binding)
+
+When trade-offs arise, optimize in this strict order:
+
+1. **Lower marker length (mm)** — primary metric. Directly tied to fabric
+   saved per cut, which is what the tool exists for.
+2. **Higher utilization (%)** — derived from marker length on a fixed
+   workload but reported separately for readability.
+3. **Layout operation duration (ms)** — distant third. Never sacrifice
+   marker length to win on time.
+
+Concretely: a 5% marker-length improvement that doubles layout time is
+*acceptable*; a 5% speedup that costs even 1% on marker length is **not**.
+This rule applies retroactively — if the bench-vs-GUI variance investigation
+(§ 5.C) reveals that any of PR #7 / PR #8's pruning regresses marker length
+in some configuration, the pruning behavior must be re-evaluated under this
+rule, regardless of the speedup it delivers.
+
+---
+
 ## 1. Headline benchmark
 
 Canonical real-workload benchmark used for all gain comparisons:
@@ -18,11 +38,11 @@ pieces × 10 identical copies each).
 
 | Source                                                | Marker length (mm) | Utilization | Notes                                                        |
 | ----------------------------------------------------- | ------------------ | ----------- | ------------------------------------------------------------ |
-| Commercial reference                                  | 10599              | 86.1%       | Out-of-scope target. ~13% better than current OpenMarker.    |
-| OpenMarker pre-PR-#7 baseline                         | 11699              | 79.4%       | ~7pp gap that motivated PRs #7–#10.                          |
-| **Current unclustered NFP-BLF** (effort=5, this PR)   | **12249**          | **75.83%**  | **The bar to beat. All algorithm changes are measured against this.** |
-| Clustering — bbox path (off by default, opt-in)       | 29958              | 31.00%      | +145% regression. Mechanism shipped opt-in; see §4.          |
-| Clustering — union path (off by default, opt-in)      | 27336              | 33.98%      | Beats bbox by ~8% but still loses to unclustered. See §4.    |
+| Commercial reference                                  | 10599              | 86.1%       | Out-of-scope aspirational target. ~9% better than the bar.   |
+| **OpenMarker pre-PR-#7 baseline (the bar to beat)**   | **11699**          | **79.4%**   | **Historical best on this workload — and what the 2026-05-30 manual GUI run reproduced exactly. All future algorithm changes must hit ≤ 11699mm marker / ≥ 79.4% utilization on this workload to count as a win.** |
+| Current bench unclustered NFP-BLF (effort=5)          | 12249              | 75.83%      | Known regression vs the bar (+4.7% marker, −3.6pp util). Likely tied to the bench-vs-GUI variance (§ 5.C) — under investigation. **Not** the bar to beat; do not use this as a comparison anchor for new work. |
+| Clustering — bbox path (off by default, opt-in)       | 29958              | 31.00%      | +156% regression vs the bar. Mechanism shipped opt-in; see §4. |
+| Clustering — union path (off by default, opt-in)      | 27336              | 33.98%      | +134% regression vs the bar. Beats bbox by ~8% but still loses. See §4. |
 
 **Bench script:** `engine/tests/bench_clustering.py`. Run with:
 
