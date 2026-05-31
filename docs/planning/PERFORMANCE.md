@@ -87,11 +87,11 @@ expansion, oversized-group passthrough).
 **Result: regresses sample_2.dxf × 10 by +145%** (29958mm vs 12249mm) because
 rigid bbox super-pieces can't interleave with other piece types in shared
 fabric rows. Shipped off (`disable_clustering: bool = True`); preserved as a
-per-group fallback for the union path (PR #10).
+per-group fallback for the union path (the 2026-05-26 work).
 
 See §4 for opt-in instructions; the mechanism is kept in the tree.
 
-### PR #10 — True-union polygon clusters (opt-in alternative)
+### True-union polygon clusters (2026-05-26, opt-in alternative)
 
 Adds `cluster_polygon: 'union' | 'bbox' = 'union'` to `auto_layout_polygon`.
 `pack_cluster_union` runs an inner NFP-BLF on each group's copies with
@@ -136,7 +136,7 @@ always rebuild per-worker caches.
 
 ## 4. Disabled-by-default approaches — code map + opt-in
 
-> Both clustering paths (bbox from PR #9, union from PR #10) are present in
+> Both clustering paths (bbox from PR #9, union from the 2026-05-26 work) are present in
 > the engine but disabled by default because neither beats unclustered
 > NFP-BLF on the headline workload. The mechanisms are correct, tested, and
 > ready to re-enable the moment a workload (or a follow-up algorithm change)
@@ -173,7 +173,7 @@ always rebuild per-worker caches.
   when union returns MultiPolygon or stays over cap after simplify. Inner-BLF
   shim params live on `engine/core/layout/heuristic.py::_blf_pack_nfp`
   (`override_rotations`, `skip_validation`).
-- **Why disabled:** structural — see PR #10 (§2). Union beats bbox by ~8%
+- **Why disabled:** structural — see § 2's true-union polygon clusters entry. Union beats bbox by ~8%
   but still ~2× worse than unclustered BLF on workloads where every
   base_id has copies (no singletons left to slot into cluster bays).
 - **Opt-in invocation:**
@@ -276,7 +276,7 @@ Add new entries here as work progresses. Each entry should record:
 
 ### 2026-05-26 — Union clusters don't beat unclustered BLF on homogeneous garment workloads
 
-- **What:** True-union polygon clusters (PR #10). Cluster polygon = Shapely
+- **What:** True-union polygon clusters (2026-05-26). Cluster polygon = Shapely
   union of inner-NFP-BLF-packed copies. Replaces PR #9's rigid bbox
   super-piece with a polygon that exposes perimeter bays.
 - **Why:** Bbox clustering (PR #9) regressed garment workloads by +145%.
@@ -295,7 +295,7 @@ Add new entries here as work progresses. Each entry should record:
 ### 2026-05-30 — Partial clustering shipped opt-in; structural barrier confirmed
 
 - **What:** Added `cluster_fraction: float = 1.0` knob to `pre_cluster_pieces` (and forwarded through `auto_layout_polygon`). Per-group split: `k = floor(N * cluster_fraction)` copies cluster; remaining `N - k` join outer BLF as singletons. Min-cluster promotion: `k < 2` → whole group becomes singletons.
-- **Why:** PR #10's § 6 entry's structural finding ("on `sample_2.dxf × 10`, every base id has 10 copies → no singletons left to fill cluster bays") implied that holding back some copies as singletons might let the outer BLF interleave them into the cluster perimeter bays.
+- **Why:** The 2026-05-26 § 6 entry's structural finding ("on `sample_2.dxf × 10`, every base id has 10 copies → no singletons left to fill cluster bays") implied that holding back some copies as singletons might let the outer BLF interleave them into the cluster perimeter bays.
 - **Result:** Bench sweep on `sample_2.dxf × 10` at fabric=1651mm bi-grain, effort=5:
 
   | `cluster_fraction` | Marker length (mm) | Utilization | Time (ms) |

@@ -166,7 +166,7 @@ Task checklist:
 - [x] Serial branch pruning (PR #7). See PERFORMANCE.md § 2.
 - [x] Parallel branch pruning + `disable_pruning` toggle (PR #8). See PERFORMANCE.md § 2.
 - [x] Identical-piece clustering — bbox path. Opt-in only (regresses garment workloads). PR #9. See PERFORMANCE.md § 2 + § 4.1.
-- [x] Identical-piece clustering — union path. Opt-in only (structural barrier documented). PR #10. See PERFORMANCE.md § 2 + § 4.2.
+- [x] Identical-piece clustering — union path. Opt-in only (structural barrier documented). Committed direct-to-main 2026-05-26 (no GitHub PR). See PERFORMANCE.md § 2 + § 4.2.
 - [~] Algorithm follow-ups — partial clustering (`cluster_fraction` knob) shipped opt-in; remaining items in PERFORMANCE.md § 5.
 
 ### Phase 7 — Export
