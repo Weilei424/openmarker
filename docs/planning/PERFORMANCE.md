@@ -446,8 +446,11 @@ Add new entries here as work progresses. Each entry should record:
   cooling rate, neighbor weights); (b) larger iteration counts (sa=500,
   sa=1000) once outer-loop pruning is added to avoid the current ~11min
   wall-clock at sa=200; (c) GA driver on the shared SA scaffolding;
-  (d) per-worker different warm-start ranking (currently all chains seed
-  from rank-0; deferred multi-warm-start may help diversity).
+  (d) when K (worker count) exceeds the warm-start pool size (up to 8 on
+  bi-grain workloads), chains beyond rank-(len-1) currently modulo-cycle
+  and duplicate earlier starts — an even more diverse seeding strategy
+  (e.g., random permutation of warm_starts[0] for surplus chains) may
+  help when K > 8.
 - **Mechanism preserved at:** `engine/core/layout/sa.py` (driver) +
   `engine/core/layout/heuristic.py::_run_sa_phase` (orchestration). Opt-in
   instructions in § 4.6.

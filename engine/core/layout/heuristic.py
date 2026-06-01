@@ -1090,8 +1090,9 @@ def _run_sa_phase(
             pass  # defensive: cannot trigger today (sa_shared_best stays at inf
                   # in serial mode), but mirrors the parallel branch's handling
                   # so a future change updating the shared value mid-run won't crash
-        except CancellationError:
-            pass  # fall through to aggregation with whatever we have
+        # CancellationError intentionally NOT caught: matches the pre-SA path
+        # (which raises from _blf_pack_nfp directly). UI expects Stop to produce
+        # a cancellation response, not a silent success with the warm-start.
     else:
         with ProcessPoolExecutor(
             max_workers=workers,
