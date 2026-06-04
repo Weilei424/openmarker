@@ -454,3 +454,18 @@ Add new entries here as work progresses. Each entry should record:
 - **Mechanism preserved at:** `engine/core/layout/sa.py` (driver) +
   `engine/core/layout/heuristic.py::_run_sa_phase` (orchestration). Opt-in
   instructions in § 4.6.
+
+- **Manual verification (post-merge sanity, 2026-06-04):** User ran the app
+  with example tests and the bench end-to-end. App tests passed.
+  Initial concern was post-bench port exhaustion (Windows showed thousands
+  of `Bound` sockets after the bench completed); root cause turned out to
+  be an unrelated long-running WeChat process leaking ~14,250 sockets over
+  several days, NOT our code. With Python no longer running, ZERO sockets
+  in any state were attributable to our bench — `ProcessPoolExecutor`
+  `with`-block teardown cleaned up workers, pipes, and IPC handles
+  correctly on Windows. `multiprocessing.Value("d", ...)` uses
+  `CreateFileMapping` (shared memory), so SA's cross-worker cutoff doesn't
+  use sockets at all. Repeated pool open/close across the bench's 6 sweep
+  entries (~12 pool lifecycle events × ~28 workers) left no accumulating
+  damage. Future bench runs could record before/after `Get-NetTCPConnection
+  | Group-Object State` snapshots to formalize this guarantee.
