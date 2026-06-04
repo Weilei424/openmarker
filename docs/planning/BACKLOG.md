@@ -168,6 +168,8 @@ Task checklist:
 - [x] Identical-piece clustering — bbox path. Opt-in only (regresses garment workloads). PR #9. See PERFORMANCE.md § 2 + § 4.1.
 - [x] Identical-piece clustering — union path. Opt-in only (structural barrier documented). Committed direct-to-main 2026-05-26 (no GitHub PR). See PERFORMANCE.md § 2 + § 4.2.
 - [x] Partial clustering (`cluster_fraction` knob). Opt-in only (structural barrier holds — best fraction 0.5 cuts full-cluster baseline in half but unclustered still wins). PR #10. See PERFORMANCE.md § 4.5 + § 6 [2026-05-30].
+- [x] SA meta-heuristic wrapper (opt-in). Multi-restart parallel chains over (order × rotation). See PERFORMANCE.md § 2 + § 4.6 + § 6 [2026-05-31].
+- [ ] GA meta-heuristic wrapper (the deferred half of the GA/SA item). Shares scaffolding with SA. See PERFORMANCE.md § 5.B.
 - [ ] Remaining clustering follow-ups (heterogeneous clustering, cluster-aware sort) + open meta items. See PERFORMANCE.md § 5.
 
 ### Phase 7 — Export

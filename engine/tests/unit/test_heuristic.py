@@ -708,3 +708,206 @@ def test_auto_layout_polygon_cluster_fraction_ignored_when_clustering_disabled()
     )
     # Bit-identical: cluster_fraction is moot when clustering is off.
     assert marker_default == marker_low
+
+
+def test_blf_pack_nfp_presorted_true_uses_input_order():
+    """When presorted=True, _blf_pack_nfp must NOT re-sort the input.
+    Verified by passing pieces in a known-bad order (smallest-first) and
+    observing that the first placed piece is the small one — the default
+    area-DESC sort would have placed the largest first."""
+    from core.layout.heuristic import _blf_pack_nfp
+
+    small = Piece(
+        id="small", name="small",
+        polygon=[(0, 0), (50, 0), (50, 30), (0, 30)],
+        area=1500.0,
+        bbox=BoundingBox(0, 0, 50, 30, 50, 30),
+        is_valid=True, validation_notes=[], grainline_direction_deg=None,
+    )
+    large = Piece(
+        id="large", name="large",
+        polygon=[(0, 0), (200, 0), (200, 150), (0, 150)],
+        area=30000.0,
+        bbox=BoundingBox(0, 0, 200, 150, 200, 150),
+        is_valid=True, validation_notes=[], grainline_direction_deg=None,
+    )
+
+    # Default sort (presorted=False) places large first.
+    placements_default, _, _ = _blf_pack_nfp(
+        [small, large], fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+    )
+    assert placements_default[0].piece_id == "large"
+
+    # presorted=True respects input order — small placed first.
+    placements_presorted, _, _ = _blf_pack_nfp(
+        [small, large], fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        presorted=True,
+    )
+    assert placements_presorted[0].piece_id == "small"
+
+
+def test_blf_pack_nfp_override_rotations_per_piece_shape():
+    """When override_rotations is list[list[float]] with len matching pieces,
+    BLF must use per-piece rotation lists rather than uniform. Verified by
+    forcing two identical no-grainline pieces to take DIFFERENT rotations."""
+    from core.layout.heuristic import _blf_pack_nfp
+
+    # Two identical rectangles, no grainline (so allowed rotations = full 360).
+    a = Piece(
+        id="a", name="a",
+        polygon=[(0, 0), (100, 0), (100, 40), (0, 40)],
+        area=4000.0,
+        bbox=BoundingBox(0, 0, 100, 40, 100, 40),
+        is_valid=True, validation_notes=[], grainline_direction_deg=None,
+    )
+    b = Piece(
+        id="b", name="b",
+        polygon=[(0, 0), (100, 0), (100, 40), (0, 40)],
+        area=4000.0,
+        bbox=BoundingBox(0, 0, 100, 40, 100, 40),
+        is_valid=True, validation_notes=[], grainline_direction_deg=None,
+    )
+
+    # Per-piece: a at 0°, b at 90° (a is 100x40 wide, b is 40x100 tall).
+    placements, _, _ = _blf_pack_nfp(
+        [a, b], fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+        presorted=True,
+        override_rotations=[[0.0], [90.0]],
+    )
+    assert len(placements) == 2
+    by_id = {p.piece_id: p for p in placements}
+    assert by_id["a"].rotation_deg == 0.0
+    assert by_id["b"].rotation_deg == 90.0
+
+
+# --- SA parameter validation tests ---
+
+def _two_simple_pieces():
+    """Helper: two pieces small enough to fit comfortably on a 500mm fabric."""
+    return [
+        Piece(
+            id="a", name="a",
+            polygon=[(0, 0), (50, 0), (50, 30), (0, 30)],
+            area=1500.0,
+            bbox=BoundingBox(0, 0, 50, 30, 50, 30),
+            is_valid=True, validation_notes=[], grainline_direction_deg=0.0,
+        ),
+        Piece(
+            id="b", name="b",
+            polygon=[(0, 0), (60, 0), (60, 40), (0, 40)],
+            area=2400.0,
+            bbox=BoundingBox(0, 0, 60, 40, 60, 40),
+            is_valid=True, validation_notes=[], grainline_direction_deg=0.0,
+        ),
+    ]
+
+
+def test_auto_layout_rejects_negative_sa_iterations():
+    from core.layout.heuristic import auto_layout_polygon
+    with pytest.raises(ValueError, match="sa_iterations"):
+        auto_layout_polygon(
+            _two_simple_pieces(), fabric_width_mm=500, grain_mode="single",
+            fabric_grain_deg=0.0, sa_iterations=-1,
+        )
+
+
+def test_auto_layout_rejects_sa_with_clustering_on():
+    from core.layout.heuristic import auto_layout_polygon
+    with pytest.raises(ValueError, match="cannot be combined"):
+        auto_layout_polygon(
+            _two_simple_pieces(), fabric_width_mm=500, grain_mode="single",
+            fabric_grain_deg=0.0, sa_iterations=10, disable_clustering=False,
+        )
+
+
+def test_auto_layout_rejects_zero_sa_max_time():
+    from core.layout.heuristic import auto_layout_polygon
+    with pytest.raises(ValueError, match="sa_max_time_s"):
+        auto_layout_polygon(
+            _two_simple_pieces(), fabric_width_mm=500, grain_mode="single",
+            fabric_grain_deg=0.0, sa_iterations=10, sa_max_time_s=0.0,
+        )
+
+
+def test_auto_layout_default_sa_params_unchanged_behavior():
+    """Without any sa_* argument, behavior is identical to before this PR.
+    Smoke test: two-piece call returns a valid layout with finite marker."""
+    from core.layout.heuristic import auto_layout_polygon
+    placements, marker, util = auto_layout_polygon(
+        _two_simple_pieces(), fabric_width_mm=500, grain_mode="single", fabric_grain_deg=0.0,
+    )
+    assert len(placements) == 2
+    assert marker > 0
+    assert 0 < util <= 100
+
+
+def test_warm_start_retention_unused_when_sa_disabled():
+    """sa_iterations=0 must NOT trigger warm-start retention bookkeeping.
+    Regression guard: result of a default call must match itself across two runs
+    with the same inputs (no nondeterminism introduced)."""
+    from core.layout.heuristic import auto_layout_polygon
+    pieces = _two_simple_pieces()
+    p1, m1, u1 = auto_layout_polygon(pieces, 500, "single", 0.0)
+    p2, m2, u2 = auto_layout_polygon(pieces, 500, "single", 0.0)
+    assert m1 == m2
+    assert u1 == u2
+    assert [pl.piece_id for pl in p1] == [pl.piece_id for pl in p2]
+
+
+def test_sa_iterations_50_monotone_against_warmstart():
+    """SA with iterations > 0 must produce marker <= the warm-start (sa_iterations=0)
+    marker for the same input + same seed. Sound by construction (warm-start
+    always retained as a candidate)."""
+    from core.layout.heuristic import auto_layout_polygon
+    pieces = _two_simple_pieces()
+    _, marker_baseline, _ = auto_layout_polygon(
+        pieces, 500, "single", 0.0, sa_iterations=0,
+    )
+    _, marker_sa, _ = auto_layout_polygon(
+        pieces, 500, "single", 0.0, sa_iterations=50, sa_seed=7,
+    )
+    assert marker_sa <= marker_baseline + 1e-9
+
+
+def test_sa_parallel_determinism():
+    """Two parallel SA runs with same sa_seed must produce identical results."""
+    from core.layout.heuristic import auto_layout_polygon
+    pieces = _two_simple_pieces()
+    _, m1, _ = auto_layout_polygon(
+        pieces, 500, "single", 0.0, effort=2, sa_iterations=20, sa_seed=42,
+    )
+    _, m2, _ = auto_layout_polygon(
+        pieces, 500, "single", 0.0, effort=2, sa_iterations=20, sa_seed=42,
+    )
+    assert m1 == m2
+
+
+def test_sa_with_disable_pruning_runs():
+    """sa_iterations + disable_pruning=True must run to completion (composability)."""
+    from core.layout.heuristic import auto_layout_polygon
+    pieces = _two_simple_pieces()
+    placements, marker, util = auto_layout_polygon(
+        pieces, 500, "single", 0.0,
+        sa_iterations=20, disable_pruning=True, sa_seed=1,
+    )
+    assert len(placements) == 2
+    assert marker > 0
+
+
+def test_sa_max_time_s_terminates_fast():
+    """sa_max_time_s=0.1 with sa_iterations=10000 must return within ~1s
+    (well under what 10k BLF iterations would take), with at minimum the warm-start."""
+    import time as _t
+    from core.layout.heuristic import auto_layout_polygon
+    pieces = _two_simple_pieces()
+    _, marker_warm, _ = auto_layout_polygon(
+        pieces, 500, "single", 0.0, sa_iterations=0,
+    )
+    start = _t.perf_counter()
+    _, marker_sa, _ = auto_layout_polygon(
+        pieces, 500, "single", 0.0,
+        sa_iterations=10_000, sa_max_time_s=0.1, sa_seed=3,
+    )
+    elapsed = _t.perf_counter() - start
+    assert elapsed < 2.0, f"SA took {elapsed:.2f}s (cap was 0.1s)"
+    assert marker_sa <= marker_warm + 1e-9
