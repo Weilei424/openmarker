@@ -1,6 +1,15 @@
 from __future__ import annotations
 
 
+# Fabric grain is fixed at 90°: the grain (warp) runs along the fabric roll
+# length — the +Y axis BLF minimizes as marker length — matching standard
+# cutting-room markers. Single source of truth for the locked value; the
+# frontend mirrors it (frontend/src/app/App.tsx). The engine still accepts an
+# arbitrary `fabric_grain_deg` for internal/test flexibility, but all production
+# callers (API, benches) use this constant. See docs/planning/PERFORMANCE.md §5.C.
+FABRIC_GRAIN_DEG = 90.0
+
+
 def allowed_rotations(
     grain_mode: str,
     fabric_grain_deg: float,
