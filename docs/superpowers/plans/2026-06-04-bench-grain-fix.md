@@ -38,6 +38,7 @@
 | `engine/tests/bench_sa.py` | Modify | Use the constant (two call sites). |
 | `engine/tests/bench_nfp_cache.py` | Modify | Route its hardcoded `90.0` through the constant (behavior-neutral). |
 | `docs/planning/PERFORMANCE.md` | Modify | Correct § 0/§ 1/§ 5.C; add § 6 entry; annotate SA tables. |
+| `docs/planning/BACKLOG.md` | Modify | One-line progress entry under "Phase 6 follow-ups — algorithm performance". |
 
 ---
 
@@ -394,16 +395,24 @@ After the `### 2026-05-31 — Simulated annealing wrapper shipped opt-in` sectio
 5b. In § 4.6 under **Bench:**, append: `These figures predate the 90° grain lock (§ 6 [2026-06-04]) and are superseded.`
 5c. In § 5.B's SA row, append to the cell: ` (measured at grain=0; superseded — re-baseline at grain=90 pending.)`
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: BACKLOG one-line entry**
+
+In `docs/planning/BACKLOG.md`, under `### Phase 6 follow-ups — algorithm performance`, right after the SA wrapper line (`- [x] SA meta-heuristic wrapper (opt-in)...`), add:
+```markdown
+- [x] Lock fabric grain at 90° + fix bench/docs (resolves §5.C bench-vs-GUI variance). See PERFORMANCE.md § 5.C + § 6 [2026-06-04].
+```
+
+- [ ] **Step 7: Commit**
 
 ```
-git -C D:/openmarker/.worktrees/perf-followups add docs/planning/PERFORMANCE.md
+git -C D:/openmarker/.worktrees/perf-followups add docs/planning/PERFORMANCE.md docs/planning/BACKLOG.md
 git -C D:/openmarker/.worktrees/perf-followups commit -m "docs(perf): resolve §5.C variance — fabric grain locked at 90°
 
 - docs/planning/PERFORMANCE.md: §0 pruning exonerated; §1 canonical benchmark
   and unclustered row corrected to grain=90 (11699.4/79.39%); clustering rows
   re-measured; §5.C marked resolved with experiment table; §6 2026-06-04 entry;
   SA tables annotated as grain=0/superseded
+- docs/planning/BACKLOG.md: one-line entry for the grain lock under Phase 6 follow-ups
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ```
