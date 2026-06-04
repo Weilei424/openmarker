@@ -136,6 +136,35 @@ that the union mechanism itself works. Bench gate relaxed from
 **Spec:** `docs/superpowers/specs/2026-05-26-true-union-polygon-clusters-design.md`
 **Plan:** `docs/superpowers/plans/2026-05-26-true-union-polygon-clusters.md`
 
+### This PR — Simulated annealing meta-heuristic wrapper (opt-in)
+
+Wraps `_blf_pack_nfp` as the fitness function of a Metropolis SA chain over
+`(piece-ordering × per-piece rotation choice)` with multi-restart parallelism
+on the existing `ProcessPoolExecutor` scaffold. Three new opt-in params on
+`auto_layout_polygon`: `sa_iterations`, `sa_max_time_s`, `sa_seed`.
+Engine-Python-only (no API/UI). Mutually exclusive with
+`disable_clustering=False`.
+
+Bench result on the canonical workload (sample_2.dxf × 10, fabric=1651mm,
+bi-grain, effort=5):
+
+| `sa_iterations` | Marker length (mm) | Utilization | Time (ms) |
+|---|---|---|---|
+| 0 (warm-start only) | 12249.1 | 75.83% | 12020 |
+| 50 (seed 42) | 12176.2 | 76.28% | 190743 |
+| 100 (seed 42) | 12164.3 | 76.36% | 353483 |
+| 200 (seed 42) | 12077.5 | 76.90% | 678065 |
+
+G5 (beat the bar 11699mm) status: **FAIL**. Best SA marker in the main sweep
+was 12077.5mm at sa=200/seed=42 — short of the bar by 378mm (3.2%). A
+separate determinism check at sa=50/seed=99 produced 11977mm (short by
+278mm / 2.4%), revealing that seed choice matters more than iteration count
+at these scales. Filed as a follow-up tuning task (T0_FACTOR sweep,
+alternative cooling, adaptive neighbor weights).
+
+**Code:** `engine/core/layout/sa.py` (driver), `engine/core/layout/heuristic.py`
+(orchestration + `_blf_pack_nfp` shape extensions). See § 4.6 for the code map.
+
 ---
 
 ## 3. NFP cache and per-call optimizations (shipped earlier, baseline behavior)
@@ -241,6 +270,41 @@ the bench is the path to flipping the default.
 - **Tests:** 13 unit tests in `engine/tests/unit/test_clustering.py` (validation, split math, min-cluster promotion, heterogeneous groups, fallback ladder, bbox-path coverage) + 3 integration tests in `engine/tests/unit/test_heuristic.py`.
 - **Bench:** `engine/tests/bench_clustering.py` sweeps `[1.0, 0.9, 0.8, 0.7, 0.5]` on `sample_2.dxf × 10` at `effort=5`. Best fraction reported in § 6's 2026-05-30 entry below.
 
+### 4.6 SA meta-heuristic (`sa_iterations > 0`)
+
+- **Code:** `engine/core/layout/sa.py` — `run_sa` driver + hyperparameter
+  constants. `engine/core/layout/heuristic.py::_run_sa_phase` orchestrates
+  the multi-restart chains. `_init_sa_worker` + `_run_sa_chain` are the
+  ProcessPoolExecutor worker entries.
+- **Why opt-in:** First-PR scope per design spec
+  (`docs/superpowers/specs/2026-05-31-sa-meta-heuristic-design.md`).
+  Same policy as `disable_clustering` / `cluster_fraction` in § 4.3.
+- **Opt-in invocation:**
+  ```python
+  from core.layout.heuristic import auto_layout_polygon
+  placements, marker, util = auto_layout_polygon(
+      pieces, fabric_width_mm=1651, grain_mode="bi", fabric_grain_deg=0.0,
+      effort=5, sa_iterations=200, sa_seed=42,
+  )
+  ```
+- **Mutual exclusion:** `sa_iterations > 0` combined with `disable_clustering=False`
+  raises `ValueError`. Combining SA with clustering is a future-work item
+  (would need a per-chain decision whether to operate on cluster super-pieces
+  or expanded pieces).
+- **Constants** (module-level in `sa.py`, no public-API tunables in this PR):
+  - `T0_FACTOR = 0.05` — initial temperature as a fraction of warm-start marker
+  - `COOLING_ALPHA = 0.95` — geometric cooling per iteration
+  - `T_MIN = 1e-3` — temperature floor
+  - `REVERSE_WINDOW_FRACTION = 0.25` — reverse-move window cap
+  - `NO_GRAINLINE_ROTATION_CAP = 4` — angles `[0, 90, 180, 270]` for no-grainline pieces
+  - `MOVE_WEIGHTS = {"swap": 1.0, "reverse": 1.0, "rotation_flip": 1.0}`
+- **Tests:** `engine/tests/unit/test_sa.py` (19 unit tests against stub
+  evaluator) + `engine/tests/unit/test_heuristic.py` (validation + integration
+  tests for monotone non-worsening, parallel determinism, composability with
+  `disable_pruning`, `sa_max_time_s` termination).
+- **Bench:** `engine/tests/bench_sa.py` sweeps `sa_iterations` on the canonical
+  workload with 4 PR-blocking gates + 1 aspirational gate.
+
 ---
 
 ## 5. Open follow-ups (ranked by gain-per-effort)
@@ -272,7 +336,7 @@ the bench is the path to flipping the default.
 | **More sort strategies (8–12 instead of 4)** — add perimeter-DESC, diagonal-DESC, aspect-ratio-extremes-first, hilbert-curve ordering. One named function each; benefits compose with parallel pruning. | Low         | 0.5–2pp |
 | **Grain-compatible mirroring** — when `grain_mode == "bi"`, allow horizontal reflection of pieces (flip x-coords within bbox center). Adds reflected copies to the rotation candidate set. | Medium      | 1–3pp |
 | **Concave-bay fill pass** — post-pass after primary BLF: for each large piece with a concave bay (armhole curves), tuck small unplaced pieces into the bay region. Bays detected via polygon difference of bbox minus polygon. | High — bay-detection geometry + second placement pass | 1–3pp on garment workloads |
-| **GA / SA meta-heuristic wrapper** — wrap the existing NFP-BLF as the fitness function inside a genetic or simulated-annealing search over piece-ordering permutations and per-piece rotation choices. Iterative — runs BLF many times with budget bounded by a time/iteration cap. Composes naturally with the other items (they all become inner-loop primitives the meta-heuristic explores). | High — adds an outer search loop; needs parallelization design | 3–8pp (biggest swing) |
+| **SA meta-heuristic wrapper** — SHIPPED OPT-IN (this PR; see § 4.6). Wraps NFP-BLF as fitness; multi-restart parallel chains; iterations + wall-clock budget. **GA half deferred to a follow-up PR** — same scaffolding will host the GA driver. | Medium for SA (shipped); High for GA follow-up | 3–8pp aspirational; actual SA gain on canonical workload at sa=200 = 1.4% (12249→12077mm) |
 
 ### 5.C Pruning meta-improvements (compose with PRs #7/#8)
 
@@ -352,3 +416,56 @@ Add new entries here as work progresses. Each entry should record:
 - **Mechanism preserved at:** `engine/core/layout/clustering.py::pre_cluster_pieces` (split logic) + `engine/core/layout/heuristic.py::auto_layout_polygon` (parameter forwarding). Opt-in instructions in § 4.5.
 
 - **Manual GUI verification (2026-05-30):** sample_2 × 10 at fabric=1651mm bi-grain returned 11699mm/79.4% (17s parallel-Max, ~34s Eco serial). This run does **NOT** validate partial clustering — `POST /auto-layout` does not accept `cluster_fraction`/`cluster_polygon`/`disable_clustering` (see § 4.3), so the GUI always hits the unclustered default path. The 11699mm number happens to match the historical "pre-PR-#7 baseline" row in § 1 while diverging from this PR's bench `off`=12249mm on the same parameters. Bench-vs-GUI variance investigation filed as a §5.C bullet.
+
+### 2026-05-31 — Simulated annealing wrapper shipped opt-in
+
+- **What:** Added `sa_iterations`, `sa_max_time_s`, `sa_seed` opt-in params
+  on `auto_layout_polygon`. New `engine/core/layout/sa.py` module owns the
+  Metropolis SA chain (geometric cooling, mixed swap/reverse/rotation-flip
+  neighbors, warm-start seeded T0). Multi-restart parallel on the existing
+  ProcessPoolExecutor scaffold (K = `_worker_count(effort)` chains;
+  per-chain seed = `sa_seed + worker_index`). Surgical changes to
+  `_blf_pack_nfp` (`presorted` flag + per-piece `override_rotations` shape)
+  let SA drive ordering + rotation directly.
+- **Why:** PERFORMANCE.md § 0 priority is marker length first. Current
+  best-of-4 sort strategies explore only 4 hand-picked orderings out of
+  N! possibilities and never explore per-piece rotation outside what the
+  inner BLF's rotation sweep happens to pick. SA generalizes both axes.
+  The 2026-05-30 § 0 framing also flagged the gap between current bench
+  baseline (12249mm) and the bar (11699mm) as something to close.
+- **Result:** Main sweep (`sa_iterations ∈ [50, 100, 200]` at seed 42):
+  marker dropped monotonically from 12176→12164→12077mm. A determinism
+  check at sa=50/seed=99 produced 11977mm — better than the sa=200/seed=42
+  result of 12077mm. Suggests seed choice matters more than iteration count
+  at these scales; SA on this workload is multimodal. **G5 (beat the bar
+  11699mm) did NOT pass** — best SA was 12077mm (sa=200/seed=42), short by
+  378mm (3.2%); seed-99 sub-run reached 11977mm, still short by 278mm (2.4%).
+  G1–G4 (correctness, monotone, determinism, default unchanged) all passed.
+- **Decision:** Shipped opt-in per the spec's disposition section regardless
+  of G5. Filed follow-ups: (a) hyperparameter tuning sweep (T0_FACTOR,
+  cooling rate, neighbor weights); (b) larger iteration counts (sa=500,
+  sa=1000) once outer-loop pruning is added to avoid the current ~11min
+  wall-clock at sa=200; (c) GA driver on the shared SA scaffolding;
+  (d) when K (worker count) exceeds the warm-start pool size (up to 8 on
+  bi-grain workloads), chains beyond rank-(len-1) currently modulo-cycle
+  and duplicate earlier starts — an even more diverse seeding strategy
+  (e.g., random permutation of warm_starts[0] for surplus chains) may
+  help when K > 8.
+- **Mechanism preserved at:** `engine/core/layout/sa.py` (driver) +
+  `engine/core/layout/heuristic.py::_run_sa_phase` (orchestration). Opt-in
+  instructions in § 4.6.
+
+- **Manual verification (post-merge sanity, 2026-06-04):** User ran the app
+  with example tests and the bench end-to-end. App tests passed.
+  Initial concern was post-bench port exhaustion (Windows showed thousands
+  of `Bound` sockets after the bench completed); root cause turned out to
+  be an unrelated long-running WeChat process leaking ~14,250 sockets over
+  several days, NOT our code. With Python no longer running, ZERO sockets
+  in any state were attributable to our bench — `ProcessPoolExecutor`
+  `with`-block teardown cleaned up workers, pipes, and IPC handles
+  correctly on Windows. `multiprocessing.Value("d", ...)` uses
+  `CreateFileMapping` (shared memory), so SA's cross-worker cutoff doesn't
+  use sockets at all. Repeated pool open/close across the bench's 6 sweep
+  entries (~12 pool lifecycle events × ~28 workers) left no accumulating
+  damage. Future bench runs could record before/after `Get-NetTCPConnection
+  | Group-Object State` snapshots to formalize this guarantee.
