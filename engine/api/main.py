@@ -24,6 +24,7 @@ from core.layout.cancellation import (
     reset_cancellation,
 )
 from core.layout.heuristic import auto_layout_polygon
+from core.layout.grain import FABRIC_GRAIN_DEG
 from core.models.piece import BoundingBox, Piece as PieceModel
 
 app = FastAPI(title="OpenMarker Engine", version="0.1.0")
@@ -97,7 +98,7 @@ async def auto_layout_endpoint(request: Request) -> dict:
         "pieces": [...],            // Piece objects from /import-dxf
         "fabric_width_mm": 1500,
         "grain_mode": "single",     // "single" | "bi"
-        "grain_direction_deg": 0,
+        "grain_direction_deg": 0,   // IGNORED — grain is locked at 90° (FABRIC_GRAIN_DEG)
         "filename": "...",          // required
         "copies": 1,                // optional, defaults to 1
         "disable_nfp_cache": false, // optional, A/B benchmark toggle
@@ -126,7 +127,6 @@ async def auto_layout_endpoint(request: Request) -> dict:
         raise HTTPException(status_code=422, detail=f"`grain_mode` must be 'single' or 'bi', got {grain_mode!r}")
 
     fabric_width_mm = float(body.get("fabric_width_mm", 1500))
-    grain_direction_deg = float(body.get("grain_direction_deg", 0.0))
     disable_nfp_cache = bool(body.get("disable_nfp_cache", False))
     effort = int(body.get("effort", 1))
     if effort < 1 or effort > 5:
@@ -200,7 +200,7 @@ async def auto_layout_endpoint(request: Request) -> dict:
     # (notably /cancel-layout, /ping) stay responsive while it runs.
     def _do_layout():
         return auto_layout_polygon(
-            pieces, fabric_width_mm, grain_mode, grain_direction_deg,
+            pieces, fabric_width_mm, grain_mode, FABRIC_GRAIN_DEG,
             disable_nfp_cache=disable_nfp_cache,
             effort=effort,
         )

@@ -16,7 +16,7 @@ from shapely.ops import unary_union
 from core.layout.cancellation import CancellationError, is_cancelled
 from core.layout.clustering import Cluster, pre_cluster_pieces, expand_cluster_placement
 from core.layout.grain import allowed_rotations
-from core.layout.sa import WarmStart, run_sa, NO_GRAINLINE_ROTATION_CAP
+from core.layout.sa import WarmStart, run_sa, NO_GRAINLINE_ROTATION_CAP, SAConfig
 from core.models.piece import Piece
 
 
@@ -93,6 +93,7 @@ _worker_sa_fabric_grain_deg: float = 0.0
 _worker_sa_allowed_rotations: list[list[float]] = []
 _worker_sa_disable_nfp_cache: bool = False
 _worker_sa_disable_pruning: bool = False
+_worker_sa_config: "SAConfig | None" = None
 
 
 def _init_sa_worker(
@@ -104,11 +105,12 @@ def _init_sa_worker(
     allowed_rotations_per_piece,
     disable_nfp_cache,
     disable_pruning,
+    sa_config,
 ):
     global _worker_sa_shared_best, _worker_sa_warm_starts, _worker_sa_blf_input
     global _worker_sa_fabric_width_mm, _worker_sa_fabric_grain_deg
     global _worker_sa_allowed_rotations, _worker_sa_disable_nfp_cache
-    global _worker_sa_disable_pruning
+    global _worker_sa_disable_pruning, _worker_sa_config
     _worker_sa_shared_best = shared_best_value
     _worker_sa_warm_starts = warm_starts
     _worker_sa_blf_input = blf_input
@@ -117,6 +119,7 @@ def _init_sa_worker(
     _worker_sa_allowed_rotations = allowed_rotations_per_piece
     _worker_sa_disable_pruning = disable_pruning
     _worker_sa_disable_nfp_cache = disable_nfp_cache
+    _worker_sa_config = sa_config
 
 
 def _run_sa_chain(worker_index: int, iterations: int, max_time_s: float | None, seed: int):
@@ -165,6 +168,7 @@ def _run_sa_chain(worker_index: int, iterations: int, max_time_s: float | None, 
         seed=seed,
         evaluator=evaluator,
         shared_best_value=_worker_sa_shared_best,
+        config=_worker_sa_config,
     )
 
 
@@ -789,6 +793,7 @@ def auto_layout_polygon(
     sa_iterations: int = 0,
     sa_max_time_s: float | None = None,
     sa_seed: int = 0,
+    sa_config: "SAConfig | None" = None,
 ) -> tuple[list[Placement], float, float]:
     """No-Fit-Polygon-based Bottom-Left-Fill (slow mode, accurate).
 
@@ -917,7 +922,7 @@ def auto_layout_polygon(
             return _run_sa_phase(
                 best, warm_starts, blf_input, fabric_width_mm, grain_mode,
                 fabric_grain_deg, sa_iterations, sa_max_time_s, sa_seed,
-                effort, disable_nfp_cache, disable_pruning, clusters,
+                effort, disable_nfp_cache, disable_pruning, clusters, sa_config,
             )
         if clusters:
             placements, marker_length, utilization = best
@@ -988,7 +993,7 @@ def auto_layout_polygon(
         return _run_sa_phase(
             best, warm_starts, blf_input, fabric_width_mm, grain_mode,
             fabric_grain_deg, sa_iterations, sa_max_time_s, sa_seed,
-            effort, disable_nfp_cache, disable_pruning, clusters,
+            effort, disable_nfp_cache, disable_pruning, clusters, sa_config,
         )
     if clusters:
         placements, marker_length, utilization = best
@@ -1035,9 +1040,12 @@ def _run_sa_phase(
     disable_nfp_cache: bool,
     disable_pruning: bool,
     clusters: list,
+    sa_config: "SAConfig | None" = None,
 ) -> tuple[list[Placement], float, float]:
     """Run multi-restart SA chains and aggregate with warm_start_best as a
     retained candidate. SA cannot regress (best returned is always <= warm-start)."""
+    cfg = SAConfig() if sa_config is None else sa_config
+
     warm_starts_sorted = sorted(warm_starts, key=lambda ws: ws.marker)
     if not warm_starts_sorted:
         # Shouldn't happen since at least one warm-start must complete to reach
@@ -1052,10 +1060,10 @@ def _run_sa_phase(
     allowed_rotations_per_piece: list[list[float]] = []
     for p in blf_input:
         rots = allowed_rotations(grain_mode, fabric_grain_deg, p.grainline_direction_deg)
-        if len(rots) > NO_GRAINLINE_ROTATION_CAP:
+        if len(rots) > cfg.no_grainline_rotation_cap:
             # No-grainline case: cap to evenly-spaced angles.
-            step = 360.0 / NO_GRAINLINE_ROTATION_CAP
-            rots = [step * i for i in range(NO_GRAINLINE_ROTATION_CAP)]
+            step = 360.0 / cfg.no_grainline_rotation_cap
+            rots = [step * i for i in range(cfg.no_grainline_rotation_cap)]
         allowed_rotations_per_piece.append(rots)
 
     workers = _worker_count(effort)
@@ -1080,7 +1088,7 @@ def _run_sa_phase(
         _init_sa_worker(
             sa_shared_best, warm_starts_sorted, blf_input, fabric_width_mm,
             fabric_grain_deg, allowed_rotations_per_piece, disable_nfp_cache,
-            disable_pruning,
+            disable_pruning, cfg,
         )
         try:
             result = _run_sa_chain(0, sa_iterations, sa_max_time_s, sa_seed)
@@ -1100,7 +1108,7 @@ def _run_sa_phase(
             initargs=(
                 sa_shared_best, warm_starts_sorted, blf_input, fabric_width_mm,
                 fabric_grain_deg, allowed_rotations_per_piece,
-                disable_nfp_cache, disable_pruning,
+                disable_nfp_cache, disable_pruning, cfg,
             ),
         ) as pool:
             _set_current_executor(pool)

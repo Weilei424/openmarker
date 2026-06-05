@@ -40,6 +40,10 @@ def test_sa_module_exports():
     assert 0.0 < sa.REVERSE_WINDOW_FRACTION <= 1.0
     assert sa.NO_GRAINLINE_ROTATION_CAP >= 2
     assert set(sa.MOVE_WEIGHTS.keys()) == {"swap", "reverse", "rotation_flip"}
+    # rotation_flip favored 3:1 — tuned 2026-06-05 (grain=90 sweep beats the
+    # 11699mm bar at 11578.5mm). Guard against an accidental revert; see
+    # PERFORMANCE.md § 6 [2026-06-05].
+    assert sa.MOVE_WEIGHTS["rotation_flip"] == 3.0
 
 
 import random
@@ -123,16 +127,18 @@ def test_rotation_flip_handles_single_allowed_piece():
 
 
 def test_sample_move_type_uses_weights():
-    """_sample_move_type returns one of the configured move types per the
-    MOVE_WEIGHTS distribution. With equal weights, the empirical distribution
-    over 3000 draws should be roughly uniform (±50 per bucket = 3σ on a
-    binomial with p=1/3, n=3000)."""
+    """_sample_move_type returns move types per the MOVE_WEIGHTS distribution.
+    The tuned default is swap:reverse:rotation_flip = 1:1:3 (rotation_flip
+    favored — 2026-06-05 grain=90 tuning), so over 3000 draws rotation_flip
+    should dominate (~3/5 ≈ 1800) and swap/reverse each ~1/5 ≈ 600. Bounds are
+    generous (>3σ binomial)."""
     rng = random.Random(123)
     counts = {"swap": 0, "reverse": 0, "rotation_flip": 0}
     for _ in range(3000):
         counts[sa._sample_move_type(rng)] += 1
-    for move_type, count in counts.items():
-        assert 900 < count < 1100, f"{move_type}: {count} (expected ~1000 ± 100)"
+    assert 500 < counts["swap"] < 700, f"swap: {counts['swap']} (expected ~600)"
+    assert 500 < counts["reverse"] < 700, f"reverse: {counts['reverse']} (expected ~600)"
+    assert 1650 < counts["rotation_flip"] < 1950, f"rotation_flip: {counts['rotation_flip']} (expected ~1800)"
 
 
 import math as _math
@@ -372,3 +378,52 @@ def test_run_sa_terminates_at_iteration_cap():
         evaluator=stub_evaluator,
     )
     assert result.iterations_executed == 5
+
+
+def test_saconfig_defaults_match_module_constants():
+    cfg = sa.SAConfig()
+    assert cfg.t0_factor == sa.T0_FACTOR
+    assert cfg.cooling_alpha == sa.COOLING_ALPHA
+    assert cfg.t_min == sa.T_MIN
+    assert cfg.reverse_window_fraction == sa.REVERSE_WINDOW_FRACTION
+    assert cfg.no_grainline_rotation_cap == sa.NO_GRAINLINE_ROTATION_CAP
+    assert cfg.move_weights == sa.MOVE_WEIGHTS
+    assert cfg.move_weights is not sa.MOVE_WEIGHTS  # independent copy
+
+
+def test_temperature_at_respects_config_alpha_and_tmin():
+    assert sa._temperature_at(100.0, 1, alpha=0.5, t_min=1e-3) == 50.0
+    assert sa._temperature_at(100.0, 2, alpha=0.5, t_min=1e-3) == 25.0
+    assert sa._temperature_at(100.0, 100, alpha=0.5, t_min=7.0) == 7.0  # floor wins
+
+
+def test_sample_move_type_respects_weights():
+    rng = random.Random(0)
+    picks = {sa._sample_move_type(rng, {"swap": 1.0, "reverse": 0.0, "rotation_flip": 0.0})
+             for _ in range(50)}
+    assert picks == {"swap"}
+
+
+def test_reverse_move_window_fraction_caps_window():
+    rng = random.Random(3)
+    order = list(range(100))
+    new_order = sa._reverse_move(order, rng, window_fraction=0.02)  # cap=2
+    diffs = [i for i in range(100) if new_order[i] != order[i]]
+    assert len(diffs) <= 2
+
+
+def test_run_sa_honors_config_move_weights_swap_only():
+    """move_weights allowing only 'swap' → evaluator never sees a flipped rotation."""
+    pieces = [_p(f"p{i}") for i in range(5)]
+    allowed = [[0.0, 180.0] for _ in pieces]  # each piece COULD flip
+    seen = []
+
+    def stub(pieces_in_order, per_piece_rots):
+        seen.append([r[0] for r in per_piece_rots])
+        return [], 1.0, 0.0
+
+    cfg = sa.SAConfig(move_weights={"swap": 1.0, "reverse": 0.0, "rotation_flip": 0.0})
+    sa.run_sa(list(range(5)), [0.0] * 5, pieces, allowed,
+              iterations=50, max_time_s=None, seed=7, evaluator=stub, config=cfg)
+    assert seen  # evaluator was called
+    assert all(all(r == 0.0 for r in snap) for snap in seen)  # no 180 ever proposed

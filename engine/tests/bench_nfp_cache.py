@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.join(HERE, "..", ".."))
 
 from core.models.piece import Piece, BoundingBox
 from core.layout import heuristic
+from core.layout.grain import FABRIC_GRAIN_DEG
 
 
 def _piece(piece_id: str, w: float, h: float, grainline: float | None = None) -> Piece:
@@ -81,7 +82,7 @@ def _time_once(pieces: list[Piece], fabric: float, grain: str) -> tuple[float, f
     then again with a fresh cache per strategy (simulating no cache)."""
     # Cached: current production path.
     t0 = time.perf_counter()
-    heuristic.auto_layout_polygon(pieces, fabric, grain, 90.0)
+    heuristic.auto_layout_polygon(pieces, fabric, grain, FABRIC_GRAIN_DEG)
     cached_s = time.perf_counter() - t0
 
     # Uncached: monkey-patch _blf_pack_nfp to force a fresh cache per call.
@@ -92,7 +93,7 @@ def _time_once(pieces: list[Piece], fabric: float, grain: str) -> tuple[float, f
     heuristic._blf_pack_nfp = no_cache
     try:
         t0 = time.perf_counter()
-        heuristic.auto_layout_polygon(pieces, fabric, grain, 90.0)
+        heuristic.auto_layout_polygon(pieces, fabric, grain, FABRIC_GRAIN_DEG)
         uncached_s = time.perf_counter() - t0
     finally:
         heuristic._blf_pack_nfp = orig

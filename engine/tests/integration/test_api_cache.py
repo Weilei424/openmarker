@@ -379,3 +379,47 @@ async def test_auto_layout_accepts_valid_effort():
                 "effort": good,
             })
             assert res.status_code == 200, f"effort={good} should be accepted"
+
+
+def _grained_rect(piece_id: str = "g0", w: float = 400.0, h: float = 100.0,
+                  grainline: float = 0.0) -> dict:
+    """A 4:1 rectangle WITH a grainline. Unlike _square_piece (grainline=None →
+    cardinal rotations regardless of grain), this piece reorients with
+    fabric_grain_deg, so it detects whether the API honors or ignores
+    grain_direction_deg."""
+    return {
+        "id": piece_id,
+        "name": piece_id,
+        "polygon": [[0, 0], [w, 0], [w, h], [0, h]],
+        "area": w * h,
+        "bbox": {"min_x": 0, "min_y": 0, "max_x": w, "max_y": h,
+                 "width": w, "height": h},
+        "is_valid": True,
+        "validation_notes": [],
+        "grainline_direction_deg": grainline,
+    }
+
+
+@pytest.mark.asyncio
+async def test_auto_layout_ignores_grain_direction_deg():
+    """Grain is locked at FABRIC_GRAIN_DEG (90°); the request field is ignored.
+
+    A 400x100 piece with a 0° grainline in single mode orients to its long side
+    at fabric_grain=0 (rotation 0 → height 100) but to its short side at
+    fabric_grain=90 (rotation 90 → height 400). If the API honored
+    grain_direction_deg the two marker lengths would differ; locked at 90 they
+    must be identical."""
+    base = {
+        "pieces": [_grained_rect()],
+        "fabric_width_mm": 1500,
+        "grain_mode": "single",
+    }
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        # Distinct filenames so cache dedup doesn't return the first result.
+        r0 = await client.post("/auto-layout", json={
+            **base, "filename": "grain0.dxf", "grain_direction_deg": 0})
+        r90 = await client.post("/auto-layout", json={
+            **base, "filename": "grain90.dxf", "grain_direction_deg": 90})
+    assert r0.status_code == 200
+    assert r90.status_code == 200
+    assert r0.json()["marker_length_mm"] == r90.json()["marker_length_mm"]

@@ -911,3 +911,32 @@ def test_sa_max_time_s_terminates_fast():
     elapsed = _t.perf_counter() - start
     assert elapsed < 2.0, f"SA took {elapsed:.2f}s (cap was 0.1s)"
     assert marker_sa <= marker_warm + 1e-9
+
+
+def test_auto_layout_sa_config_none_matches_explicit_default():
+    """sa_config=None must be bit-identical to sa_config=SAConfig() (serial SA)."""
+    from core.layout.heuristic import auto_layout_polygon
+    from core.layout.sa import SAConfig
+    p = _two_simple_pieces()
+    _, m_none, _ = auto_layout_polygon(
+        p, fabric_width_mm=500, grain_mode="bi", fabric_grain_deg=0.0,
+        effort=1, sa_iterations=20, sa_seed=5, sa_config=None)
+    _, m_def, _ = auto_layout_polygon(
+        p, fabric_width_mm=500, grain_mode="bi", fabric_grain_deg=0.0,
+        effort=1, sa_iterations=20, sa_seed=5, sa_config=SAConfig())
+    assert m_none == m_def
+
+
+def test_auto_layout_sa_config_deterministic_parallel():
+    """A custom SAConfig is forwarded to workers and used deterministically
+    (parallel SA path: sa_iterations>=50 + effort=5)."""
+    from core.layout.heuristic import auto_layout_polygon
+    from core.layout.sa import SAConfig
+    cfg = SAConfig(t0_factor=0.1, cooling_alpha=0.90,
+                   move_weights={"swap": 2.0, "reverse": 1.0, "rotation_flip": 3.0})
+    p = _two_simple_pieces()
+    _, m1, _ = auto_layout_polygon(p, 500, "bi", 0.0, effort=5,
+                                   sa_iterations=50, sa_seed=11, sa_config=cfg)
+    _, m2, _ = auto_layout_polygon(p, 500, "bi", 0.0, effort=5,
+                                   sa_iterations=50, sa_seed=11, sa_config=cfg)
+    assert m1 == m2

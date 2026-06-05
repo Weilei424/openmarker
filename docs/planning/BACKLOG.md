@@ -169,7 +169,11 @@ Task checklist:
 - [x] Identical-piece clustering — union path. Opt-in only (structural barrier documented). Committed direct-to-main 2026-05-26 (no GitHub PR). See PERFORMANCE.md § 2 + § 4.2.
 - [x] Partial clustering (`cluster_fraction` knob). Opt-in only (structural barrier holds — best fraction 0.5 cuts full-cluster baseline in half but unclustered still wins). PR #10. See PERFORMANCE.md § 4.5 + § 6 [2026-05-30].
 - [x] SA meta-heuristic wrapper (opt-in). Multi-restart parallel chains over (order × rotation). See PERFORMANCE.md § 2 + § 4.6 + § 6 [2026-05-31].
-- [ ] GA meta-heuristic wrapper (the deferred half of the GA/SA item). Shares scaffolding with SA. See PERFORMANCE.md § 5.B.
+- [x] Lock fabric grain at 90° + fix bench/docs (resolves §5.C bench-vs-GUI variance). See PERFORMANCE.md § 5.C + § 6 [2026-06-04].
+- [x] SA hyperparameter tuning at grain=90 — rotation-flip-weighted default (`SAConfig`) beats the bar (11578.5mm vs 11699). See PERFORMANCE.md § 4.6 + § 6 [2026-06-05].
+- [ ] GA meta-heuristic wrapper (the deferred half of the GA/SA item) — its own branch + PR; reuses the `SAConfig`/worker scaffolding from the SA tuning. See PERFORMANCE.md § 5.B.
+- [ ] Expose SA to the GUI (opt-in "optimize harder") so users actually get the tuning win — `POST /auto-layout` + frontend wiring; SA is engine-Python-only today (would use the existing `/cancel-layout` + `sa_max_time_s`). See PERFORMANCE.md § 4.6.
+- [ ] Make parallel SA's improving path deterministic (deterministic only with `disable_pruning` today — timing-dependent cutoff pruning). See PERFORMANCE.md § 6 [2026-06-05].
 - [ ] Remaining clustering follow-ups (heterogeneous clustering, cluster-aware sort) + open meta items. See PERFORMANCE.md § 5.
 
 ### Phase 7 — Export

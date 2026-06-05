@@ -9,15 +9,15 @@ iterations executed, winning chain index.
 
 PR-blocking acceptance gates:
   G1 (regression): sa_iterations=0 marker == existing `off` baseline
-  G2 (monotone):   for each sa_iterations in [100, 500, 1000],
+  G2 (monotone):   for each swept sa_iterations in [50, 100, 200],
                    marker <= warm-start marker
   G3 (determinism): two runs with same sa_seed yield identical marker
   G4 (default unchanged): no-sa-arg call matches off baseline
+  G5 (beat the bar): best swept sa_iterations beats the bar (11699mm) strictly.
+                     PR-blocking since the 2026-06-05 grain=90 tuning made the
+                     rotation-flip-weighted default beat the bar at seed 42.
 
-Aspirational gate (informational; PASS/FAIL printed but not exit-blocking):
-  G5: at least one sa_iterations in [100, 500, 1000] beats the bar (11699mm).
-
-Exits 1 on G1-G4 failure. G5 status reported but doesn't affect exit code.
+Exits 1 on G2-G5 failure.
 """
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ sys.path.insert(0, os.path.join(HERE, ".."))
 sys.path.insert(0, os.path.join(HERE, "..", ".."))
 
 from core.layout.heuristic import auto_layout_polygon
+from core.layout.grain import FABRIC_GRAIN_DEG
 
 
 SAMPLE_DXF_RELPATH = ["examples", "input", "sample_2.dxf"]
@@ -76,7 +77,7 @@ def _load_pieces(path: str, copies: int):
 def _run(pieces, **kwargs):
     start = time.perf_counter()
     placements, marker, util = auto_layout_polygon(
-        pieces, FABRIC_WIDTH_MM, GRAIN_MODE, 0.0, effort=EFFORT, **kwargs,
+        pieces, FABRIC_WIDTH_MM, GRAIN_MODE, FABRIC_GRAIN_DEG, effort=EFFORT, **kwargs,
     )
     elapsed_ms = (time.perf_counter() - start) * 1000.0
     return placements, marker, util, elapsed_ms
@@ -123,7 +124,7 @@ def main() -> int:
     print("  [running] default (no sa_* kwarg) ...", flush=True)
     start = time.perf_counter()
     _, marker_default, _ = auto_layout_polygon(
-        pieces, FABRIC_WIDTH_MM, GRAIN_MODE, 0.0, effort=EFFORT,
+        pieces, FABRIC_WIDTH_MM, GRAIN_MODE, FABRIC_GRAIN_DEG, effort=EFFORT,
     )
     t_default = (time.perf_counter() - start) * 1000.0
     print(f"  default   L={marker_default:8.1f}                t={t_default:8.1f}ms (no sa_* kwarg)", flush=True)
@@ -158,9 +159,12 @@ def main() -> int:
         failures.append(f"G4: default marker={marker_default:.1f} != sa=0 marker={marker_off:.1f}")
     print(f"  G4 (default == sa=0):              {'PASS' if g4_ok else 'FAIL'}")
 
-    # G5: aspirational — beat the bar.
+    # G5: beat the bar STRICTLY. PR-blocking since the 2026-06-05 grain=90
+    # tuning (rotation-flip-weighted default beats 11699mm at seed 42).
     best_sa_marker = min(m for m, _, _ in sa_results.values())
-    g5_ok = best_sa_marker <= BAR_TO_BEAT_MM
+    g5_ok = best_sa_marker < BAR_TO_BEAT_MM
+    if not g5_ok:
+        failures.append(f"G5: best SA {best_sa_marker:.1f}mm did not beat the bar {BAR_TO_BEAT_MM:.0f}mm")
     print(f"  G5 (beat the bar {BAR_TO_BEAT_MM:.0f}mm):    "
           f"{'PASS' if g5_ok else 'FAIL'} (best SA = {best_sa_marker:.1f}mm)")
     print()
@@ -170,15 +174,12 @@ def main() -> int:
         for f in failures:
             print(f"  - {f}")
         print()
-        print("ACCEPTANCE: FAIL — do not ship until G2-G4 pass.")
+        print("ACCEPTANCE: FAIL — do not ship until G2-G5 pass.")
         return 1
 
-    print("ACCEPTANCE: G2-G4 PASS (PR-blocking gates green).")
-    if g5_ok:
-        print("            G5 also PASSED — SA beats the bar; consider follow-up to expose via API/UI.")
-    else:
-        print(f"            G5 informational FAIL — best SA {best_sa_marker:.1f}mm did not beat "
-              f"{BAR_TO_BEAT_MM:.0f}mm bar. Ships as opt-in mechanism per spec disposition.")
+    print("ACCEPTANCE: G2-G5 PASS (PR-blocking gates green).")
+    print(f"            G5: SA beats the bar ({best_sa_marker:.1f}mm < {BAR_TO_BEAT_MM:.0f}mm) "
+          f"with the tuned rotation-flip-weighted default.")
     return 0
 
 

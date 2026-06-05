@@ -26,6 +26,10 @@ This rule applies retroactively — if the bench-vs-GUI variance investigation
 in some configuration, the pruning behavior must be re-evaluated under this
 rule, regardless of the speedup it delivers.
 
+**Update (2026-06-04):** the § 5.C investigation resolved the variance to a
+benchmark grain-config divergence (`fabric_grain_deg` 0 vs 90), **not** pruning.
+PR #7/#8 pruning is confirmed result-preserving and is exonerated.
+
 ---
 
 ## 1. Headline benchmark
@@ -33,16 +37,17 @@ rule, regardless of the speedup it delivers.
 Canonical real-workload benchmark used for all gain comparisons:
 
 `examples/input/sample_2.dxf × 10 copies` at `fabric_width_mm=1651`,
-`grain_mode="bi"`, `fabric_grain_deg=0.0` (190 pieces total — 19 distinct base
-pieces × 10 identical copies each).
+`grain_mode="bi"`, `fabric_grain_deg=90.0` (the locked production grain — see
+§ 5.C; 190 pieces total — 19 distinct base pieces × 10 identical copies each).
 
 | Source                                                | Marker length (mm) | Utilization | Notes                                                        |
 | ----------------------------------------------------- | ------------------ | ----------- | ------------------------------------------------------------ |
 | Commercial reference                                  | 10599              | 86.1%       | Out-of-scope aspirational target. ~9% better than the bar.   |
 | **OpenMarker pre-PR-#7 baseline (the bar to beat)**   | **11699**          | **79.4%**   | **Historical best on this workload — and what the 2026-05-30 manual GUI run reproduced exactly. All future algorithm changes must hit ≤ 11699mm marker / ≥ 79.4% utilization on this workload to count as a win.** |
-| Current bench unclustered NFP-BLF (effort=5)          | 12249              | 75.83%      | Known regression vs the bar (+4.7% marker, −3.6pp util). Likely tied to the bench-vs-GUI variance (§ 5.C) — under investigation. **Not** the bar to beat; do not use this as a comparison anchor for new work. |
-| Clustering — bbox path (off by default, opt-in)       | 29958              | 31.00%      | +156% regression vs the bar. Mechanism shipped opt-in; see §4. |
-| Clustering — union path (off by default, opt-in)      | 27336              | 33.98%      | +134% regression vs the bar. Beats bbox by ~8% but still loses. See §4. |
+| Current bench unclustered NFP-BLF (effort=5)          | 11699.4            | 79.39%      | At the locked 90° grain the bench now matches the GUI and the bar (§ 5.C). Was 12249/75.83% at the erroneous grain=0. |
+| **OpenMarker SA-tuned (rotation-flip 3:1, opt-in)**   | **11578.5**        | **80.22%**  | **Beats the bar ~1.0% — best of the 2026-06-05 grain=90 SA sweep; < bar on ≥3 seeds. Opt-in via `sa_iterations>0`; see § 4.6 + § 6 [2026-06-05].** |
+| Clustering — bbox path (off by default, opt-in)       | 24649.7            | 37.68%      | +110.7% vs the bar. Mechanism shipped opt-in; see §4. (Re-measured at grain=90.) |
+| Clustering — union path (off by default, opt-in)      | 23591.6            | 39.37%      | +101.6% vs the bar. Beats bbox by ~4% but still loses. See §4. (Re-measured at grain=90.) |
 
 **Bench script:** `engine/tests/bench_clustering.py`. Run with:
 
@@ -51,7 +56,7 @@ D:\openmarker\engine\.venv\Scripts\python.exe engine\tests\bench_clustering.py
 ```
 
 Prints a 3-column off/bbox/union matrix on 4 scenarios (identical rects,
-two-groups, singletons, `sample_2.dxf × 10` serial + parallel). 5 programmatic
+two-groups, singletons, `sample_2.dxf × 10` serial + parallel). 6 programmatic
 acceptance gates; exits 1 on failure. Run this whenever the algorithm changes
 — it's the fastest way to confirm no regression on either disabled path.
 
@@ -147,6 +152,10 @@ Engine-Python-only (no API/UI). Mutually exclusive with
 
 Bench result on the canonical workload (sample_2.dxf × 10, fabric=1651mm,
 bi-grain, effort=5):
+
+> Note: these SA numbers were measured at the erroneous `fabric_grain_deg=0` and
+> are superseded. At the locked 90° grain the SA-tuning follow-up (rotation-flip
+> weighted 3:1) beats the bar — 11578.5mm / 80.22%. See § 6 [2026-06-05].
 
 | `sa_iterations` | Marker length (mm) | Utilization | Time (ms) |
 |---|---|---|---|
@@ -272,10 +281,12 @@ the bench is the path to flipping the default.
 
 ### 4.6 SA meta-heuristic (`sa_iterations > 0`)
 
-- **Code:** `engine/core/layout/sa.py` — `run_sa` driver + hyperparameter
-  constants. `engine/core/layout/heuristic.py::_run_sa_phase` orchestrates
-  the multi-restart chains. `_init_sa_worker` + `_run_sa_chain` are the
-  ProcessPoolExecutor worker entries.
+- **Code:** `engine/core/layout/sa.py` — `run_sa` driver + `SAConfig` (tunable
+  hyperparameters; field defaults = the module constants). `heuristic.py::_run_sa_phase`
+  orchestrates the multi-restart chains; `auto_layout_polygon(sa_config=...)`
+  threads a config to the `_init_sa_worker` + `_run_sa_chain` workers (it must
+  travel via `initargs` — spawned workers re-import fresh). Sweep harness:
+  `engine/tests/bench_sa_sweep.py` (soft TTL + always-writes-a-report).
 - **Why opt-in:** First-PR scope per design spec
   (`docs/superpowers/specs/2026-05-31-sa-meta-heuristic-design.md`).
   Same policy as `disable_clustering` / `cluster_fraction` in § 4.3.
@@ -291,19 +302,24 @@ the bench is the path to flipping the default.
   raises `ValueError`. Combining SA with clustering is a future-work item
   (would need a per-chain decision whether to operate on cluster super-pieces
   or expanded pieces).
-- **Constants** (module-level in `sa.py`, no public-API tunables in this PR):
+- **Constants** (module-level in `sa.py`; also the `SAConfig` field defaults —
+  tunable per-call via `auto_layout_polygon(sa_config=...)`, engine-Python-only):
   - `T0_FACTOR = 0.05` — initial temperature as a fraction of warm-start marker
   - `COOLING_ALPHA = 0.95` — geometric cooling per iteration
   - `T_MIN = 1e-3` — temperature floor
   - `REVERSE_WINDOW_FRACTION = 0.25` — reverse-move window cap
   - `NO_GRAINLINE_ROTATION_CAP = 4` — angles `[0, 90, 180, 270]` for no-grainline pieces
-  - `MOVE_WEIGHTS = {"swap": 1.0, "reverse": 1.0, "rotation_flip": 1.0}`
+  - `MOVE_WEIGHTS = {"swap": 1.0, "reverse": 1.0, "rotation_flip": 3.0}` — rotation_flip
+    tuned to 3.0 (2026-06-05 grain=90 sweep — beats the bar; § 6)
 - **Tests:** `engine/tests/unit/test_sa.py` (19 unit tests against stub
   evaluator) + `engine/tests/unit/test_heuristic.py` (validation + integration
   tests for monotone non-worsening, parallel determinism, composability with
   `disable_pruning`, `sa_max_time_s` termination).
 - **Bench:** `engine/tests/bench_sa.py` sweeps `sa_iterations` on the canonical
-  workload with 4 PR-blocking gates + 1 aspirational gate.
+  workload — G2–G5 are PR-blocking and G5 (beat the bar) now passes at the tuned
+  default. `engine/tests/bench_sa_sweep.py` is the full grain=90 hyperparameter
+  sweep that found the win. See § 6 [2026-06-05]. (The grain=0 sweep table above
+  is superseded.)
 
 ---
 
@@ -336,7 +352,7 @@ the bench is the path to flipping the default.
 | **More sort strategies (8–12 instead of 4)** — add perimeter-DESC, diagonal-DESC, aspect-ratio-extremes-first, hilbert-curve ordering. One named function each; benefits compose with parallel pruning. | Low         | 0.5–2pp |
 | **Grain-compatible mirroring** — when `grain_mode == "bi"`, allow horizontal reflection of pieces (flip x-coords within bbox center). Adds reflected copies to the rotation candidate set. | Medium      | 1–3pp |
 | **Concave-bay fill pass** — post-pass after primary BLF: for each large piece with a concave bay (armhole curves), tuck small unplaced pieces into the bay region. Bays detected via polygon difference of bbox minus polygon. | High — bay-detection geometry + second placement pass | 1–3pp on garment workloads |
-| **SA meta-heuristic wrapper** — SHIPPED OPT-IN (this PR; see § 4.6). Wraps NFP-BLF as fitness; multi-restart parallel chains; iterations + wall-clock budget. **GA half deferred to a follow-up PR** — same scaffolding will host the GA driver. | Medium for SA (shipped); High for GA follow-up | 3–8pp aspirational; actual SA gain on canonical workload at sa=200 = 1.4% (12249→12077mm) |
+| **SA meta-heuristic wrapper** — SHIPPED OPT-IN; **tuned 2026-06-05** (see § 4.6 + § 6). Wraps NFP-BLF as fitness; multi-restart parallel chains; iterations + wall-clock budget. **GA half deferred to a follow-up PR** — same scaffolding will host the GA driver. | Medium for SA (shipped); High for GA follow-up | At grain=90, rotation-flip-weighted SA **beats the bar: 11578.5mm vs 11699** (~1.0%, < bar on ≥3 seeds). Prior grain=0 figure (12249→12077) superseded. |
 
 ### 5.C Pruning meta-improvements (compose with PRs #7/#8)
 
@@ -346,21 +362,23 @@ the bench is the path to flipping the default.
 - [ ] **Cutoff slack.** Accept runs within `epsilon` of best for diversity
   (e.g., to keep "almost as good" results for future export/comparison).
   Not needed today; filed so it's not lost.
-- [ ] **Bench-vs-GUI variance on the unclustered path (filed 2026-05-30).**
-  `bench_clustering.py off` returns 12249.1mm on `sample_2.dxf × 10` at
-  `effort=1` and `effort=5` (deterministic). A 2026-05-30 manual GUI run on
-  the same workload + effort=Max returned 11699mm. Both paths invoke
-  `auto_layout_polygon(disable_clustering=True)` and should produce identical
-  results. Likely suspects: (1) bench's `_load_dxf_pieces`
-  (`engine/tests/bench_clustering.py:70`) vs the API's
-  `parse_dxf` + `normalize_piece` may yield subtly different `Piece.polygon`
-  lists (vertex ordering, normalization tolerance, grainline angle);
-  (2) PR #8's "result identical to serial mode" claim may not hold across
-  all worker counts; (3) the `POST /auto-layout` cache
-  (`engine/api/main.py:179`) could have served a stale entry. Repro starting
-  point: call `auto_layout_polygon` directly with effort=Max-equivalent and
-  diff against a `requests.post('/auto-layout', ...)` result on the same
-  pieces — vertex-by-vertex polygon diff first.
+- [x] **Bench-vs-GUI variance — RESOLVED (2026-06-04).** Root cause: the bench
+  and this doc ran `fabric_grain_deg=0`, but the GUI runs a fixed `90`
+  (frontend `App.tsx:18`). `_layout_rotations` shifts every grain-constrained
+  piece by +90° between the two, reorienting the whole pack against the fixed
+  width. Controlled experiment (bench input held constant, only grain varied,
+  clustering off):
+
+  | `fabric_grain_deg` | effort | marker (mm) | utilization |
+  | --- | --- | --- | --- |
+  | 0.0 (old bench) | 1 & 5 | 12249.1 | 75.83% |
+  | 90.0 (GUI)      | 1 & 5 | 11699.4 | 79.39% |
+
+  grain=90 reproduces the GUI/bar exactly. **Not** input ordering (frontend and
+  bench expand copies identically, copy-major), **not** pruning (serial and
+  parallel agree within each grain), **not** the cache. **Fix:** grain locked at
+  90° via `FABRIC_GRAIN_DEG` (`core/layout/grain.py`); the API no longer reads
+  `grain_direction_deg`; benches and this doc use the constant.
 
 ---
 
@@ -469,3 +487,76 @@ Add new entries here as work progresses. Each entry should record:
   entries (~12 pool lifecycle events × ~28 workers) left no accumulating
   damage. Future bench runs could record before/after `Get-NetTCPConnection
   | Group-Object State` snapshots to formalize this guarantee.
+
+### 2026-06-04 — Bench-vs-GUI variance resolved: fabric grain locked at 90°
+
+- **What:** Traced the 550mm bench-vs-GUI gap (§ 5.C) to a benchmark-config
+  divergence and locked the fabric grain. Added `FABRIC_GRAIN_DEG = 90.0`
+  (`core/layout/grain.py`); `POST /auto-layout` now ignores `grain_direction_deg`
+  and always lays out at the constant; all benches reference it.
+- **Why:** The bench and § 1 ran `fabric_grain_deg=0`; the GUI hard-codes 90
+  (`frontend/src/app/App.tsx:18`). Every piece on the canonical workload has a
+  grainline, so the +90° shift reorients the whole pack against the fixed width.
+- **Result:** Controlled experiment (same input, only grain varied, clustering
+  off): grain=0 → 12249.1mm/75.83%; grain=90 → 11699.4mm/79.39% — the latter
+  reproduces the GUI and the § 1 bar exactly, at both effort=1 and effort=5.
+  The unclustered path already meets the bar; no algorithm change was needed.
+  PR #7/#8 pruning is exonerated. Re-running the clustering bench at grain=90
+  also refreshed § 1: bbox 24649.7mm/37.68%, union 23591.6mm/39.37% (both still
+  far above the bar — the clustering structural barrier holds; partial-cluster
+  best fraction 0.5 = 12630.4mm).
+- **Decision:** Grain is no longer a variable feature. The engine keeps the
+  `fabric_grain_deg` parameter (and `test_grain.py` still exercises it across
+  angles), but no production caller varies it. The prior clustering and SA
+  numbers were measured at grain=0 and are superseded; SA is re-baselined at
+  grain=90 in the SA-tuning follow-up.
+- **Mechanism at:** `engine/core/layout/grain.py` (constant), `engine/api/main.py`
+  (locked call). Spec/plan: `docs/superpowers/specs/2026-06-04-bench-grain-fix-design.md`,
+  `docs/superpowers/plans/2026-06-04-bench-grain-fix.md`.
+
+### 2026-06-05 — SA hyperparameter tuning at grain=90: rotation-flip-weighted moves beat the bar
+
+- **What:** Made SA's hyperparameters tunable — an `SAConfig` dataclass threaded
+  through `auto_layout_polygon(sa_config=...)` to the spawned workers (via
+  `initargs`, since workers re-import fresh) — and swept them at the locked
+  grain=90 via `engine/tests/bench_sa_sweep.py` (Phases 0–3: single-axis
+  screening → combine → multi-seed validation). Baked the winning default.
+- **Why:** After the grain lock the warm-start is already 11699.4mm (the bar),
+  so SA had to improve on an already-good start. The hyperparameters were fixed
+  module constants — untunable without a code edit and unreachable by the
+  spawned SA workers via main-process monkeypatch.
+- **Result** (sample_2.dxf × 10, fabric=1651, bi-grain, effort=5):
+
+  | config | marker (mm) | util | note |
+  | --- | --- | --- | --- |
+  | warm-start / current constants | 11699.4 | 79.39% | = bar |
+  | `t0_factor=0.1` | 11690.8 | 79.45% | barely |
+  | `reverse_window_fraction=0.40` | 11670.4 | 79.59% | |
+  | **`rotation_flip=3.0` (rot-heavy)** | **11578.5** | **80.22%** | **best** |
+
+  rot-heavy beats the bar **strictly on seeds 42, 13, 21, 99** (4 of 6; seeds 7
+  & 123 found no improvement → 11699.4). Combining the per-axis bests did *not*
+  help (the combine candidate returned 11699.4). So the win is the single change
+  `MOVE_WEIGHTS rotation_flip 1.0 → 3.0`.
+- **Why rotation_flip:** every piece on this workload has a grainline → only two
+  rotations (0°/180° vs grain). The 4 sort strategies already cover ordering
+  well, but each piece's grain-flip choice is otherwise underexplored — weighting
+  that move 3:1 is where the headroom was.
+- **Validation** (`bench_sa.py`, tuned default, seed 42, effort=5): sa=50/100/200
+  = 11635.4 / 11578.5 / 11517.2mm — all beat the bar; G2–G5 (now PR-blocking)
+  pass. **Caveat:** parallel SA's cross-chain cutoff pruning is timing-dependent,
+  so an *improving* run's exact marker varies slightly across invocations (e.g.
+  sa=50/seed42 was 11578.5mm in the sweep vs 11635.4mm in this validation) — every
+  observed run still beats the bar; `disable_pruning=True` yields fully
+  deterministic (slower) SA. G3 (same-seed determinism) holds for non-improving
+  seeds; the improving path is reproducible only with pruning disabled.
+- **Decision:** Baked `rotation_flip=3.0` as the new `MOVE_WEIGHTS` /
+  `SAConfig.move_weights` default. `bench_sa.py` G5 (beat the bar) is now
+  PR-blocking and passes. SA stays opt-in (`sa_iterations>0`); the GUI path is
+  unchanged. `SAConfig` + `bench_sa_sweep.py` are reusable scaffolding for the
+  GA follow-up.
+- **Mechanism at:** `engine/core/layout/sa.py` (`SAConfig` + `MOVE_WEIGHTS`),
+  `engine/core/layout/heuristic.py` (`sa_config` threading),
+  `engine/tests/bench_sa_sweep.py` (sweep). Spec/plan:
+  `docs/superpowers/specs/2026-06-04-sa-hyperparameter-tuning-design.md`,
+  `docs/superpowers/plans/2026-06-04-sa-hyperparameter-tuning.md`.
