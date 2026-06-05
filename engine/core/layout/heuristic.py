@@ -17,6 +17,7 @@ from core.layout.cancellation import CancellationError, is_cancelled
 from core.layout.clustering import Cluster, pre_cluster_pieces, expand_cluster_placement
 from core.layout.grain import allowed_rotations
 from core.layout.sa import WarmStart, run_sa, NO_GRAINLINE_ROTATION_CAP, SAConfig
+from core.layout.ga import GAConfig, run_ga
 from core.models.piece import Piece
 
 
@@ -794,6 +795,10 @@ def auto_layout_polygon(
     sa_max_time_s: float | None = None,
     sa_seed: int = 0,
     sa_config: "SAConfig | None" = None,
+    ga_generations: int = 0,
+    ga_max_time_s: float | None = None,
+    ga_seed: int = 0,
+    ga_config: "GAConfig | None" = None,
 ) -> tuple[list[Placement], float, float]:
     """No-Fit-Polygon-based Bottom-Left-Fill (slow mode, accurate).
 
@@ -860,6 +865,20 @@ def auto_layout_polygon(
 
     `sa_seed`: base RNG seed for SA. Each parallel chain k uses
     `sa_seed + k` so multi-restart runs are reproducible. Default 0.
+
+    `ga_generations`: when > 0, run an island-model Genetic Algorithm on top of
+    the best-of-4 sort-strategies result instead of SA. K = _worker_count(effort)
+    independent populations evolve `ga_generations` generations each; the best
+    individual across islands (and the retained warm-start) wins. Default 0 (GA
+    disabled). Mutually exclusive with both `disable_clustering=False` and
+    `sa_iterations > 0` -- raises ValueError. GA does not use cross-island pruning,
+    so results are deterministic per `ga_seed`. See PERFORMANCE.md section 4.7 and
+    engine/core/layout/ga.py.
+
+    `ga_max_time_s`: optional wall-clock cap per GA island in seconds. Must be > 0
+    when set. Default None (generation-cap only).
+
+    `ga_seed`: base RNG seed for GA. Island k uses `ga_seed + k`. Default 0.
     """
     # SA meta-heuristic parameter validation. Keep cheap checks at the top so
     # bad calls fail before any layout work happens.
@@ -872,6 +891,20 @@ def auto_layout_polygon(
         )
     if sa_max_time_s is not None and sa_max_time_s <= 0:
         raise ValueError(f"sa_max_time_s must be > 0 when set, got {sa_max_time_s}")
+    if ga_generations < 0:
+        raise ValueError(f"ga_generations must be >= 0, got {ga_generations}")
+    if ga_generations > 0 and not disable_clustering:
+        raise ValueError(
+            "ga_generations > 0 cannot be combined with disable_clustering=False; "
+            "see PERFORMANCE.md section 4.7 for the future-work note."
+        )
+    if ga_generations > 0 and sa_iterations > 0:
+        raise ValueError(
+            "ga_generations > 0 and sa_iterations > 0 are mutually exclusive; "
+            "run one meta-heuristic per call."
+        )
+    if ga_max_time_s is not None and ga_max_time_s <= 0:
+        raise ValueError(f"ga_max_time_s must be > 0 when set, got {ga_max_time_s}")
 
     if disable_clustering:
         blf_input = pieces

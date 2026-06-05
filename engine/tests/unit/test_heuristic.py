@@ -940,3 +940,35 @@ def test_auto_layout_sa_config_deterministic_parallel():
     _, m2, _ = auto_layout_polygon(p, 500, "bi", 0.0, effort=5,
                                    sa_iterations=50, sa_seed=11, sa_config=cfg)
     assert m1 == m2
+
+
+# --- GA parameter validation tests ---
+# Reuse the file's _make_rect builder; _p here is a grainline=0.0 rect.
+def _p(piece_id, w=100.0, h=50.0):
+    return _make_rect(piece_id, w, h, grainline_deg=0.0)
+
+
+from core.layout.ga import GAConfig
+
+
+def test_ga_negative_generations_raises():
+    with pytest.raises(ValueError, match="ga_generations must be >= 0"):
+        auto_layout_polygon([_p("0")], 1651.0, "bi", 90.0, ga_generations=-1)
+
+
+def test_ga_with_clustering_raises():
+    with pytest.raises(ValueError, match="cannot be combined with disable_clustering"):
+        auto_layout_polygon([_p("0")], 1651.0, "bi", 90.0,
+                            ga_generations=5, disable_clustering=False)
+
+
+def test_ga_and_sa_mutually_exclusive():
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        auto_layout_polygon([_p("0")], 1651.0, "bi", 90.0,
+                            ga_generations=5, sa_iterations=5)
+
+
+def test_ga_max_time_s_must_be_positive():
+    with pytest.raises(ValueError, match="ga_max_time_s must be > 0"):
+        auto_layout_polygon([_p("0")], 1651.0, "bi", 90.0,
+                            ga_generations=5, ga_max_time_s=0)
