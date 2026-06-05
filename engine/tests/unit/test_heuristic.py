@@ -1004,3 +1004,25 @@ def test_ga_parallel_is_deterministic_per_seed():
     r1 = auto_layout_polygon(pieces, 1651.0, "bi", 90.0, **kw)
     r2 = auto_layout_polygon(pieces, 1651.0, "bi", 90.0, **kw)
     assert r1[1] == r2[1]                         # identical marker across runs
+
+
+def test_ga_phase_invoked_only_when_enabled(monkeypatch):
+    """Proves GA actually executes when ga_generations>0 (and not otherwise),
+    independent of whether it improves on the warm-start (on a tiny toy input it
+    cannot). Guards against a silent no-op wiring regression that the other
+    integration tests would not catch."""
+    import core.layout.heuristic as h
+    calls = {"n": 0}
+    real = h._run_ga_phase
+
+    def spy(*args, **kwargs):
+        calls["n"] += 1
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(h, "_run_ga_phase", spy)
+    pieces = [_grained_rect(str(i)) for i in range(4)]
+    auto_layout_polygon(pieces, 1651.0, "bi", 90.0, effort=5)  # GA off -> not called
+    assert calls["n"] == 0
+    auto_layout_polygon(pieces, 1651.0, "bi", 90.0, effort=5,
+                        ga_generations=3, ga_config=GAConfig(population_size=6))
+    assert calls["n"] == 1                          # GA on -> phase invoked once
