@@ -51,3 +51,31 @@ def test_ga_config_picklable():
     restored = pickle.loads(pickle.dumps(cfg))
     assert restored.population_size == 12
     assert restored.mutation_move_weights == ga.MUTATION_MOVE_WEIGHTS
+
+
+def test_order_crossover_produces_valid_permutation():
+    rng = random.Random(3)
+    p1 = list(range(10))
+    p2 = [9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
+    for _ in range(50):
+        child = ga._order_crossover(p1, p2, rng)
+        assert sorted(child) == list(range(10))  # valid permutation, no dupes/omissions
+
+
+def test_order_crossover_preserves_a_parent1_slice():
+    """OX copies a contiguous slice from parent1 verbatim; the rest comes from
+    parent2 in order. With identical parents the child equals the parent."""
+    rng = random.Random(0)
+    p = list(range(8))
+    assert ga._order_crossover(p, p, rng) == p
+
+
+def test_uniform_rotation_crossover_inherits_only_parent_values():
+    rng = random.Random(1)
+    r1 = [0.0, 0.0, 180.0, 90.0]
+    r2 = [180.0, 0.0, 0.0, 270.0]
+    for _ in range(50):
+        child = ga._uniform_rotation_crossover(r1, r2, rng)
+        assert len(child) == 4
+        for i in range(4):
+            assert child[i] in (r1[i], r2[i])

@@ -72,5 +72,38 @@ class GAResult(NamedTuple):
     evaluations: int
 
 
+# ---------------------------------------------------------------------------
+# Operators. Pure -- they never mutate their inputs. RNG is injected.
+# ---------------------------------------------------------------------------
+
+
+def _order_crossover(p1_order: list[int], p2_order: list[int],
+                     rng: _random.Random) -> list[int]:
+    """Order Crossover (OX): copy a random contiguous slice of p1 verbatim,
+    fill the remaining positions with p2's genes in their p2 order (skipping
+    genes already taken). Always returns a valid permutation."""
+    n = len(p1_order)
+    if n < 2:
+        return list(p1_order)
+    a, b = sorted(rng.sample(range(n), 2))
+    child: list[int | None] = [None] * n
+    child[a : b + 1] = p1_order[a : b + 1]
+    taken = set(p1_order[a : b + 1])
+    fill = [g for g in p2_order if g not in taken]
+    f = 0
+    for i in range(n):
+        if child[i] is None:
+            child[i] = fill[f]
+            f += 1
+    return child  # type: ignore[return-value]
+
+
+def _uniform_rotation_crossover(r1: list[float], r2: list[float],
+                                rng: _random.Random) -> list[float]:
+    """Per-gene uniform crossover. Both parents carry valid rotations per piece,
+    so the child is valid. Independent of order (rotations are piece-indexed)."""
+    return [r1[i] if rng.random() < 0.5 else r2[i] for i in range(len(r1))]
+
+
 def run_ga(*args, **kwargs):  # implemented in Task 4
     raise NotImplementedError("run_ga is implemented in Task 4")
