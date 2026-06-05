@@ -32,7 +32,9 @@ COPIES = 10
 EFFORT = 5
 BAR_MM = 11699.0
 SWEEP_TTL_S = 3 * 3600
-PER_ROW_CAP_S = 900.0  # per-row ga_max_time_s; bounds a single config so it can't hang past a TTL check
+PER_ROW_CAP_S = 400.0  # per-row ga_max_time_s. GA converges to the ~11517 floor in
+# ~3 generations (~120s for pop=30), so 400s gives margin past convergence while
+# letting the full ~17-row sweep (incl. Phase-3 multi-seed) finish well within the 3h TTL.
 RESULTS_PATH = os.path.join(HERE, "_ga_sweep_results.jsonl")
 REPORT_PATH = os.path.join(HERE, "_ga_sweep_report.md")
 
