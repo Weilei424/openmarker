@@ -43,8 +43,13 @@ NO_GRAINLINE_ROTATION_CAP: int = 4
 """For pieces with no grainline (allowed_rotations returns full 360), keep
 only this many evenly-spaced angles: [0, 360/N, 2*360/N, ...]."""
 
-MOVE_WEIGHTS: dict[str, float] = {"swap": 1.0, "reverse": 1.0, "rotation_flip": 1.0}
-"""Uniform random pick across move types per iteration."""
+MOVE_WEIGHTS: dict[str, float] = {"swap": 1.0, "reverse": 1.0, "rotation_flip": 3.0}
+"""Per-iteration move-type weights. rotation_flip is favored 3:1 — the 2026-06-05
+grain=90 hyperparameter sweep found per-piece rotation is the productive search
+axis on garment workloads (piece ordering is already well-covered by the 4 sort
+strategies, but each piece's 0°/180° grain choice is otherwise underexplored).
+This default beats the 11699mm bar (11578.5mm / 80.22% at seed 42, sa=100; down
+to 11517mm at sa=200). See PERFORMANCE.md § 6 [2026-06-05]."""
 
 
 @dataclass

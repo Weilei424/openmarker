@@ -40,6 +40,10 @@ def test_sa_module_exports():
     assert 0.0 < sa.REVERSE_WINDOW_FRACTION <= 1.0
     assert sa.NO_GRAINLINE_ROTATION_CAP >= 2
     assert set(sa.MOVE_WEIGHTS.keys()) == {"swap", "reverse", "rotation_flip"}
+    # rotation_flip favored 3:1 — tuned 2026-06-05 (grain=90 sweep beats the
+    # 11699mm bar at 11578.5mm). Guard against an accidental revert; see
+    # PERFORMANCE.md § 6 [2026-06-05].
+    assert sa.MOVE_WEIGHTS["rotation_flip"] == 3.0
 
 
 import random
@@ -123,16 +127,18 @@ def test_rotation_flip_handles_single_allowed_piece():
 
 
 def test_sample_move_type_uses_weights():
-    """_sample_move_type returns one of the configured move types per the
-    MOVE_WEIGHTS distribution. With equal weights, the empirical distribution
-    over 3000 draws should be roughly uniform (±50 per bucket = 3σ on a
-    binomial with p=1/3, n=3000)."""
+    """_sample_move_type returns move types per the MOVE_WEIGHTS distribution.
+    The tuned default is swap:reverse:rotation_flip = 1:1:3 (rotation_flip
+    favored — 2026-06-05 grain=90 tuning), so over 3000 draws rotation_flip
+    should dominate (~3/5 ≈ 1800) and swap/reverse each ~1/5 ≈ 600. Bounds are
+    generous (>3σ binomial)."""
     rng = random.Random(123)
     counts = {"swap": 0, "reverse": 0, "rotation_flip": 0}
     for _ in range(3000):
         counts[sa._sample_move_type(rng)] += 1
-    for move_type, count in counts.items():
-        assert 900 < count < 1100, f"{move_type}: {count} (expected ~1000 ± 100)"
+    assert 500 < counts["swap"] < 700, f"swap: {counts['swap']} (expected ~600)"
+    assert 500 < counts["reverse"] < 700, f"reverse: {counts['reverse']} (expected ~600)"
+    assert 1650 < counts["rotation_flip"] < 1950, f"rotation_flip: {counts['rotation_flip']} (expected ~1800)"
 
 
 import math as _math

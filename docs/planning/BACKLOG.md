@@ -170,6 +170,7 @@ Task checklist:
 - [x] Partial clustering (`cluster_fraction` knob). Opt-in only (structural barrier holds — best fraction 0.5 cuts full-cluster baseline in half but unclustered still wins). PR #10. See PERFORMANCE.md § 4.5 + § 6 [2026-05-30].
 - [x] SA meta-heuristic wrapper (opt-in). Multi-restart parallel chains over (order × rotation). See PERFORMANCE.md § 2 + § 4.6 + § 6 [2026-05-31].
 - [x] Lock fabric grain at 90° + fix bench/docs (resolves §5.C bench-vs-GUI variance). See PERFORMANCE.md § 5.C + § 6 [2026-06-04].
+- [x] SA hyperparameter tuning at grain=90 — rotation-flip-weighted default (`SAConfig`) beats the bar (11578.5mm vs 11699). See PERFORMANCE.md § 4.6 + § 6 [2026-06-05].
 - [ ] GA meta-heuristic wrapper (the deferred half of the GA/SA item). Shares scaffolding with SA. See PERFORMANCE.md § 5.B.
 - [ ] Remaining clustering follow-ups (heterogeneous clustering, cluster-aware sort) + open meta items. See PERFORMANCE.md § 5.
 
