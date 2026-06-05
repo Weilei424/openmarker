@@ -79,3 +79,47 @@ def test_uniform_rotation_crossover_inherits_only_parent_values():
         assert len(child) == 4
         for i in range(4):
             assert child[i] in (r1[i], r2[i])
+
+
+def test_tournament_select_returns_lowest_fitness_contender():
+    """With tournament_size == population, the global best (min fitness) wins."""
+    rng = random.Random(0)
+    fitnesses = [5.0, 2.0, 9.0, 1.0, 7.0]
+    winner = ga._tournament_select(fitnesses, k=5, rng=rng)
+    assert winner == 3  # index of 1.0
+
+
+def test_mutate_dispatches_to_sa_moves_and_changes_state():
+    """rotation_flip-only weights must change rotations, not order."""
+    rng = random.Random(2)
+    order = list(range(6))
+    rotations = [0.0] * 6
+    allowed = [[0.0, 180.0]] * 6
+    weights = {"swap": 0.0, "reverse": 0.0, "rotation_flip": 1.0}
+    new_order, new_rot = ga._mutate(order, rotations, allowed, rng, weights)
+    assert new_order == order          # rotation_flip leaves order untouched
+    assert new_rot != rotations         # exactly one rotation flipped to 180
+    assert sum(1 for i in range(6) if new_rot[i] != rotations[i]) == 1
+
+
+def test_mutate_swap_only_changes_order_not_rotations():
+    rng = random.Random(4)
+    order = list(range(6))
+    rotations = [0.0] * 6
+    allowed = [[0.0, 180.0]] * 6
+    weights = {"swap": 1.0, "reverse": 0.0, "rotation_flip": 0.0}
+    new_order, new_rot = ga._mutate(order, rotations, allowed, rng, weights)
+    assert sorted(new_order) == list(range(6))
+    assert new_rot == rotations
+
+
+def test_seed_variant_keeps_valid_permutation_and_allowed_rotations():
+    rng = random.Random(5)
+    order = list(range(8))
+    rotations = [0.0] * 8
+    allowed = [[0.0, 180.0]] * 8
+    o, r = ga._seed_variant(order, rotations, allowed, rng,
+                            ga.MUTATION_MOVE_WEIGHTS, moves=3)
+    assert sorted(o) == list(range(8))
+    for i in range(8):
+        assert r[i] in allowed[i]

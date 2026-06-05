@@ -105,5 +105,38 @@ def _uniform_rotation_crossover(r1: list[float], r2: list[float],
     return [r1[i] if rng.random() < 0.5 else r2[i] for i in range(len(r1))]
 
 
+def _tournament_select(fitnesses: list[float], k: int,
+                       rng: _random.Random) -> int:
+    """Return the index of the lowest-fitness (best) of k random contenders."""
+    n = len(fitnesses)
+    contenders = rng.sample(range(n), min(k, n))
+    return min(contenders, key=lambda j: fitnesses[j])
+
+
+def _mutate(order: list[int], rotations: list[float],
+            allowed_per_piece: list[list[float]], rng: _random.Random,
+            weights: dict) -> tuple[list[int], list[float]]:
+    """Apply ONE move (swap/reverse/rotation_flip per `weights`). Returns
+    (new_order, new_rotations); never mutates inputs. A rotation_flip with no
+    flippable piece is a no-op (returns copies)."""
+    move = _sample_move_type(rng, weights)
+    if move == "swap":
+        return _swap_move(order, rng), list(rotations)
+    if move == "reverse":
+        return _reverse_move(order, rng), list(rotations)
+    new_rot, _idx = _rotation_flip_move(rotations, allowed_per_piece, rng)
+    return list(order), new_rot
+
+
+def _seed_variant(order: list[int], rotations: list[float],
+                  allowed_per_piece: list[list[float]], rng: _random.Random,
+                  weights: dict, moves: int) -> tuple[list[int], list[float]]:
+    """Apply `moves` consecutive mutations to seed an initial-population variant."""
+    o, r = list(order), list(rotations)
+    for _ in range(moves):
+        o, r = _mutate(o, r, allowed_per_piece, rng, weights)
+    return o, r
+
+
 def run_ga(*args, **kwargs):  # implemented in Task 4
     raise NotImplementedError("run_ga is implemented in Task 4")
