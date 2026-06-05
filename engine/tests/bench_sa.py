@@ -30,6 +30,7 @@ sys.path.insert(0, os.path.join(HERE, ".."))
 sys.path.insert(0, os.path.join(HERE, "..", ".."))
 
 from core.layout.heuristic import auto_layout_polygon
+from core.layout.grain import FABRIC_GRAIN_DEG
 
 
 SAMPLE_DXF_RELPATH = ["examples", "input", "sample_2.dxf"]
@@ -76,7 +77,7 @@ def _load_pieces(path: str, copies: int):
 def _run(pieces, **kwargs):
     start = time.perf_counter()
     placements, marker, util = auto_layout_polygon(
-        pieces, FABRIC_WIDTH_MM, GRAIN_MODE, 0.0, effort=EFFORT, **kwargs,
+        pieces, FABRIC_WIDTH_MM, GRAIN_MODE, FABRIC_GRAIN_DEG, effort=EFFORT, **kwargs,
     )
     elapsed_ms = (time.perf_counter() - start) * 1000.0
     return placements, marker, util, elapsed_ms
@@ -123,7 +124,7 @@ def main() -> int:
     print("  [running] default (no sa_* kwarg) ...", flush=True)
     start = time.perf_counter()
     _, marker_default, _ = auto_layout_polygon(
-        pieces, FABRIC_WIDTH_MM, GRAIN_MODE, 0.0, effort=EFFORT,
+        pieces, FABRIC_WIDTH_MM, GRAIN_MODE, FABRIC_GRAIN_DEG, effort=EFFORT,
     )
     t_default = (time.perf_counter() - start) * 1000.0
     print(f"  default   L={marker_default:8.1f}                t={t_default:8.1f}ms (no sa_* kwarg)", flush=True)

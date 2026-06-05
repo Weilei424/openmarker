@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.join(HERE, "..", ".."))
 
 from core.models.piece import Piece, BoundingBox
 from core.layout import heuristic
+from core.layout.grain import FABRIC_GRAIN_DEG
 
 
 def _piece(piece_id: str, w: float, h: float, grainline: float | None = None) -> Piece:
@@ -77,7 +78,7 @@ def _run(pieces, fabric_width_mm, grain_mode, effort, disable_pruning=False):
     t0 = time.perf_counter()
     result = heuristic.auto_layout_polygon(
         pieces, fabric_width_mm=fabric_width_mm,
-        grain_mode=grain_mode, fabric_grain_deg=0.0, effort=effort,
+        grain_mode=grain_mode, fabric_grain_deg=FABRIC_GRAIN_DEG, effort=effort,
         disable_pruning=disable_pruning,
     )
     return time.perf_counter() - t0, result[1]  # (seconds, marker_length)

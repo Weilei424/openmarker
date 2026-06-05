@@ -16,7 +16,8 @@ Acceptance gates (post Task 7 BLOCKED — clustering ships as OPT-IN, default of
   - two-groups:         union.marker <= off.marker + 1e-6  (sort-key fix lets union match off here)
   - 8 singletons:       union.marker == off.marker (clustering no-op)
   - sample_2.dxf x 10:  union.marker <= bbox.marker + 1e-6  (RELAXED from "beats off":
-                        the headline gate cannot beat off=12249mm because all 19 base
+                        the headline gate cannot beat off (~11699mm at the locked 90°
+                        grain) because all 19 base
                         pieces have copies → 19 rigid clusters that can't interleave.
                         We still require union to be at least as good as bbox, since
                         union exposing perimeter bays gives ~8% reduction over bbox
@@ -40,6 +41,7 @@ sys.path.insert(0, os.path.join(HERE, "..", ".."))
 
 from core.models.piece import Piece, BoundingBox
 from core.layout import heuristic
+from core.layout.grain import FABRIC_GRAIN_DEG
 
 
 def _piece(piece_id: str, w: float, h: float, grainline: float | None = None) -> Piece:
@@ -90,7 +92,7 @@ def _run(pieces, fabric_width_mm, grain_mode, effort, mode, cluster_fraction=1.0
     'union_f' is the same as 'union' but passes cluster_fraction through."""
     kwargs = dict(
         pieces=pieces, fabric_width_mm=fabric_width_mm,
-        grain_mode=grain_mode, fabric_grain_deg=0.0, effort=effort,
+        grain_mode=grain_mode, fabric_grain_deg=FABRIC_GRAIN_DEG, effort=effort,
     )
     if mode == "off":
         kwargs["disable_clustering"] = True
@@ -214,7 +216,7 @@ if __name__ == "__main__":
         print(
             f"ACCEPTANCE: ALL {len(gates)} GATES PASSED — safe to ship.\n"
             f"NOTE: clustering remains OPT-IN (disable_clustering=True by default).\n"
-            f"      Sweep above shows whether any cluster_fraction beats off=12249mm.\n"
+            f"      Sweep above shows whether any cluster_fraction beats off (~11699mm).\n"
             f"      If yes, file a follow-up PR to flip the default with the winning fraction.\n"
             f"      If no, the result is recorded in PERFORMANCE.md § 6 as a confirmed\n"
             f"      data point about the structural barrier."
