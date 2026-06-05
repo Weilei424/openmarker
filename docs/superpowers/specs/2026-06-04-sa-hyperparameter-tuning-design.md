@@ -34,7 +34,14 @@ Workload note: on the canonical workload every piece has a grainline → exactly
 
 ### 2. Sweep harness — new `engine/tests/bench_sa_sweep.py`
 
-Standalone manual bench (keeps `bench_sa.py` as the PR-gate bench). Loads the canonical workload at grain=90 (`FABRIC_GRAIN_DEG`), runs rows of `(label, SAConfig, sa_iterations, sa_seed)` via `auto_layout_polygon`, prints an incremental (`flush=True`) table — marker / util / wall-clock — and flags any row with marker `< 11699`. Designed to be run in the background.
+Standalone manual bench (keeps `bench_sa.py` as the PR-gate bench). Loads the canonical workload at grain=90 (`FABRIC_GRAIN_DEG`) and runs rows of `(label, SAConfig, sa_iterations, sa_seed)` via `auto_layout_polygon`.
+
+**Robustness — always produces a report (key requirement):**
+- **Soft wall-clock TTL** (`SWEEP_TTL_S`, default `3 * 3600` = 3 h, overridable by `--ttl <seconds>` / env). Checked *between* rows: once elapsed ≥ TTL the sweep loop stops gracefully and finalizes. Rows run ~3–6 min, so the actual stop overshoots by at most one row.
+- **Per-row cap** via `auto_layout_polygon(sa_max_time_s=...)` so no single config can hang past the between-rows TTL check (bounds each row's SA chains).
+- **Incremental persistence:** every completed row is appended immediately (flushed) to `_sweep_results.jsonl` AND printed to stdout — so partial results survive even a hard kill mid-row (only the in-flight row is lost).
+- **Always-report `finally` block:** on *any* exit — normal completion, soft-TTL stop, `KeyboardInterrupt`, or exception — the harness writes a markdown report `_sweep_report.md` (and echoes it to stdout): all completed rows sorted by marker, the best config with its field values, the beat-the-bar verdict (`< 11699`?), the phase reached, and a one-line recommended next step. This is the artifact analyzed afterward.
+- Run in the **background**; `_sweep_results.jsonl` / `_sweep_report.md` are run artifacts (not committed). The harness self-finalizes within the TTL, so no external hard-kill is needed; if one happens anyway, the JSONL still holds every completed row.
 
 ### 3. Sweep methodology (phased)
 
@@ -42,7 +49,7 @@ Standalone manual bench (keeps `bench_sa.py` as the PR-gate bench). Loads the ca
 - **Phase 1 — single-axis screening** (~sa=50, fixed seed): `t0_factor ∈ {0.02, 0.05, 0.1, 0.2}`, `cooling_alpha ∈ {0.90, 0.95, 0.98}`, `reverse_window_fraction ∈ {0.15, 0.25, 0.40}`, `move_weights ∈ {uniform, rotation-flip-heavy, order-heavy}`.
 - **Phase 2 — combine** best-of-each-axis into ~3–5 candidate configs (~sa=100).
 - **Phase 3 — multi-seed** validate the top 1–2 configs across **5 seeds** vs the bar. Seeds are first-class: grain=0 evidence showed seed choice mattered more than iteration count (multimodal landscape).
-- **Budget:** ≈3.4 s per SA iteration wall-clock at effort=5 → sa=50 ≈ 3 min, sa=100 ≈ 6 min → ~15–20 runs ≈ ~2 hr. The harness prints incrementally so the run can be stopped early.
+- **Budget:** ≈3.4 s per SA iteration wall-clock at effort=5 → sa=50 ≈ 3 min, sa=100 ≈ 6 min → ~15–20 runs ≈ ~2 hr, under the 3 h soft TTL. Rows are ordered highest-value-first (single-axis screening, then combined finalists, then multi-seed) so a TTL cutoff still leaves an analyzable sweep.
 
 ### 4. Outcome handling
 
@@ -69,12 +76,12 @@ Standalone manual bench (keeps `bench_sa.py` as the PR-gate bench). Loads the ca
 ## Acceptance criteria
 
 1. `SAConfig` threads end-to-end; `auto_layout_polygon(sa_config=None)` is bit-identical to today (regression test passes).
-2. `bench_sa_sweep.py` runs at grain=90 and produces the phased results table.
+2. `bench_sa_sweep.py` runs at grain=90 and produces the phased results table, and **always writes `_sweep_report.md`** even when stopped by the TTL — verified by a short smoke run with a tiny `--ttl` before the real sweep.
 3. A definitive outcome: either a ≥3-seed config beating 11699 (baked in, gates/docs updated) **or** a committed gap analysis with evidence and recommended next levers.
 4. Full engine unit + integration suites green.
 
 ## Risks
 
 - **SA may have little headroom at grain=90** (warm-start already at the bar) → likely outcome is the gap analysis. Acceptable per the goal; the scaffolding + evidence are still valuable and reusable for the GA follow-up.
-- **Sweep wall-clock** is long; mitigated by background execution + incremental output + early-stop.
+- **Sweep wall-clock** is long; mitigated by background execution + incremental output + early-stop + a 3 h soft TTL that always finalizes a report (and per-row `sa_max_time_s` so no single config hangs).
 - **Determinism across seeds** must hold for the multi-seed validation to mean anything (existing G3 covers same-seed determinism).
