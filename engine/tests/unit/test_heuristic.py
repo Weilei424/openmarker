@@ -972,3 +972,35 @@ def test_ga_max_time_s_must_be_positive():
     with pytest.raises(ValueError, match="ga_max_time_s must be > 0"):
         auto_layout_polygon([_p("0")], 1651.0, "bi", 90.0,
                             ga_generations=5, ga_max_time_s=0)
+
+
+# --- GA orchestration (island) integration tests ---
+def _grained_rect(piece_id, w=200.0, h=120.0):
+    return _p(piece_id, w, h)  # grainline_direction_deg=0.0 from the helper
+
+
+def test_ga_opt_in_returns_valid_layout_not_worse_than_baseline():
+    pieces = [_grained_rect(str(i)) for i in range(6)]
+    base = auto_layout_polygon(pieces, 1651.0, "bi", 90.0, effort=5)
+    ga_res = auto_layout_polygon(pieces, 1651.0, "bi", 90.0, effort=5,
+                                 ga_generations=5, ga_seed=1,
+                                 ga_config=GAConfig(population_size=8))
+    placements, marker, util = ga_res
+    assert len(placements) == len(pieces)        # all pieces placed
+    assert marker <= base[1] + 1e-6              # GA never worse than warm-start
+
+
+def test_ga_default_off_is_identical_to_baseline():
+    pieces = [_grained_rect(str(i)) for i in range(6)]
+    a = auto_layout_polygon(pieces, 1651.0, "bi", 90.0, effort=5)
+    b = auto_layout_polygon(pieces, 1651.0, "bi", 90.0, effort=5)  # no ga_* kwargs
+    assert a[1] == b[1] and a[2] == b[2]
+
+
+def test_ga_parallel_is_deterministic_per_seed():
+    pieces = [_grained_rect(str(i)) for i in range(6)]
+    kw = dict(effort=5, ga_generations=6, ga_seed=7,
+              ga_config=GAConfig(population_size=8))
+    r1 = auto_layout_polygon(pieces, 1651.0, "bi", 90.0, **kw)
+    r2 = auto_layout_polygon(pieces, 1651.0, "bi", 90.0, **kw)
+    assert r1[1] == r2[1]                         # identical marker across runs
