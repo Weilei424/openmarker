@@ -13,6 +13,7 @@ from __future__ import annotations
 import math
 import random as _random
 import time
+from dataclasses import dataclass, field
 from typing import Callable, NamedTuple, TYPE_CHECKING
 
 from core.layout.cancellation import is_cancelled
@@ -44,6 +45,20 @@ only this many evenly-spaced angles: [0, 360/N, 2*360/N, ...]."""
 
 MOVE_WEIGHTS: dict[str, float] = {"swap": 1.0, "reverse": 1.0, "rotation_flip": 1.0}
 """Uniform random pick across move types per iteration."""
+
+
+@dataclass
+class SAConfig:
+    """Tunable SA hyperparameters. Field defaults mirror the module constants
+    above (single source of truth). Threaded through auto_layout_polygon →
+    workers so a sweep can vary them without code edits. Picklable (crosses the
+    ProcessPoolExecutor boundary)."""
+    t0_factor: float = T0_FACTOR
+    cooling_alpha: float = COOLING_ALPHA
+    t_min: float = T_MIN
+    reverse_window_fraction: float = REVERSE_WINDOW_FRACTION
+    no_grainline_rotation_cap: int = NO_GRAINLINE_ROTATION_CAP
+    move_weights: dict = field(default_factory=lambda: dict(MOVE_WEIGHTS))
 
 
 # ---------------------------------------------------------------------------
@@ -100,14 +115,15 @@ def _swap_move(order: list[int], rng: _random.Random) -> list[int]:
     return new_order
 
 
-def _reverse_move(order: list[int], rng: _random.Random) -> list[int]:
+def _reverse_move(order: list[int], rng: _random.Random,
+                  window_fraction: float = REVERSE_WINDOW_FRACTION) -> list[int]:
     """Reverse a contiguous slice of `order`. Window length is uniform in
-    [2, cap] where cap = ceil(N * REVERSE_WINDOW_FRACTION). Window position
+    [2, cap] where cap = ceil(N * window_fraction). Window position
     is uniform-random subject to staying within bounds."""
     n = len(order)
     if n < 2:
         return list(order)
-    cap = max(2, math.ceil(n * REVERSE_WINDOW_FRACTION))
+    cap = max(2, math.ceil(n * window_fraction))
     cap = min(cap, n)
     window_len = rng.randint(2, cap)
     start = rng.randint(0, n - window_len)
@@ -140,11 +156,13 @@ def _rotation_flip_move(
     return new_rotations, piece_index
 
 
-def _sample_move_type(rng: _random.Random) -> str:
-    """Pick a move type per MOVE_WEIGHTS distribution."""
-    move_types = list(MOVE_WEIGHTS.keys())
-    weights = [MOVE_WEIGHTS[m] for m in move_types]
-    return rng.choices(move_types, weights=weights, k=1)[0]
+def _sample_move_type(rng: _random.Random, weights: dict | None = None) -> str:
+    """Pick a move type per the weights distribution (defaults to MOVE_WEIGHTS)."""
+    if weights is None:
+        weights = MOVE_WEIGHTS
+    move_types = list(weights.keys())
+    w = [weights[m] for m in move_types]
+    return rng.choices(move_types, weights=w, k=1)[0]
 
 
 # ---------------------------------------------------------------------------
@@ -152,9 +170,10 @@ def _sample_move_type(rng: _random.Random) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _temperature_at(T0: float, k: int) -> float:
-    """Geometric cooling with T_MIN floor."""
-    return max(T_MIN, T0 * (COOLING_ALPHA ** k))
+def _temperature_at(T0: float, k: int, alpha: float = COOLING_ALPHA,
+                    t_min: float = T_MIN) -> float:
+    """Geometric cooling with a t_min floor."""
+    return max(t_min, T0 * (alpha ** k))
 
 
 def _metropolis_accept(delta: float, T: float, rng: _random.Random) -> bool:
@@ -182,6 +201,7 @@ def run_sa(
     evaluator: Callable[[list[Piece], list[list[float]]], tuple[list["Placement"], float, float]],
     shared_best_value=None,
     clock: Callable[[], float] = time.perf_counter,
+    config: "SAConfig | None" = None,
 ) -> SAResult:
     """Run one SA chain. Returns best-seen state.
 
@@ -196,7 +216,9 @@ def run_sa(
       evaluator: callable taking (pieces_in_order, per_piece_rotation_singletons) → (placements, marker, util)
       shared_best_value: multiprocessing.Value('d') for cross-worker pruning, or None
       clock: time source (injected for test determinism)
+      config: optional SAConfig; defaults to SAConfig() (module constants)
     """
+    cfg = SAConfig() if config is None else config
     rng = _random.Random(seed)
 
     # Capture start_time BEFORE any work (including initial evaluation) so
@@ -238,7 +260,7 @@ def run_sa(
     best_marker = init_marker
     best_util = init_util
 
-    T0 = max(T_MIN, T0_FACTOR * init_marker)
+    T0 = max(cfg.t_min, cfg.t0_factor * init_marker)
     accept_count = 0
     improve_count = 0
     iteration = 0
@@ -255,13 +277,13 @@ def run_sa(
         new_order = current_order
         new_rotations = current_rotations
         for _retry in range(3):
-            move_type = _sample_move_type(rng)
+            move_type = _sample_move_type(rng, cfg.move_weights)
             if move_type == "swap":
                 new_order = _swap_move(current_order, rng)
                 new_rotations = current_rotations
                 break
             elif move_type == "reverse":
-                new_order = _reverse_move(current_order, rng)
+                new_order = _reverse_move(current_order, rng, cfg.reverse_window_fraction)
                 new_rotations = current_rotations
                 break
             else:  # rotation_flip
@@ -289,7 +311,7 @@ def run_sa(
             continue
 
         # Metropolis acceptance.
-        T_k = _temperature_at(T0, iteration)
+        T_k = _temperature_at(T0, iteration, cfg.cooling_alpha, cfg.t_min)
         delta = new_marker - current_marker
         if _metropolis_accept(delta, T_k, rng):
             current_order = new_order

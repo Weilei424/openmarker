@@ -372,3 +372,52 @@ def test_run_sa_terminates_at_iteration_cap():
         evaluator=stub_evaluator,
     )
     assert result.iterations_executed == 5
+
+
+def test_saconfig_defaults_match_module_constants():
+    cfg = sa.SAConfig()
+    assert cfg.t0_factor == sa.T0_FACTOR
+    assert cfg.cooling_alpha == sa.COOLING_ALPHA
+    assert cfg.t_min == sa.T_MIN
+    assert cfg.reverse_window_fraction == sa.REVERSE_WINDOW_FRACTION
+    assert cfg.no_grainline_rotation_cap == sa.NO_GRAINLINE_ROTATION_CAP
+    assert cfg.move_weights == sa.MOVE_WEIGHTS
+    assert cfg.move_weights is not sa.MOVE_WEIGHTS  # independent copy
+
+
+def test_temperature_at_respects_config_alpha_and_tmin():
+    assert sa._temperature_at(100.0, 1, alpha=0.5, t_min=1e-3) == 50.0
+    assert sa._temperature_at(100.0, 2, alpha=0.5, t_min=1e-3) == 25.0
+    assert sa._temperature_at(100.0, 100, alpha=0.5, t_min=7.0) == 7.0  # floor wins
+
+
+def test_sample_move_type_respects_weights():
+    rng = random.Random(0)
+    picks = {sa._sample_move_type(rng, {"swap": 1.0, "reverse": 0.0, "rotation_flip": 0.0})
+             for _ in range(50)}
+    assert picks == {"swap"}
+
+
+def test_reverse_move_window_fraction_caps_window():
+    rng = random.Random(3)
+    order = list(range(100))
+    new_order = sa._reverse_move(order, rng, window_fraction=0.02)  # cap=2
+    diffs = [i for i in range(100) if new_order[i] != order[i]]
+    assert len(diffs) <= 2
+
+
+def test_run_sa_honors_config_move_weights_swap_only():
+    """move_weights allowing only 'swap' → evaluator never sees a flipped rotation."""
+    pieces = [_p(f"p{i}") for i in range(5)]
+    allowed = [[0.0, 180.0] for _ in pieces]  # each piece COULD flip
+    seen = []
+
+    def stub(pieces_in_order, per_piece_rots):
+        seen.append([r[0] for r in per_piece_rots])
+        return [], 1.0, 0.0
+
+    cfg = sa.SAConfig(move_weights={"swap": 1.0, "reverse": 0.0, "rotation_flip": 0.0})
+    sa.run_sa(list(range(5)), [0.0] * 5, pieces, allowed,
+              iterations=50, max_time_s=None, seed=7, evaluator=stub, config=cfg)
+    assert seen  # evaluator was called
+    assert all(all(r == 0.0 for r in snap) for snap in seen)  # no 180 ever proposed
