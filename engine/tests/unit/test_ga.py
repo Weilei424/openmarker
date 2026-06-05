@@ -123,3 +123,118 @@ def test_seed_variant_keeps_valid_permutation_and_allowed_rotations():
     assert sorted(o) == list(range(8))
     for i in range(8):
         assert r[i] in allowed[i]
+
+
+def _index_inversion_stub():
+    """Stub evaluator: marker = order-inversions + count(rotation != 0).
+    Optimum (marker 0) = ascending order + all rotations 0. Counts calls."""
+    calls = {"n": 0}
+
+    def ev(pieces_in_order, per_piece_rots):
+        calls["n"] += 1
+        order = [int(p.id) for p in pieces_in_order]
+        inv = sum(1 for i in range(len(order)) for j in range(i + 1, len(order))
+                  if order[i] > order[j])
+        flips = sum(1 for r in per_piece_rots if r[0] != 0.0)
+        marker = float(inv + flips)
+        return ([("pl", marker)], marker, 50.0)
+
+    return ev, calls
+
+
+def test_run_ga_zero_generations_is_fast_path_no_eval():
+    pieces = [_p(str(i)) for i in range(5)]
+    ev, calls = _index_inversion_stub()
+    res = ga.run_ga(
+        warm_start_order=list(range(5)), warm_start_rotations=[0.0] * 5,
+        pieces=pieces, allowed_rotations_per_piece=[[0.0, 180.0]] * 5,
+        generations=0, max_time_s=None, seed=1, evaluator=ev,
+    )
+    assert calls["n"] == 0
+    assert res.generations_executed == 0
+    assert res.best_marker == float("inf")
+
+
+def test_run_ga_is_monotone_non_worsening_vs_warm_start():
+    pieces = [_p(str(i)) for i in range(8)]
+    ev, _ = _index_inversion_stub()
+    warm_order = [7, 6, 5, 4, 3, 2, 1, 0]      # fully reversed (28 inversions)
+    warm_rot = [180.0] * 8                       # 8 flips -> warm marker 36
+    res = ga.run_ga(
+        warm_start_order=warm_order, warm_start_rotations=warm_rot,
+        pieces=pieces, allowed_rotations_per_piece=[[0.0, 180.0]] * 8,
+        generations=10, max_time_s=None, seed=42, evaluator=ev,
+        config=ga.GAConfig(population_size=16, mutation_rate=0.6),
+    )
+    # Warm-start marker = 28 + 8 = 36; GA best must never exceed it.
+    assert res.best_marker <= 36.0
+
+
+def test_run_ga_improves_on_a_suboptimal_start():
+    pieces = [_p(str(i)) for i in range(8)]
+    ev, _ = _index_inversion_stub()
+    res = ga.run_ga(
+        warm_start_order=[7, 6, 5, 4, 3, 2, 1, 0], warm_start_rotations=[180.0] * 8,
+        pieces=pieces, allowed_rotations_per_piece=[[0.0, 180.0]] * 8,
+        generations=25, max_time_s=None, seed=42, evaluator=ev,
+        config=ga.GAConfig(population_size=20, mutation_rate=0.6),
+    )
+    assert res.best_marker < 36.0          # strictly improved on the warm-start
+    assert res.generations_executed == 25
+
+
+def test_run_ga_is_deterministic_per_seed():
+    pieces = [_p(str(i)) for i in range(8)]
+    ev1, _ = _index_inversion_stub()
+    ev2, _ = _index_inversion_stub()
+    kw = dict(
+        warm_start_order=[7, 6, 5, 4, 3, 2, 1, 0], warm_start_rotations=[180.0] * 8,
+        pieces=pieces, allowed_rotations_per_piece=[[0.0, 180.0]] * 8,
+        generations=15, max_time_s=None, seed=99,
+        config=ga.GAConfig(population_size=16, mutation_rate=0.5),
+    )
+    r1 = ga.run_ga(evaluator=ev1, **kw)
+    r2 = ga.run_ga(evaluator=ev2, **kw)
+    assert r1.best_marker == r2.best_marker
+    assert r1.best_order == r2.best_order
+    assert r1.best_rotations == r2.best_rotations
+
+
+def test_run_ga_respects_time_cap_via_injected_clock():
+    pieces = [_p(str(i)) for i in range(5)]
+    ev, _ = _index_inversion_stub()
+    ticks = iter([0.0] + [100.0] * 50)         # start=0, then time already past cap
+    res = ga.run_ga(
+        warm_start_order=list(range(5)), warm_start_rotations=[0.0] * 5,
+        pieces=pieces, allowed_rotations_per_piece=[[0.0, 180.0]] * 5,
+        generations=100, max_time_s=1.0, seed=1, evaluator=ev,
+        clock=lambda: next(ticks),
+    )
+    assert res.generations_executed == 0       # cap fires before the first generation
+
+
+def test_run_ga_breaks_on_cancellation(monkeypatch):
+    pieces = [_p(str(i)) for i in range(5)]
+    ev, _ = _index_inversion_stub()
+    monkeypatch.setattr(ga, "is_cancelled", lambda: True)
+    res = ga.run_ga(
+        warm_start_order=list(range(5)), warm_start_rotations=[0.0] * 5,
+        pieces=pieces, allowed_rotations_per_piece=[[0.0, 180.0]] * 5,
+        generations=100, max_time_s=None, seed=1, evaluator=ev,
+    )
+    assert res.generations_executed == 0
+
+
+def test_run_ga_treats_value_error_as_infeasible():
+    pieces = [_p(str(i)) for i in range(4)]
+
+    def bad_ev(pieces_in_order, per_piece_rots):
+        raise ValueError("cannot place")
+
+    res = ga.run_ga(
+        warm_start_order=list(range(4)), warm_start_rotations=[0.0] * 4,
+        pieces=pieces, allowed_rotations_per_piece=[[0.0, 180.0]] * 4,
+        generations=3, max_time_s=None, seed=1, evaluator=bad_ev,
+        config=ga.GAConfig(population_size=6),
+    )
+    assert res.best_marker == float("inf")     # every individual infeasible

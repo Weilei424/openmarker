@@ -138,5 +138,121 @@ def _seed_variant(order: list[int], rotations: list[float],
     return o, r
 
 
-def run_ga(*args, **kwargs):  # implemented in Task 4
-    raise NotImplementedError("run_ga is implemented in Task 4")
+# ---------------------------------------------------------------------------
+# Public entry point.
+# ---------------------------------------------------------------------------
+
+
+def run_ga(
+    warm_start_order: list[int],
+    warm_start_rotations: list[float],
+    pieces: list[Piece],
+    allowed_rotations_per_piece: list[list[float]],
+    generations: int,
+    max_time_s: float | None,
+    seed: int,
+    evaluator: Callable[[list[Piece], list[list[float]]],
+                        tuple[list["Placement"], float, float]],
+    clock: Callable[[], float] = time.perf_counter,
+    config: "GAConfig | None" = None,
+) -> GAResult:
+    """Run one island GA. Returns the best-seen individual.
+
+    Args mirror sa.run_sa. `evaluator(pieces_in_order, per_piece_rotation_singletons)
+    -> (placements, marker, util)`; a ValueError means "infeasible" -> +inf fitness.
+    No shared_best_value: GA does not prune (spec section 7), so it is deterministic.
+    """
+    cfg = GAConfig() if config is None else config
+    rng = _random.Random(seed)
+    start = clock()
+
+    # Fast path: 0 generations. The phase aggregator retains warm_start_best, so
+    # we return an inf sentinel without touching the evaluator (mirrors run_sa).
+    if generations == 0:
+        return GAResult(list(warm_start_order), list(warm_start_rotations),
+                        [], float("inf"), 0.0, 0, 0)
+
+    P = max(2, cfg.population_size)
+    weights = cfg.mutation_move_weights
+
+    def _eval(order: list[int], rots: list[float]):
+        pieces_in_order = [pieces[idx] for idx in order]
+        per_piece = [[rots[idx]] for idx in order]
+        try:
+            placements, marker, util = evaluator(pieces_in_order, per_piece)
+            return marker, util, placements
+        except ValueError:
+            return float("inf"), 0.0, []
+
+    # Initial population: individual 0 = warm-start; rest = mutated variants.
+    pop_orders = [list(warm_start_order)]
+    pop_rots = [list(warm_start_rotations)]
+    for _ in range(P - 1):
+        o, r = _seed_variant(warm_start_order, warm_start_rotations,
+                             allowed_rotations_per_piece, rng, weights,
+                             cfg.seed_mutation_moves)
+        pop_orders.append(o)
+        pop_rots.append(r)
+
+    fits: list[float] = []
+    utils: list[float] = []
+    places: list = []
+    evals = 0
+    for o, r in zip(pop_orders, pop_rots):
+        m, u, pl = _eval(o, r)
+        evals += 1
+        fits.append(m)
+        utils.append(u)
+        places.append(pl)
+
+    def _capture_best(gens_done: int) -> GAResult:
+        bi = min(range(len(fits)), key=lambda j: fits[j])
+        return GAResult(list(pop_orders[bi]), list(pop_rots[bi]), list(places[bi]),
+                        fits[bi], utils[bi], gens_done, evals)
+
+    best = _capture_best(0)
+    gens_done = 0
+
+    for _gen in range(generations):
+        if is_cancelled():
+            break
+        if max_time_s is not None and (clock() - start) >= max_time_s:
+            break
+
+        # Elitism: carry the best `elitism_count` unchanged.
+        elite = sorted(range(len(fits)), key=lambda j: fits[j])[: max(0, cfg.elitism_count)]
+        new_orders = [list(pop_orders[j]) for j in elite]
+        new_rots = [list(pop_rots[j]) for j in elite]
+        new_fits = [fits[j] for j in elite]
+        new_utils = [utils[j] for j in elite]
+        new_places = [list(places[j]) for j in elite]
+
+        while len(new_orders) < P:
+            i1 = _tournament_select(fits, cfg.tournament_size, rng)
+            i2 = _tournament_select(fits, cfg.tournament_size, rng)
+            if rng.random() < cfg.crossover_rate:
+                c_order = _order_crossover(pop_orders[i1], pop_orders[i2], rng)
+                c_rot = _uniform_rotation_crossover(pop_rots[i1], pop_rots[i2], rng)
+            else:
+                c_order = list(pop_orders[i1])
+                c_rot = list(pop_rots[i1])
+            if rng.random() < cfg.mutation_rate:
+                c_order, c_rot = _mutate(c_order, c_rot,
+                                         allowed_rotations_per_piece, rng, weights)
+            m, u, pl = _eval(c_order, c_rot)
+            evals += 1
+            new_orders.append(c_order)
+            new_rots.append(c_rot)
+            new_fits.append(m)
+            new_utils.append(u)
+            new_places.append(pl)
+
+        pop_orders, pop_rots = new_orders, new_rots
+        fits, utils, places = new_fits, new_utils, new_places
+        gens_done += 1
+
+        candidate = _capture_best(gens_done)
+        if candidate.best_marker < best.best_marker:
+            best = candidate
+
+    return best._replace(generations_executed=gens_done, evaluations=evals)
