@@ -17,6 +17,7 @@ from core.layout.cancellation import CancellationError, is_cancelled
 from core.layout.clustering import Cluster, pre_cluster_pieces, expand_cluster_placement
 from core.layout.grain import allowed_rotations
 from core.layout.sa import WarmStart, run_sa, NO_GRAINLINE_ROTATION_CAP, SAConfig
+from core.layout.ga import GAConfig, run_ga
 from core.models.piece import Piece
 
 
@@ -120,6 +121,87 @@ def _init_sa_worker(
     _worker_sa_disable_pruning = disable_pruning
     _worker_sa_disable_nfp_cache = disable_nfp_cache
     _worker_sa_config = sa_config
+
+
+# ---------------------------------------------------------------------------
+# GA worker globals -- set by _init_ga_worker, read by _run_ga_chain.
+# (No shared_best: GA does not prune -- spec section 7.)
+# ---------------------------------------------------------------------------
+_worker_ga_warm_starts: list[WarmStart] = []
+_worker_ga_blf_input: list[Piece] = []
+_worker_ga_fabric_width_mm: float = 0.0
+_worker_ga_fabric_grain_deg: float = 0.0
+_worker_ga_allowed_rotations: list[list[float]] = []
+_worker_ga_disable_nfp_cache: bool = False
+_worker_ga_config: "GAConfig | None" = None
+
+
+def _init_ga_worker(
+    warm_starts,
+    blf_input,
+    fabric_width_mm,
+    fabric_grain_deg,
+    allowed_rotations_per_piece,
+    disable_nfp_cache,
+    ga_config,
+):
+    global _worker_ga_warm_starts, _worker_ga_blf_input, _worker_ga_fabric_width_mm
+    global _worker_ga_fabric_grain_deg, _worker_ga_allowed_rotations
+    global _worker_ga_disable_nfp_cache, _worker_ga_config
+    _worker_ga_warm_starts = warm_starts
+    _worker_ga_blf_input = blf_input
+    _worker_ga_fabric_width_mm = fabric_width_mm
+    _worker_ga_fabric_grain_deg = fabric_grain_deg
+    _worker_ga_allowed_rotations = allowed_rotations_per_piece
+    _worker_ga_disable_nfp_cache = disable_nfp_cache
+    _worker_ga_config = ga_config
+
+
+def _run_ga_chain(worker_index: int, generations: int,
+                  max_time_s: float | None, seed: int):
+    """Module-level entry for ProcessPoolExecutor. Picks a warm-start, builds the
+    evaluator closure, calls ga.run_ga. Returns GAResult or None."""
+    from core.layout.ga import run_ga
+
+    if not _worker_ga_warm_starts:
+        return None
+    chosen = _worker_ga_warm_starts[worker_index % len(_worker_ga_warm_starts)]
+
+    pid_to_index = {p.id: i for i, p in enumerate(_worker_ga_blf_input)}
+    warm_order = [pid_to_index[p.id] for p in chosen.sorted_pieces]
+    warm_rot = [0.0] * len(_worker_ga_blf_input)
+    for sorted_idx, p in enumerate(chosen.sorted_pieces):
+        warm_rot[pid_to_index[p.id]] = chosen.rotations_used[sorted_idx]
+
+    nfp_cache: NfpCache = {}
+
+    def evaluator(pieces_in_order, per_piece_rotations):
+        cache = {} if _worker_ga_disable_nfp_cache else nfp_cache
+        try:
+            return _blf_pack_nfp(
+                pieces_in_order,
+                _worker_ga_fabric_width_mm,
+                chosen.mode,
+                _worker_ga_fabric_grain_deg,
+                nfp_cache=cache,
+                override_rotations=per_piece_rotations,
+                presorted=True,
+                skip_validation=True,
+            )
+        except _PrunedRun:  # no shared cutoff is passed, so this cannot fire;
+            raise ValueError("pruned")  # defensive translation for run_ga.
+
+    return run_ga(
+        warm_start_order=warm_order,
+        warm_start_rotations=warm_rot,
+        pieces=_worker_ga_blf_input,
+        allowed_rotations_per_piece=_worker_ga_allowed_rotations,
+        generations=generations,
+        max_time_s=max_time_s,
+        seed=seed,
+        evaluator=evaluator,
+        config=_worker_ga_config,
+    )
 
 
 def _run_sa_chain(worker_index: int, iterations: int, max_time_s: float | None, seed: int):
@@ -794,6 +876,10 @@ def auto_layout_polygon(
     sa_max_time_s: float | None = None,
     sa_seed: int = 0,
     sa_config: "SAConfig | None" = None,
+    ga_generations: int = 0,
+    ga_max_time_s: float | None = None,
+    ga_seed: int = 0,
+    ga_config: "GAConfig | None" = None,
 ) -> tuple[list[Placement], float, float]:
     """No-Fit-Polygon-based Bottom-Left-Fill (slow mode, accurate).
 
@@ -860,6 +946,20 @@ def auto_layout_polygon(
 
     `sa_seed`: base RNG seed for SA. Each parallel chain k uses
     `sa_seed + k` so multi-restart runs are reproducible. Default 0.
+
+    `ga_generations`: when > 0, run an island-model Genetic Algorithm on top of
+    the best-of-4 sort-strategies result instead of SA. K = _worker_count(effort)
+    independent populations evolve `ga_generations` generations each; the best
+    individual across islands (and the retained warm-start) wins. Default 0 (GA
+    disabled). Mutually exclusive with both `disable_clustering=False` and
+    `sa_iterations > 0` -- raises ValueError. GA does not use cross-island pruning,
+    so results are deterministic per `ga_seed`. See PERFORMANCE.md section 4.7 and
+    engine/core/layout/ga.py.
+
+    `ga_max_time_s`: optional wall-clock cap per GA island in seconds. Must be > 0
+    when set. Default None (generation-cap only).
+
+    `ga_seed`: base RNG seed for GA. Island k uses `ga_seed + k`. Default 0.
     """
     # SA meta-heuristic parameter validation. Keep cheap checks at the top so
     # bad calls fail before any layout work happens.
@@ -872,6 +972,20 @@ def auto_layout_polygon(
         )
     if sa_max_time_s is not None and sa_max_time_s <= 0:
         raise ValueError(f"sa_max_time_s must be > 0 when set, got {sa_max_time_s}")
+    if ga_generations < 0:
+        raise ValueError(f"ga_generations must be >= 0, got {ga_generations}")
+    if ga_generations > 0 and not disable_clustering:
+        raise ValueError(
+            "ga_generations > 0 cannot be combined with disable_clustering=False; "
+            "see PERFORMANCE.md section 4.7 for the future-work note."
+        )
+    if ga_generations > 0 and sa_iterations > 0:
+        raise ValueError(
+            "ga_generations > 0 and sa_iterations > 0 are mutually exclusive; "
+            "run one meta-heuristic per call."
+        )
+    if ga_max_time_s is not None and ga_max_time_s <= 0:
+        raise ValueError(f"ga_max_time_s must be > 0 when set, got {ga_max_time_s}")
 
     if disable_clustering:
         blf_input = pieces
@@ -913,7 +1027,7 @@ def auto_layout_polygon(
                 except _PrunedRun:
                     continue
                 best = _shorter(best, result)
-                if sa_iterations > 0:
+                if sa_iterations > 0 or ga_generations > 0:
                     warm_starts.append(_build_warm_start(
                         blf_input, _SORT_STRATEGIES[sort_index], mode, result
                     ))
@@ -923,6 +1037,12 @@ def auto_layout_polygon(
                 best, warm_starts, blf_input, fabric_width_mm, grain_mode,
                 fabric_grain_deg, sa_iterations, sa_max_time_s, sa_seed,
                 effort, disable_nfp_cache, disable_pruning, clusters, sa_config,
+            )
+        if ga_generations > 0:
+            return _run_ga_phase(
+                best, warm_starts, blf_input, fabric_width_mm, grain_mode,
+                fabric_grain_deg, ga_generations, ga_max_time_s, ga_seed,
+                effort, disable_nfp_cache, clusters, ga_config,
             )
         if clusters:
             placements, marker_length, utilization = best
@@ -978,7 +1098,7 @@ def auto_layout_polygon(
                             if result[1] < shared_best.value:
                                 shared_best.value = result[1]
                     best = _shorter(best, result)
-                    if sa_iterations > 0:
+                    if sa_iterations > 0 or ga_generations > 0:
                         mode, sort_index = future_meta[f]
                         warm_starts.append(_build_warm_start(
                             blf_input, _SORT_STRATEGIES[sort_index], mode, result
@@ -994,6 +1114,12 @@ def auto_layout_polygon(
             best, warm_starts, blf_input, fabric_width_mm, grain_mode,
             fabric_grain_deg, sa_iterations, sa_max_time_s, sa_seed,
             effort, disable_nfp_cache, disable_pruning, clusters, sa_config,
+        )
+    if ga_generations > 0:
+        return _run_ga_phase(
+            best, warm_starts, blf_input, fabric_width_mm, grain_mode,
+            fabric_grain_deg, ga_generations, ga_max_time_s, ga_seed,
+            effort, disable_nfp_cache, clusters, ga_config,
         )
     if clusters:
         placements, marker_length, utilization = best
@@ -1149,3 +1275,99 @@ def _run_sa_phase(
         placements = _expand_clustered_placements(placements, clusters)
         return placements, marker_length, utilization
     return final
+
+
+def _run_ga_phase(
+    warm_start_best: tuple[list[Placement], float, float],
+    warm_starts: list[WarmStart],
+    blf_input: list[Piece],
+    fabric_width_mm: float,
+    grain_mode: str,
+    fabric_grain_deg: float,
+    ga_generations: int,
+    ga_max_time_s: float | None,
+    ga_seed: int,
+    effort: int,
+    disable_nfp_cache: bool,
+    clusters: list,
+    ga_config: "GAConfig | None" = None,
+) -> tuple[list[Placement], float, float]:
+    """Run K island GAs and aggregate with warm_start_best retained. GA never
+    regresses below the warm-start. No shared-cutoff pruning (deterministic)."""
+    cfg = GAConfig() if ga_config is None else ga_config
+
+    # Deterministic order: marker, then mode, then piece-id signature. The
+    # parallel warm-start phase appends in as_completed order, so a marker-only
+    # sort could shuffle island seeding on ties and break per-seed determinism.
+    warm_starts_sorted = sorted(
+        warm_starts,
+        key=lambda ws: (ws.marker, ws.mode, tuple(p.id for p in ws.sorted_pieces)),
+    )
+    if not warm_starts_sorted:
+        if clusters:
+            placements, marker_length, utilization = warm_start_best
+            placements = _expand_clustered_placements(placements, clusters)
+            return placements, marker_length, utilization
+        return warm_start_best
+
+    allowed_rotations_per_piece: list[list[float]] = []
+    for p in blf_input:
+        rots = allowed_rotations(grain_mode, fabric_grain_deg, p.grainline_direction_deg)
+        if len(rots) > cfg.no_grainline_rotation_cap:
+            step = 360.0 / cfg.no_grainline_rotation_cap
+            rots = [step * i for i in range(cfg.no_grainline_rotation_cap)]
+        allowed_rotations_per_piece.append(rots)
+
+    workers = _worker_count(effort)
+    ga_use_pool = workers > 1 and ga_generations >= 1
+
+    chain_results: list = []  # (GAResult, worker_index)
+
+    if not ga_use_pool:
+        _init_ga_worker(
+            warm_starts_sorted, blf_input, fabric_width_mm, fabric_grain_deg,
+            allowed_rotations_per_piece, disable_nfp_cache, cfg,
+        )
+        result = _run_ga_chain(0, ga_generations, ga_max_time_s, ga_seed)
+        if result is not None:
+            chain_results.append((result, 0))
+    else:
+        with ProcessPoolExecutor(
+            max_workers=workers,
+            initializer=_init_ga_worker,
+            initargs=(
+                warm_starts_sorted, blf_input, fabric_width_mm, fabric_grain_deg,
+                allowed_rotations_per_piece, disable_nfp_cache, cfg,
+            ),
+        ) as pool:
+            _set_current_executor(pool)
+            try:
+                futures = {
+                    pool.submit(_run_ga_chain, k, ga_generations, ga_max_time_s, ga_seed + k): k
+                    for k in range(workers)
+                }
+                try:
+                    for f in as_completed(futures):
+                        k = futures[f]
+                        result = f.result()
+                        if result is not None:
+                            chain_results.append((result, k))
+                except BrokenProcessPool as e:
+                    raise CancellationError("GA cancelled (workers terminated).") from e
+            finally:
+                _set_current_executor(None)
+
+    # Aggregate. warm_start_best always retained; deterministic tie-break by
+    # (marker, worker_index) with the warm-start at index -1 so it wins exact ties.
+    best_placements, best_marker, best_util = warm_start_best
+    best_key = (best_marker, -1)
+    for result, k in chain_results:
+        if result.best_placements and (result.best_marker, k) < best_key:
+            best_marker = result.best_marker
+            best_util = result.best_util
+            best_placements = result.best_placements
+            best_key = (result.best_marker, k)
+
+    if clusters:
+        best_placements = _expand_clustered_placements(best_placements, clusters)
+    return best_placements, best_marker, best_util

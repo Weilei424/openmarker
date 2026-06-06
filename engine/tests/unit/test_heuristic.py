@@ -940,3 +940,89 @@ def test_auto_layout_sa_config_deterministic_parallel():
     _, m2, _ = auto_layout_polygon(p, 500, "bi", 0.0, effort=5,
                                    sa_iterations=50, sa_seed=11, sa_config=cfg)
     assert m1 == m2
+
+
+# --- GA parameter validation tests ---
+# Reuse the file's _make_rect builder; _p here is a grainline=0.0 rect.
+def _p(piece_id, w=100.0, h=50.0):
+    return _make_rect(piece_id, w, h, grainline_deg=0.0)
+
+
+from core.layout.ga import GAConfig
+
+
+def test_ga_negative_generations_raises():
+    with pytest.raises(ValueError, match="ga_generations must be >= 0"):
+        auto_layout_polygon([_p("0")], 1651.0, "bi", 90.0, ga_generations=-1)
+
+
+def test_ga_with_clustering_raises():
+    with pytest.raises(ValueError, match="cannot be combined with disable_clustering"):
+        auto_layout_polygon([_p("0")], 1651.0, "bi", 90.0,
+                            ga_generations=5, disable_clustering=False)
+
+
+def test_ga_and_sa_mutually_exclusive():
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        auto_layout_polygon([_p("0")], 1651.0, "bi", 90.0,
+                            ga_generations=5, sa_iterations=5)
+
+
+def test_ga_max_time_s_must_be_positive():
+    with pytest.raises(ValueError, match="ga_max_time_s must be > 0"):
+        auto_layout_polygon([_p("0")], 1651.0, "bi", 90.0,
+                            ga_generations=5, ga_max_time_s=0)
+
+
+# --- GA orchestration (island) integration tests ---
+def _grained_rect(piece_id, w=200.0, h=120.0):
+    return _p(piece_id, w, h)  # grainline_direction_deg=0.0 from the helper
+
+
+def test_ga_opt_in_returns_valid_layout_not_worse_than_baseline():
+    pieces = [_grained_rect(str(i)) for i in range(6)]
+    base = auto_layout_polygon(pieces, 1651.0, "bi", 90.0, effort=5)
+    ga_res = auto_layout_polygon(pieces, 1651.0, "bi", 90.0, effort=5,
+                                 ga_generations=5, ga_seed=1,
+                                 ga_config=GAConfig(population_size=8))
+    placements, marker, util = ga_res
+    assert len(placements) == len(pieces)        # all pieces placed
+    assert marker <= base[1] + 1e-6              # GA never worse than warm-start
+
+
+def test_ga_default_off_is_identical_to_baseline():
+    pieces = [_grained_rect(str(i)) for i in range(6)]
+    a = auto_layout_polygon(pieces, 1651.0, "bi", 90.0, effort=5)
+    b = auto_layout_polygon(pieces, 1651.0, "bi", 90.0, effort=5)  # no ga_* kwargs
+    assert a[1] == b[1] and a[2] == b[2]
+
+
+def test_ga_parallel_is_deterministic_per_seed():
+    pieces = [_grained_rect(str(i)) for i in range(6)]
+    kw = dict(effort=5, ga_generations=6, ga_seed=7,
+              ga_config=GAConfig(population_size=8))
+    r1 = auto_layout_polygon(pieces, 1651.0, "bi", 90.0, **kw)
+    r2 = auto_layout_polygon(pieces, 1651.0, "bi", 90.0, **kw)
+    assert r1[1] == r2[1]                         # identical marker across runs
+
+
+def test_ga_phase_invoked_only_when_enabled(monkeypatch):
+    """Proves GA actually executes when ga_generations>0 (and not otherwise),
+    independent of whether it improves on the warm-start (on a tiny toy input it
+    cannot). Guards against a silent no-op wiring regression that the other
+    integration tests would not catch."""
+    import core.layout.heuristic as h
+    calls = {"n": 0}
+    real = h._run_ga_phase
+
+    def spy(*args, **kwargs):
+        calls["n"] += 1
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(h, "_run_ga_phase", spy)
+    pieces = [_grained_rect(str(i)) for i in range(4)]
+    auto_layout_polygon(pieces, 1651.0, "bi", 90.0, effort=5)  # GA off -> not called
+    assert calls["n"] == 0
+    auto_layout_polygon(pieces, 1651.0, "bi", 90.0, effort=5,
+                        ga_generations=3, ga_config=GAConfig(population_size=6))
+    assert calls["n"] == 1                          # GA on -> phase invoked once
