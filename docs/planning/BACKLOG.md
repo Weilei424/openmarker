@@ -173,6 +173,19 @@ Task checklist:
 - [x] SA hyperparameter tuning at grain=90 — rotation-flip-weighted default (`SAConfig`) beats the bar (11578.5mm vs 11699). See PERFORMANCE.md § 4.6 + § 6 [2026-06-05].
 - [x] GA meta-heuristic wrapper (opt-in island-model GA) — reuses the `WarmStart`/`ProcessPoolExecutor` scaffolding + `sa.py` move operators. Uniform-weight default **beats the bar AND SA** (11426.6mm / 81.29%, < bar on 5/5 seeds; deterministic per seed). See PERFORMANCE.md § 4.7 + § 6 [2026-06-05].
 - [ ] Expose SA/GA to the GUI (opt-in "optimize harder") so users actually get the tuning win — `POST /auto-layout` + frontend wiring; both are engine-Python-only today (would use the existing `/cancel-layout` + `sa_max_time_s` / `ga_max_time_s`). GA is the stronger default (§ 4.7). See PERFORMANCE.md § 4.6 + § 4.7.
+
+  > **Plan:** `docs/superpowers/plans/2026-06-06-expose-optimizer-gui.md`. Design: `docs/superpowers/specs/2026-06-06-expose-optimizer-gui-design.md`. Fast/Better/Best quality selector → GA-only (SA stays engine-only); Stop returns the warm-start; `quality` joins the cache key.
+  - [ ] Engine: `StoppedWithWarmStart` exception (`cancellation.py`)
+  - [ ] Engine: GA cancel → warm-start fallback (`heuristic.py::_ga_phase_or_warm_start`)
+  - [ ] Engine: `quality` in the cache dedup key (`cache.py`)
+  - [ ] Engine: `/auto-layout` `quality` field → GA knobs in `_do_layout`; `stopped` in response (`api/main.py`)
+  - [ ] Engine: budget-validation bench locks `better`/`best` budgets (`bench_optimizer_tiers.py`)
+  - [ ] Frontend: `LayoutQuality` type + `stopped?` on `AutoLayoutResponse` (`types/engine.ts`)
+  - [ ] Frontend: `QualityPanel` Fast/Better/Best selector (+ test)
+  - [ ] Frontend: `useAutoLayout` sends `quality` (+ test)
+  - [ ] Frontend: `App.tsx` quality state, panel section, elapsed timer, stopped status
+  - [ ] Docs: PERFORMANCE.md § 6 entry + check off this list
+
 - [ ] Make parallel SA's improving path deterministic (deterministic only with `disable_pruning` today — timing-dependent cutoff pruning). See PERFORMANCE.md § 6 [2026-06-05].
 - [ ] Remaining clustering follow-ups (heterogeneous clustering, cluster-aware sort) + open meta items. See PERFORMANCE.md § 5.
 
