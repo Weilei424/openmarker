@@ -43,8 +43,13 @@ TOURNAMENT_SIZE: int = 3
 ELITISM_COUNT: int = 2
 SEED_MUTATION_MOVES: int = 2
 """Moves applied to the warm-start to create each initial-population variant."""
-MUTATION_MOVE_WEIGHTS: dict = {"swap": 1.0, "reverse": 1.0, "rotation_flip": 3.0}
-"""Mutation move-type weights; rotation_flip favored, matching SA's tuning win."""
+MUTATION_MOVE_WEIGHTS: dict = {"swap": 1.0, "reverse": 1.0, "rotation_flip": 1.0}
+"""Mutation move-type weights. UNIFORM (1:1:1) is the tuned default: the
+2026-06-05 grain=90 sweep found uniform beats rotation-flip-heavy for GA
+(11426.6 vs 11518.8mm at seed 42; < bar on 5/5 seeds). Unlike SA -- which has no
+crossover and relied on rotation_flip moves to explore grain choices -- GA's
+uniform rotation crossover already recombines per-piece rotations, so mutation is
+better spent on order diversity (swap/reverse). See PERFORMANCE.md section 6 [2026-06-05]."""
 
 
 @dataclass

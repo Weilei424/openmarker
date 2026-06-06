@@ -35,8 +35,10 @@ def test_ga_module_exports_and_config_defaults():
     assert cfg.elitism_count == ga.ELITISM_COUNT
     assert cfg.no_grainline_rotation_cap == ga.NO_GRAINLINE_ROTATION_CAP
     assert cfg.mutation_move_weights == ga.MUTATION_MOVE_WEIGHTS
-    # rotation_flip favored, matching SA's tuning win (spec section 5.4).
-    assert cfg.mutation_move_weights["rotation_flip"] == 3.0
+    # UNIFORM weights are the tuned default (1:1:1) -- the 2026-06-05 sweep found
+    # uniform beats rotation-flip-heavy for GA (crossover already recombines
+    # rotations). Guards against an accidental revert; see PERFORMANCE.md s6.
+    assert cfg.mutation_move_weights["rotation_flip"] == 1.0
     # Sanity bounds.
     assert cfg.population_size >= 2
     assert 0.0 <= cfg.crossover_rate <= 1.0

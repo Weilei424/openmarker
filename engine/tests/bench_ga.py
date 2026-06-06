@@ -127,8 +127,12 @@ def main() -> int:
 
     if marker < BAR:
         print(f"G5 PASS: GA {marker:.1f} < bar {BAR}", flush=True)
+    elif args.smoke:
+        print(f"G5 INFO (smoke config too small to judge): GA {marker:.1f} vs bar {BAR}", flush=True)
     else:
-        print(f"G5 INFO: GA {marker:.1f} did NOT beat bar {BAR} (gap-analysis path)", flush=True)
+        # PR-blocking since the 2026-06-05 sweep: uniform-weights GA beats the bar
+        # on 5/5 seeds (11426-11485mm). A full-config run that misses it is a regression.
+        failures.append(f"G5 GA {marker:.1f} did not beat bar {BAR}")
 
     print("GATES:", ("FAIL: " + "; ".join(failures)) if failures else "G1-G4 PASS", flush=True)
     return 1 if failures else 0
