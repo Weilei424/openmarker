@@ -663,3 +663,25 @@ Add new entries here as work progresses. Each entry should record:
   `engine/tests/bench_ga_sweep.py` (sweep). Spec/plan:
   `docs/superpowers/specs/2026-06-05-ga-meta-heuristic-design.md`,
   `docs/superpowers/plans/2026-06-05-ga-meta-heuristic.md`.
+
+### 2026-06-06 — GA optimizer exposed to the GUI (Fast / Better / Best)
+
+- **What:** `POST /auto-layout` gained an optional `quality` field
+  (`fast` | `better` | `best`, default `fast` = today's warm-start, bit-identical).
+  `_do_layout` maps `better`/`best` to `auto_layout_polygon(ga_generations=12,
+  ga_max_time_s=<budget>, ga_seed=42, effort=4)`. Budgets: `better=180s`,
+  `best=420s` (`api.main.QUALITY_BUDGETS_S`).
+- **Stop:** a GA cancellation now returns the pre-computed warm-start
+  (`StoppedWithWarmStart`) as HTTP 200 + `stopped=true`, cached as `fast`.
+- **Cache:** `quality` joined the dedup key (a Best run never returns a cached Fast result).
+- **Frontend:** `QualityPanel` radio group + live elapsed timer; SA stays engine-only.
+- **Validation** (`bench_optimizer_tiers.py`, sample_2.dxf ×10, fabric=1651, bi-grain @90, effort=4):
+  fast=11699.4mm/79.39%; better=11531.9mm/80.54% (~222s wall); best=11456.2mm/81.08%
+  (~486s wall) — both beat the bar (11699mm). GATES: PASS.
+- **Code:** `engine/api/main.py` (tier map + stopped handling),
+  `engine/core/layout/heuristic.py` (`_ga_phase_or_warm_start`),
+  `engine/core/layout/cancellation.py` (`StoppedWithWarmStart`),
+  `engine/core/layout/cache.py` (quality key),
+  `frontend/src/components/sidebar/QualityPanel.tsx`.
+  Spec: `docs/superpowers/specs/2026-06-06-expose-optimizer-gui-design.md`;
+  plan: `docs/superpowers/plans/2026-06-06-expose-optimizer-gui.md`.
