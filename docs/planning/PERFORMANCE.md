@@ -46,7 +46,7 @@ Canonical real-workload benchmark used for all gain comparisons:
 | **OpenMarker pre-PR-#7 baseline (the bar to beat)**   | **11699**          | **79.4%**   | **Historical best on this workload — and what the 2026-05-30 manual GUI run reproduced exactly. All future algorithm changes must hit ≤ 11699mm marker / ≥ 79.4% utilization on this workload to count as a win.** |
 | Current bench unclustered NFP-BLF (effort=5)          | 11699.4            | 79.39%      | At the locked 90° grain the bench now matches the GUI and the bar (§ 5.C). Was 12249/75.83% at the erroneous grain=0. |
 | **OpenMarker SA-tuned (rotation-flip 3:1, opt-in)**   | **11578.5**        | **80.22%**  | **Beats the bar ~1.0% — best of the 2026-06-05 grain=90 SA sweep; < bar on ≥3 seeds. Opt-in via `sa_iterations>0`; see § 4.6 + § 6 [2026-06-05].** |
-| **OpenMarker GA-tuned (uniform-weight, opt-in)**      | **11426.6**        | **81.29%**  | **Beats the bar ~2.3% — and beats SA-tuned by ~0.8%. Best of the 2026-06-05 grain=90 GA sweep; < bar on 5/5 seeds (11426–11485). Opt-in via `ga_generations>0`; see § 4.7 + § 6 [2026-06-05].** |
+| **OpenMarker GA-tuned (uniform-weight, opt-in)**      | **11412.5**        | **81.39%**  | **`bench_ga.py` gens=12 — beats the bar ~2.5% and SA's best (11517) by ~0.9%. The time-capped sweep's multi-seed best is 11426.6, < bar on 5/5 seeds (11426–11485). Opt-in via `ga_generations>0`; see § 4.7 + § 6 [2026-06-05].** |
 | Clustering — bbox path (off by default, opt-in)       | 24649.7            | 37.68%      | +110.7% vs the bar. Mechanism shipped opt-in; see §4. (Re-measured at grain=90.) |
 | Clustering — union path (off by default, opt-in)      | 23591.6            | 39.37%      | +101.6% vs the bar. Beats bbox by ~4% but still loses. See §4. (Re-measured at grain=90.) |
 
@@ -636,7 +636,10 @@ Add new entries here as work progresses. Each entry should record:
   Multi-seed validation of uniform weights (seeds 42/7/13/21/99):
   11426.6 / 11456.7 / 11473.7 / 11473.7 / 11485.4 — **5/5 beat the bar AND beat
   SA's floor (11517)**. So GA is the stronger meta-heuristic on this workload
-  (~0.8% better than SA, ~2.3% better than the bar).
+  (~0.8% better than SA, ~2.3% better than the bar). The permanent acceptance
+  bench (`bench_ga.py`, gens=12, no time cap) reaches **11412.5mm / 81.39%** at
+  seed 42 — slightly better than the time-capped sweep figure since it runs all
+  12 generations.
 - **Why uniform (not rot-heavy like SA):** GA's *uniform rotation crossover*
   already recombines per-piece grain choices across the population, so a
   rotation-flip-heavy *mutation* is largely redundant; uniform weights spend
