@@ -122,3 +122,28 @@ def test_find_by_settings_newest_match_wins():
     )
     assert hit is not None
     assert hit.id == "new"
+
+
+def test_find_by_settings_quality_must_match():
+    cache = LayoutCache()
+    e = _make_entry("best1")
+    e.quality = "best"
+    cache.insert(e)
+    # Default lookup quality is "fast" -> must NOT match a "best" entry.
+    assert cache.find_by_settings(
+        filename="sample.dxf", grain_mode="single", copies=1, fabric_width_mm=1500.0
+    ) is None
+    hit = cache.find_by_settings(
+        filename="sample.dxf", grain_mode="single", copies=1,
+        fabric_width_mm=1500.0, quality="best",
+    )
+    assert hit is not None and hit.id == "best1"
+
+
+def test_find_by_settings_default_quality_is_fast():
+    cache = LayoutCache()
+    cache.insert(_make_entry("f1"))  # quality defaults to "fast"
+    hit = cache.find_by_settings(
+        filename="sample.dxf", grain_mode="single", copies=1, fabric_width_mm=1500.0
+    )
+    assert hit is not None and hit.id == "f1"

@@ -24,6 +24,10 @@ class CachedLayout:
     # rapid inserts can tie; LayoutCache adds an internal tiebreaker
     # (_sort_key) so ordering remains deterministic.
     created_at: float
+    # Layout quality tier this entry was produced at ("fast" | "better" | "best").
+    # Part of the dedup key so a Best run never returns a cached Fast result.
+    # Defaults to "fast" so legacy/auxiliary constructions dedup as the warm-start.
+    quality: str = "fast"
     # Internal tiebreaker assigned by LayoutCache.insert when the entry is
     # accepted. Strictly increasing per-cache; not part of the public API
     # and not serialized to clients.
@@ -85,16 +89,19 @@ class LayoutCache:
         grain_mode: str,
         copies: int,
         fabric_width_mm: float,
+        quality: str = "fast",
         effort: int | None = None,  # TEMP(phase6-bench): include in key when not None
     ) -> CachedLayout | None:
         """Return the newest entry matching ALL of (filename, grain_mode, copies,
-        fabric_width_mm), or None. Used to dedup re-runs with identical settings."""
+        fabric_width_mm, quality), or None. Used to dedup re-runs with identical
+        settings."""
         matches = []
         for e in self._entries.values():
             if not (e.filename == filename
                     and e.grain_mode == grain_mode
                     and e.copies == copies
-                    and e.fabric_width_mm == fabric_width_mm):
+                    and e.fabric_width_mm == fabric_width_mm
+                    and e.quality == quality):
                 continue
             # TEMP(phase6-bench): if effort is part of the key, require it to match.
             # Entries inserted without the bench flag won't have _bench_effort set,
