@@ -46,6 +46,7 @@ Canonical real-workload benchmark used for all gain comparisons:
 | **OpenMarker pre-PR-#7 baseline (the bar to beat)**   | **11699**          | **79.4%**   | **Historical best on this workload — and what the 2026-05-30 manual GUI run reproduced exactly. All future algorithm changes must hit ≤ 11699mm marker / ≥ 79.4% utilization on this workload to count as a win.** |
 | Current bench unclustered NFP-BLF (effort=5)          | 11699.4            | 79.39%      | At the locked 90° grain the bench now matches the GUI and the bar (§ 5.C). Was 12249/75.83% at the erroneous grain=0. |
 | **OpenMarker SA-tuned (rotation-flip 3:1, opt-in)**   | **11578.5**        | **80.22%**  | **Beats the bar ~1.0% — best of the 2026-06-05 grain=90 SA sweep; < bar on ≥3 seeds. Opt-in via `sa_iterations>0`; see § 4.6 + § 6 [2026-06-05].** |
+| **OpenMarker GA-tuned (uniform-weight, opt-in)**      | **11426.6**        | **81.29%**  | **Beats the bar ~2.3% — and beats SA-tuned by ~0.8%. Best of the 2026-06-05 grain=90 GA sweep; < bar on 5/5 seeds (11426–11485). Opt-in via `ga_generations>0`; see § 4.7 + § 6 [2026-06-05].** |
 | Clustering — bbox path (off by default, opt-in)       | 24649.7            | 37.68%      | +110.7% vs the bar. Mechanism shipped opt-in; see §4. (Re-measured at grain=90.) |
 | Clustering — union path (off by default, opt-in)      | 23591.6            | 39.37%      | +101.6% vs the bar. Beats bbox by ~4% but still loses. See §4. (Re-measured at grain=90.) |
 
@@ -321,6 +322,51 @@ the bench is the path to flipping the default.
   sweep that found the win. See § 6 [2026-06-05]. (The grain=0 sweep table above
   is superseded.)
 
+### 4.7 GA meta-heuristic (`ga_generations > 0`)
+
+- **Code:** `engine/core/layout/ga.py` — `run_ga` island driver + `GAConfig`
+  (tunable hyperparameters; field defaults = the module constants) + operators
+  (`_order_crossover`, `_uniform_rotation_crossover`, `_tournament_select`,
+  `_mutate` — the latter reuses `sa.py`'s `_swap_move`/`_reverse_move`/
+  `_rotation_flip_move`). `heuristic.py::_run_ga_phase` orchestrates K independent
+  island populations (one per worker); `auto_layout_polygon(ga_config=...)` threads
+  a config to the `_init_ga_worker` + `_run_ga_chain` workers via `initargs`. Sweep
+  harness: `engine/tests/bench_ga_sweep.py` (soft TTL + always-writes-a-report).
+- **Island model:** each worker runs a full GA seeded from
+  `warm_starts_sorted[worker_index % len]` (deterministic tie-break on
+  `(marker, mode, piece-ids)`); the best individual across islands and the retained
+  warm-start wins. **No cross-island shared-cutoff pruning** — it would +∞-poison
+  the worse-than-best offspring GA recombines from (collapsing the population), so
+  GA omits it and is **deterministic per seed** when generations (not
+  `ga_max_time_s`) is the binding budget.
+- **Why opt-in:** same policy as SA (§ 4.6) — engine-Python-only, off by default.
+- **Opt-in invocation:**
+  ```python
+  from core.layout.heuristic import auto_layout_polygon
+  placements, marker, util = auto_layout_polygon(
+      pieces, fabric_width_mm=1651, grain_mode="bi", fabric_grain_deg=0.0,
+      effort=5, ga_generations=12, ga_seed=42,
+  )
+  ```
+- **Mutual exclusion:** `ga_generations > 0` raises `ValueError` if combined with
+  `disable_clustering=False` OR with `sa_iterations > 0` (one meta-heuristic per call).
+- **Constants / `GAConfig` fields** (module-level in `ga.py`; tunable per-call via
+  `auto_layout_polygon(ga_config=...)`, engine-Python-only):
+  - `POPULATION_SIZE = 30`, `CROSSOVER_RATE = 0.9`, `MUTATION_RATE = 0.2`,
+    `TOURNAMENT_SIZE = 3`, `ELITISM_COUNT = 2`, `SEED_MUTATION_MOVES = 2`,
+    `NO_GRAINLINE_ROTATION_CAP = 4` (reused from `sa.py`).
+  - `MUTATION_MOVE_WEIGHTS = {"swap":1, "reverse":1, "rotation_flip":1}` — UNIFORM,
+    the 2026-06-05 sweep winner. Uniform beats rotation-flip-heavy for GA because
+    the uniform rotation crossover already recombines per-piece rotations, so
+    mutation is better spent on order diversity — the **opposite** of SA's tuning. See § 6.
+- **Tests:** `engine/tests/unit/test_ga.py` (operators + `run_ga` against a stub
+  evaluator: monotone, determinism, time-cap, cancellation, infeasible→+∞) +
+  `engine/tests/unit/test_heuristic.py` (validation, opt-in path, default-off guard,
+  parallel determinism, GA-phase-invoked spy).
+- **Bench:** `engine/tests/bench_ga.py` (G1–G5; G5 beat-the-bar is PR-blocking and
+  passes at the uniform default). `engine/tests/bench_ga_sweep.py` is the full
+  grain=90 sweep that found the win. See § 6 [2026-06-05].
+
 ---
 
 ## 5. Open follow-ups (ranked by gain-per-effort)
@@ -352,7 +398,7 @@ the bench is the path to flipping the default.
 | **More sort strategies (8–12 instead of 4)** — add perimeter-DESC, diagonal-DESC, aspect-ratio-extremes-first, hilbert-curve ordering. One named function each; benefits compose with parallel pruning. | Low         | 0.5–2pp |
 | **Grain-compatible mirroring** — when `grain_mode == "bi"`, allow horizontal reflection of pieces (flip x-coords within bbox center). Adds reflected copies to the rotation candidate set. | Medium      | 1–3pp |
 | **Concave-bay fill pass** — post-pass after primary BLF: for each large piece with a concave bay (armhole curves), tuck small unplaced pieces into the bay region. Bays detected via polygon difference of bbox minus polygon. | High — bay-detection geometry + second placement pass | 1–3pp on garment workloads |
-| **SA meta-heuristic wrapper** — SHIPPED OPT-IN; **tuned 2026-06-05** (see § 4.6 + § 6). Wraps NFP-BLF as fitness; multi-restart parallel chains; iterations + wall-clock budget. **GA half deferred to a follow-up PR** — same scaffolding will host the GA driver. | Medium for SA (shipped); High for GA follow-up | At grain=90, rotation-flip-weighted SA **beats the bar: 11578.5mm vs 11699** (~1.0%, < bar on ≥3 seeds). Prior grain=0 figure (12249→12077) superseded. |
+| **SA + GA meta-heuristic wrappers** — BOTH SHIPPED OPT-IN; tuned 2026-06-05 (see § 4.6 / § 4.7 + § 6). Wrap NFP-BLF as fitness over (ordering × per-piece rotation); SA = multi-restart Metropolis chains, GA = island-model populations. Both reuse the same `ProcessPoolExecutor` + `WarmStart` scaffolding. | Medium (both shipped) | At grain=90 both beat the bar: rotation-flip-weighted **SA 11578.5mm** (~1.0%); uniform-weight **GA 11426.6mm** (~2.3%, ~0.8% better than SA), < bar on 5/5 seeds. Prior grain=0 figures superseded. |
 
 ### 5.C Pruning meta-improvements (compose with PRs #7/#8)
 
@@ -560,3 +606,57 @@ Add new entries here as work progresses. Each entry should record:
   `engine/tests/bench_sa_sweep.py` (sweep). Spec/plan:
   `docs/superpowers/specs/2026-06-04-sa-hyperparameter-tuning-design.md`,
   `docs/superpowers/plans/2026-06-04-sa-hyperparameter-tuning.md`.
+
+### 2026-06-05 — GA meta-heuristic shipped opt-in: uniform-weight island GA beats both the bar and SA
+
+- **What:** Added the deferred GA half (§ 5.B). New `engine/core/layout/ga.py` —
+  an island-model Genetic Algorithm wrapping `_blf_pack_nfp` as fitness over
+  `(piece-ordering × per-piece rotation)`: tournament selection, Order Crossover
+  (OX) on the ordering + per-gene uniform crossover on rotations, mutation that
+  reuses `sa.py`'s swap/reverse/rotation-flip moves, and elitism.
+  `heuristic.py::_run_ga_phase` runs K = `_worker_count(effort)` independent island
+  populations on the existing `ProcessPoolExecutor`, each seeded from the
+  best-of-4-sort `WarmStart` pool; the best individual across islands (warm-start
+  always retained) wins. Opt-in via `auto_layout_polygon(ga_generations>0)` plus
+  `ga_max_time_s` / `ga_seed` / `ga_config`. Engine-Python-only; mutually exclusive
+  with clustering and with `sa_iterations>0`.
+- **Why:** The SA PR deferred a GA driver on the shared scaffolding. GA adds
+  population-based *global* recombination, complementing SA's single-trajectory
+  local search, over the same two productive axes (ordering + grain choice).
+- **Result** (sample_2.dxf × 10, fabric=1651, bi-grain @90, effort=5; full
+  `bench_ga_sweep.py`, 17 rows, per-row cap 400s — every row beat the bar):
+
+  | config | marker (mm) | util | note |
+  | --- | --- | --- | --- |
+  | warm-start (ga=0) | 11699.4 | 79.39% | = bar |
+  | rot-heavy (`rotation_flip=3.0`) | 11518.8 | 80.64% | ties SA's floor |
+  | **uniform weights (`1:1:1`)** | **11426.6** | **81.29%** | **best — baked default** |
+  | combo (all per-axis bests) | 11489.8 | 80.84% | worse than uniform alone |
+
+  Multi-seed validation of uniform weights (seeds 42/7/13/21/99):
+  11426.6 / 11456.7 / 11473.7 / 11473.7 / 11485.4 — **5/5 beat the bar AND beat
+  SA's floor (11517)**. So GA is the stronger meta-heuristic on this workload
+  (~0.8% better than SA, ~2.3% better than the bar).
+- **Why uniform (not rot-heavy like SA):** GA's *uniform rotation crossover*
+  already recombines per-piece grain choices across the population, so a
+  rotation-flip-heavy *mutation* is largely redundant; uniform weights spend
+  mutation on order diversity (swap/reverse), which complements crossover. SA has
+  no crossover, so it needed the rotation-flip-heavy moves. Combining the per-axis
+  bests (pop=50, cr=0.7, mr=0.4) with uniform weights did **not** help (11489.8 >
+  11426.6), so only the single `MUTATION_MOVE_WEIGHTS` change was baked.
+- **Determinism:** GA does **not** pass a shared-cutoff to the evaluator (that
+  pruning only fires on worse-than-best offspring — the recombination
+  stepping-stones a population method needs). Consequently GA is **deterministic
+  per seed** when generations (not `ga_max_time_s`) is the binding budget — a
+  stronger guarantee than SA's timing-dependent improving path. `bench_ga.py` G3
+  asserts exact reproducibility.
+- **Decision:** Shipped opt-in (`ga_generations>0`); baked uniform
+  `MUTATION_MOVE_WEIGHTS` / `GAConfig.mutation_move_weights` default; `bench_ga.py`
+  G5 (beat the bar) is PR-blocking and passes. Both SA and GA stay opt-in,
+  engine-Python-only; the GUI path is unchanged.
+- **Mechanism at:** `engine/core/layout/ga.py` (driver + `GAConfig` + operators),
+  `engine/core/layout/heuristic.py` (`_run_ga_phase` / `_init_ga_worker` /
+  `_run_ga_chain` + `ga_*` wiring), `engine/tests/bench_ga.py` (gates),
+  `engine/tests/bench_ga_sweep.py` (sweep). Spec/plan:
+  `docs/superpowers/specs/2026-06-05-ga-meta-heuristic-design.md`,
+  `docs/superpowers/plans/2026-06-05-ga-meta-heuristic.md`.
