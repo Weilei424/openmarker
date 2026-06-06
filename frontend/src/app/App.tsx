@@ -2,7 +2,7 @@
 // Layout: topbar | preview-panel | (sidebar + (tabs / canvas)) | bottom-panel | statusbar.
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import type { EngineStatus, PingResponse, GrainMode, Piece } from "../types/engine";
+import type { EngineStatus, PingResponse, GrainMode, Piece, LayoutQuality } from "../types/engine";
 import { useImportDxf, type ImportOutcome } from "../hooks/useImportDxf";
 import { usePlacements } from "../hooks/usePlacements";
 import { useAutoLayout } from "../hooks/useAutoLayout";
@@ -10,10 +10,11 @@ import { useLayoutCache } from "../hooks/useLayoutCache";
 import { PreviewPanel } from "../components/PreviewPanel";
 import { MenuBar } from "../components/MenuBar";
 import { CachedLayoutTabs } from "../components/CachedLayoutTabs";
-import { BottomPanel } from "../components/BottomPanel";
+import { BottomPanel, formatDuration } from "../components/BottomPanel";
 import { CanvasWorkspace } from "../components/canvas/CanvasWorkspace";
 import { FabricPanel } from "../components/sidebar/FabricPanel";
 import { GrainPanel } from "../components/sidebar/GrainPanel";
+import { QualityPanel } from "../components/sidebar/QualityPanel";
 
 const FABRIC_GRAIN_DEG = 90;
 const ENGINE_URL = "http://127.0.0.1:8765";
@@ -32,6 +33,8 @@ export default function App() {
   const [copiesInput, setCopiesInput] = useState<string>("");
   const [disableNfpCache, setDisableNfpCache] = useState<boolean>(false);
   const [effort, setEffort] = useState<number>(1);
+  const [quality, setQuality] = useState<LayoutQuality>("fast");
+  const [elapsedMs, setElapsedMs] = useState<number>(0);
   const [maxCacheEntries, setMaxCacheEntries] = useState<number>(5);
   // TEMP(phase6-bench): include effort in dedup key so the same settings at
   // different effort levels create separate cache tabs for benchmarking.
@@ -105,6 +108,19 @@ export default function App() {
     return () => { cancelled = true; };
   }, [currentFileName]);
 
+  // Live elapsed timer while an auto-layout runs (mainly for the multi-minute
+  // Better/Best tiers). Resets to 0 when not loading.
+  useEffect(() => {
+    if (autoStatus !== "loading") {
+      setElapsedMs(0);
+      return;
+    }
+    const startedAt = Date.now();
+    setElapsedMs(0);
+    const id = setInterval(() => setElapsedMs(Date.now() - startedAt), 1000);
+    return () => clearInterval(id);
+  }, [autoStatus]);
+
   const pingEngine = useCallback(async () => {
     setEngineStatus("connecting");
     setStatusMessage("Connecting to engine...");
@@ -153,22 +169,30 @@ export default function App() {
       setCopiesInput(canonical);
     }
     const outcome = await runAutoLayout(
-      currentFileName, expandedPieces, fabricWidthMm, grainMode, FABRIC_GRAIN_DEG, copies, disableNfpCache, effort, maxCacheEntries, includeEffortInKey,
+      currentFileName, expandedPieces, fabricWidthMm, grainMode, FABRIC_GRAIN_DEG, copies, disableNfpCache, effort, maxCacheEntries, includeEffortInKey, quality,
     );
     if (outcome.ok) {
       await refreshCache();
       setActiveId(outcome.data.id);
-      setStatusMessage(
-        `Auto layout: ${outcome.data.placements.length} piece${outcome.data.placements.length !== 1 ? "s" : ""} · ` +
-        `Marker: ${Math.round(outcome.data.marker_length_mm)} mm · ` +
-        `Utilization: ${outcome.data.utilization_pct}%`
-      );
+      if (outcome.data.stopped) {
+        setStatusMessage(
+          `Stopped — showing best result so far · ` +
+          `Marker: ${Math.round(outcome.data.marker_length_mm)} mm · ` +
+          `Utilization: ${outcome.data.utilization_pct}%`
+        );
+      } else {
+        setStatusMessage(
+          `Auto layout: ${outcome.data.placements.length} piece${outcome.data.placements.length !== 1 ? "s" : ""} · ` +
+          `Marker: ${Math.round(outcome.data.marker_length_mm)} mm · ` +
+          `Utilization: ${outcome.data.utilization_pct}%`
+        );
+      }
     } else if (outcome.aborted) {
       setStatusMessage("Auto layout stopped.");
     } else {
       setStatusMessage(`Auto layout failed: ${outcome.errorMessage}`);
     }
-  }, [expandedPieces, currentFileName, fabricWidthMm, grainMode, copies, copiesInput, disableNfpCache, effort, maxCacheEntries, includeEffortInKey, runAutoLayout, refreshCache, setActiveId]);
+  }, [expandedPieces, currentFileName, fabricWidthMm, grainMode, copies, copiesInput, disableNfpCache, effort, maxCacheEntries, includeEffortInKey, quality, runAutoLayout, refreshCache, setActiveId]);
 
   const importButtonLabel = importStatus === "loading" ? "Importing..." : "Import DXF";
 
@@ -279,6 +303,10 @@ export default function App() {
             </div>
           </Section>
 
+          <Section title="Layout quality">
+            <QualityPanel quality={quality} onChange={setQuality} />
+          </Section>
+
           <Section title="Layout">
             <input
               ref={fileInputRef}
@@ -309,6 +337,13 @@ export default function App() {
               >
                 Stop
               </button>
+            )}
+
+            {autoStatus === "loading" && (
+              <p style={styles.advancedHint}>
+                {`Optimizing (${quality})… ${formatDuration(elapsedMs)} elapsed`}
+                {quality !== "fast" ? " · this can take several minutes" : ""}
+              </p>
             )}
 
             {autoStatus === "error" && autoError && (
