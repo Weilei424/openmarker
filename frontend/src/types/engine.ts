@@ -43,6 +43,10 @@ export type ImportStatus = "idle" | "loading" | "success" | "error";
 // Phase 6: "none" removed. Only "single" and "bi" are valid.
 export type GrainMode = "single" | "bi";
 
+// Layout quality tier sent to POST /auto-layout. "fast" = today's warm-start;
+// "better"/"best" run the GA optimizer with a short/long time budget.
+export type LayoutQuality = "fast" | "better" | "best";
+
 export interface AutoLayoutPlacement {
   piece_id: string;
   x: number;
@@ -58,6 +62,8 @@ export interface AutoLayoutResponse {
   placements: AutoLayoutPlacement[];
   marker_length_mm: number;
   utilization_pct: number;
+  // True when a better/best run was cancelled and fell back to the warm-start.
+  stopped?: boolean;
 }
 
 export interface CachedLayoutSummary {
