@@ -1,6 +1,7 @@
 import sys
 import os
 import pytest
+from types import SimpleNamespace
 from httpx import ASGITransport, AsyncClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -423,3 +424,120 @@ async def test_auto_layout_ignores_grain_direction_deg():
     assert r0.status_code == 200
     assert r90.status_code == 200
     assert r0.json()["marker_length_mm"] == r90.json()["marker_length_mm"]
+
+
+# ---------------------------------------------------------------------------
+# Quality tier tests (Task 4)
+# ---------------------------------------------------------------------------
+
+
+def _fake_layout_factory(captured: dict):
+    """Returns a stub for api.main.auto_layout_polygon that records kwargs and
+    returns a trivial valid result (one placement)."""
+    def _fake(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        pl = SimpleNamespace(piece_id="p0", x=0.0, y=0.0, rotation_deg=0.0)
+        return ([pl], 100.0, 50.0)
+    return _fake
+
+
+@pytest.mark.asyncio
+async def test_quality_best_maps_to_ga_knobs(monkeypatch):
+    import api.main as main_mod
+    captured = {}
+    monkeypatch.setattr(main_mod, "auto_layout_polygon", _fake_layout_factory(captured))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post("/auto-layout", json={
+            "filename": "q.dxf", "pieces": [_square_piece()],
+            "fabric_width_mm": 1500, "grain_mode": "single", "quality": "best",
+        })
+    assert res.status_code == 200
+    kw = captured["kwargs"]
+    assert kw["ga_generations"] == 12
+    assert kw["ga_max_time_s"] == 420.0
+    assert kw["ga_seed"] == 42
+    assert kw["effort"] == 4
+    assert "sa_iterations" not in kw  # GA path only
+
+
+@pytest.mark.asyncio
+async def test_quality_better_maps_to_180s(monkeypatch):
+    import api.main as main_mod
+    captured = {}
+    monkeypatch.setattr(main_mod, "auto_layout_polygon", _fake_layout_factory(captured))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post("/auto-layout", json={
+            "filename": "q.dxf", "pieces": [_square_piece()],
+            "fabric_width_mm": 1500, "grain_mode": "single", "quality": "better",
+        })
+    assert res.status_code == 200
+    assert captured["kwargs"]["ga_max_time_s"] == 180.0
+    assert captured["kwargs"]["ga_generations"] == 12
+
+
+@pytest.mark.asyncio
+async def test_quality_fast_passes_no_ga_knobs(monkeypatch):
+    import api.main as main_mod
+    captured = {}
+    monkeypatch.setattr(main_mod, "auto_layout_polygon", _fake_layout_factory(captured))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post("/auto-layout", json={
+            "filename": "q.dxf", "pieces": [_square_piece()],
+            "fabric_width_mm": 1500, "grain_mode": "single",  # quality omitted
+        })
+    assert res.status_code == 200
+    kw = captured["kwargs"]
+    assert "ga_generations" not in kw
+    assert "ga_max_time_s" not in kw
+    assert kw["effort"] == 1  # the user's effort radio default, unchanged
+    assert res.json()["stopped"] is False
+
+
+@pytest.mark.asyncio
+async def test_quality_invalid_returns_422():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post("/auto-layout", json={
+            "filename": "q.dxf", "pieces": [_square_piece()],
+            "fabric_width_mm": 1500, "grain_mode": "single", "quality": "ultra",
+        })
+    assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_quality_in_dedup_key_distinguishes_best_and_fast(monkeypatch):
+    import api.main as main_mod
+    monkeypatch.setattr(main_mod, "auto_layout_polygon", _fake_layout_factory({}))
+    body = {"filename": "d.dxf", "pieces": [_square_piece()],
+            "fabric_width_mm": 1500, "grain_mode": "single"}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        f = await client.post("/auto-layout", json={**body, "quality": "fast"})
+        b = await client.post("/auto-layout", json={**body, "quality": "best"})
+        listing = await client.get("/layouts")
+    assert f.json()["id"] != b.json()["id"]
+    assert len(listing.json()) == 2
+
+
+@pytest.mark.asyncio
+async def test_quality_stopped_returns_warm_start_cached_as_fast(monkeypatch):
+    import api.main as main_mod
+    from core.layout.cancellation import StoppedWithWarmStart
+    warm = ([SimpleNamespace(piece_id="p0", x=1.0, y=2.0, rotation_deg=0.0)], 999.0, 60.0)
+
+    def fake(*args, **kwargs):
+        if kwargs.get("ga_generations"):       # the best/better path
+            raise StoppedWithWarmStart(warm)
+        return warm                             # the fast path
+
+    monkeypatch.setattr(main_mod, "auto_layout_polygon", fake)
+    body = {"filename": "s.dxf", "pieces": [_square_piece()],
+            "fabric_width_mm": 1500, "grain_mode": "single"}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        best = await client.post("/auto-layout", json={**body, "quality": "best"})
+        fast = await client.post("/auto-layout", json={**body, "quality": "fast"})
+    assert best.status_code == 200
+    assert best.json()["stopped"] is True
+    assert best.json()["marker_length_mm"] == 999.0
+    # The stopped Best run was cached as Fast -> a later Fast run dedups to it.
+    assert fast.json()["stopped"] is False
+    assert fast.json()["id"] == best.json()["id"]

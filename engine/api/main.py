@@ -20,6 +20,7 @@ from core.geometry import normalize_piece
 from core.layout.cache import CachedLayout, get_cache
 from core.layout.cancellation import (
     CancellationError,
+    StoppedWithWarmStart,
     request_cancellation,
     reset_cancellation,
 )
@@ -88,6 +89,18 @@ async def import_dxf(file: UploadFile) -> dict:
     }
 
 
+# Optimizer quality tiers -> GA knobs (see
+# docs/superpowers/specs/2026-06-06-expose-optimizer-gui-design.md).
+# "fast" runs no meta-heuristic (today's warm-start). "better"/"best" run the
+# island-model GA with a wall-clock budget. Budgets validated by
+# engine/tests/bench_optimizer_tiers.py on the canonical workload.
+VALID_QUALITIES = ("fast", "better", "best")
+GA_GENERATIONS_CAP = 12        # generation cap; binds on small jobs, time binds on big
+GA_GUI_SEED = 42               # fixed -> deterministic per (input, quality)
+OPTIMIZED_EFFORT = 4           # "all but one core": more islands, machine stays usable
+QUALITY_BUDGETS_S = {"better": 180.0, "best": 420.0}
+
+
 @app.post("/auto-layout")
 async def auto_layout_endpoint(request: Request) -> dict:
     """
@@ -102,8 +115,9 @@ async def auto_layout_endpoint(request: Request) -> dict:
         "filename": "...",          // required
         "copies": 1,                // optional, defaults to 1
         "disable_nfp_cache": false, // optional, A/B benchmark toggle
-        "effort": 1,                // optional, 1=serial..5=all cores
-        "max_cache_entries": 5      // optional, 5..20; sets FIFO cap before dedup check
+        "effort": 1,                // optional, 1=serial..5=all cores; ignored when quality is better/best (forced to 4)
+        "max_cache_entries": 5,     // optional, 5..20; sets FIFO cap before dedup check
+        "quality": "fast",          // optional: "fast" | "better" | "best"; better/best run GA
     }
 
     Response JSON:
@@ -113,7 +127,8 @@ async def auto_layout_endpoint(request: Request) -> dict:
         "duration_ms": 1234,        // Phase 6: layout duration
         "placements": [{"piece_id": "...", "x": 0, "y": 0, "rotation_deg": 0}],
         "marker_length_mm": 1234.5,
-        "utilization_pct": 82.4
+        "utilization_pct": 82.4,
+        "stopped": false            // true if a better/best run was cancelled and fell back to the warm-start
     }
     """
     body = await request.json()
@@ -131,6 +146,13 @@ async def auto_layout_endpoint(request: Request) -> dict:
     effort = int(body.get("effort", 1))
     if effort < 1 or effort > 5:
         raise HTTPException(status_code=422, detail=f"`effort` must be between 1 and 5, got {effort}")
+
+    quality = str(body.get("quality", "fast"))
+    if quality not in VALID_QUALITIES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"`quality` must be one of {VALID_QUALITIES}, got {quality!r}",
+        )
 
     # TEMP(phase6-bench): when True, dedup key also includes the effort level,
     # so the same settings run at different effort levels produce distinct entries.
@@ -181,6 +203,7 @@ async def auto_layout_endpoint(request: Request) -> dict:
         grain_mode=grain_mode,
         copies=int(body.get("copies", 1)),
         fabric_width_mm=fabric_width_mm,
+        quality=quality,
         effort=effort if include_effort_in_key else None,  # TEMP(phase6-bench)
     )
     if existing is not None:
@@ -191,6 +214,7 @@ async def auto_layout_endpoint(request: Request) -> dict:
             "placements": existing.placements,
             "marker_length_mm": existing.marker_length_mm,
             "utilization_pct": existing.utilization_pct,
+            "stopped": False,
         }
 
     # Clear any stale cancellation flag from a previous run.
@@ -199,16 +223,34 @@ async def auto_layout_endpoint(request: Request) -> dict:
     # Run the CPU-bound layout in a worker thread so other endpoints
     # (notably /cancel-layout, /ping) stay responsive while it runs.
     def _do_layout():
+        if quality == "fast":
+            return auto_layout_polygon(
+                pieces, fabric_width_mm, grain_mode, FABRIC_GRAIN_DEG,
+                disable_nfp_cache=disable_nfp_cache,
+                effort=effort,
+            )
+        # better / best: island-model GA with a wall-clock budget. effort is
+        # forced to OPTIMIZED_EFFORT (all-but-one core) for more GA islands.
         return auto_layout_polygon(
             pieces, fabric_width_mm, grain_mode, FABRIC_GRAIN_DEG,
             disable_nfp_cache=disable_nfp_cache,
-            effort=effort,
+            effort=OPTIMIZED_EFFORT,
+            ga_generations=GA_GENERATIONS_CAP,
+            ga_max_time_s=QUALITY_BUDGETS_S[quality],
+            ga_seed=GA_GUI_SEED,
         )
 
     start = time.perf_counter()
+    stopped = False
     try:
         placements, marker_length, utilization = await run_in_threadpool(_do_layout)
+    except StoppedWithWarmStart as fallback:
+        # GA cancelled after the warm-start was computed: return the warm-start
+        # (== the Fast result) instead of discarding the run.
+        placements, marker_length, utilization = fallback.result
+        stopped = True
     except CancellationError:
+        # Cancelled before any result existed (e.g. during the warm-start phase).
         return JSONResponse(
             status_code=499,  # Client Closed Request (Nginx convention)
             content={"detail": "cancelled"},
@@ -216,6 +258,11 @@ async def auto_layout_endpoint(request: Request) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     duration_ms = int((time.perf_counter() - start) * 1000)
+
+    # A stopped optimized run yielded the warm-start, which IS the Fast result --
+    # cache and label it as Fast so it dedups correctly and never shadows a real
+    # Best run.
+    effective_quality = "fast" if stopped else quality
 
     placements_serialized = [
         {"piece_id": pl.piece_id, "x": pl.x, "y": pl.y, "rotation_deg": pl.rotation_deg}
@@ -238,6 +285,7 @@ async def auto_layout_endpoint(request: Request) -> dict:
         # Monotonic — used only for FIFO ordering, never displayed.
         # Wall-clock display lives in `timestamp`.
         created_at=time.monotonic(),
+        quality=effective_quality,
     )
     # TEMP(phase6-bench): tag the entry with the effort level used to compute it,
     # so future lookups with include_effort_in_key=True can find it.
@@ -253,6 +301,7 @@ async def auto_layout_endpoint(request: Request) -> dict:
         "placements": placements_serialized,
         "marker_length_mm": marker_length,
         "utilization_pct": utilization,
+        "stopped": stopped,
     }
 
 
