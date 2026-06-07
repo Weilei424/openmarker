@@ -400,7 +400,7 @@ the bench is the path to flipping the default.
 | **Concave-bay fill pass** — post-pass after primary BLF: for each large piece with a concave bay (armhole curves), tuck small unplaced pieces into the bay region. Bays detected via polygon difference of bbox minus polygon. | High — bay-detection geometry + second placement pass | 1–3pp on garment workloads |
 | **SA + GA meta-heuristic wrappers** — BOTH SHIPPED OPT-IN; tuned 2026-06-05 (see § 4.6 / § 4.7 + § 6). Wrap NFP-BLF as fitness over (ordering × per-piece rotation); SA = multi-restart Metropolis chains, GA = island-model populations. Both reuse the same `ProcessPoolExecutor` + `WarmStart` scaffolding. | Medium (both shipped) | At grain=90 both beat the bar: rotation-flip-weighted **SA 11578.5mm** (~1.0%); uniform-weight **GA 11426.6mm** (~2.3%, ~0.8% better than SA), < bar on 5/5 seeds. Prior grain=0 figures superseded. |
 | **Compaction post-pass (translate-only)** — settle placed pieces down-then-left into BLF's leftover gaps (fixpoint or N-pass). Hard-constraint-safe by construction: translate-only preserves grain / rotation allowance / handedness. Entry point to the separation family. Reimplement (Shapely). **SHELVED — spiked 2026-06-07, measured ≈0 (§ 6).** | Medium | ≈0 (0 to −13mm, <0.1pp) |
-| **Overlap-and-separate + Guided Local Search** — drop pieces into a too-short strip (overlaps allowed), then GLS-weighted local search nudges colliding pieces apart to feasibility; shrink strip; repeat. The academic SOTA paradigm (Umetani 2009 → sparrow 2025) for irregular **strip** packing — directly targets the ordering-brittleness wall our SA/GA-over-BLF hit. Restricted rotations ({0°,180°}) + no-flip are first-class, so manufacturing-compatible. Reimplement in Python from the papers, or wrap Rust jagua-rs/sparrow (MIT/MPL-2.0 — packaging cost). See § 6 [2026-06-07]. | High | ~0.3–5% over prior best on academic benchmarks (NOT cross-comparable to our 81.4%) |
+| **Overlap-and-separate + Guided Local Search** — drop pieces into a too-short strip (overlaps allowed), then GLS-weighted local search nudges colliding pieces apart to feasibility; shrink strip; repeat. The academic SOTA paradigm (Umetani 2009 → sparrow 2025) for irregular **strip** packing — directly targets the ordering-brittleness wall our SA/GA-over-BLF hit. Restricted rotations ({0°,180°}) + no-flip are first-class, so manufacturing-compatible. Reimplement in Python from the papers, or wrap Rust jagua-rs/sparrow (MIT/MPL-2.0 — packaging cost). **EVALUATED 2026-06-07 → GO (§ 6).** | High | **MEASURED: sample_2×10 = 10916.5mm / 85.08% (−4.35% vs GA, valid, 180s); sample_4 −9.6%** |
 | **LP compaction / separation (Li–Milenkovic 1995)** — rigorous version of the compaction post-pass: solve for new non-overlapping positions via linear programming. Originally invented for garment **marker making** (fixed-width cloth, minimize length — our exact problem). Needs an LP solver (scipy). **SHELVED — spiked 2026-06-07, measured ≈0 (§ 6).** | Medium-High | ≈0 (−2 to −12mm, <0.1pp) |
 
 ### 5.C Pruning meta-improvements (compose with PRs #7/#8)
@@ -755,3 +755,41 @@ Add new entries here as work progresses. Each entry should record:
   Milenkovic 1995, "Compaction and separation algorithms for non-convex polygons"
   (EJOR 84(3):539–561); sparrow paper, arXiv:2509.13329 (2025). Full URL list in the
   2026-06-07 research conversation.
+
+### 2026-06-07 — Separation engine (sparrow) EVALUATED: beats GA → Phase-1 GO
+
+- **What:** Built + ran the Rust SOTA nester `sparrow` (MIT, on MPL-2.0 `jagua-rs`)
+  on our workloads to measure the overlap-and-separate paradigm's ceiling on garment
+  markers. Lean end-to-end harness `engine/tests/bench_sparrow.py` (on the
+  `feat/separation-engine` worktree): pieces → `jagua-rs` JSON (grain-aligned + 90°
+  axis-map so cross-grain width → jagua `strip_height` = fabric width;
+  `allowed_orientations:[0,180]`) → run `sparrow` → reconstruct + validate (grain /
+  overlap / within-width) → marker length vs GA.
+- **Grain (hard constraint) honored:** `jagua-rs` items take per-item
+  `allowed_orientations` (deg) and have NO flip field; feeding `[0,180]` yields output
+  rotations of only 0/−180, zero mirroring. Every measured layout passed validation
+  (grain ∈ {0,180}, no overlaps, within fabric width). Schema + axis-map:
+  `docs/superpowers/notes/2026-06-07-jagua-schema.md` (on the branch).
+- **Result (seed 42, all markers validated):**
+
+  | workload | sparrow | GA (our best) | vs GA |
+  | --- | --- | --- | --- |
+  | `sample_2.dxf ×10` @180s | **10916.5mm / 85.08%** | 11412.5 / 81.39% | **−4.35%** |
+  | `sample_4.dxf ×6` @20s | 4628.8mm / 79.09% | 5121.6 | −9.6% |
+
+  `sample_2×10` clears the ≥3% gate (≤ 11070mm) and approaches the commercial reference
+  (10599mm / 86.1%) — at only 180s of a 600s-capable budget. `sparrow` even enforces a
+  small inter-item separation our engine does NOT require, so the win is structural, not
+  a tolerance artifact.
+- **Why it works where compaction failed:** compaction only refines the existing BLF
+  arrangement (measured ≈0); `sparrow`'s overlap-and-separate explores *new* arrangements
+  — exactly where the gain lives, per the literature's thesis.
+- **Decision: GO.** Phase 2 (productionize as a bundled OFFLINE sidecar + GUI "Ultra"
+  tier, gated at ≥3% — see the spec) is justified. Phase 2 is a separate build: write its
+  plan before starting. Eval code lives on `feat/separation-engine`
+  (`engine/tests/bench_sparrow.py`, schema notes, Phase-0/1 plan).
+- **Spec:** `docs/superpowers/specs/2026-06-07-separation-engine-design.md`.
+- **Caveats / next:** lean spike compares marker = `strip_width + 2·EDGE_GAP` vs our GA
+  metric — small convention diffs, but ±20mm ≪ the 496mm win. Phase-2 build needs the
+  rigorous per-placement parser into engine `Placement`s + the sidecar/cancellation/cache
+  wiring. Longer budgets (up to 600s) and cross-import (sample_3) likely improve further.
