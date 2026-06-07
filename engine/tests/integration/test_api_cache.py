@@ -491,7 +491,6 @@ async def test_quality_fast_passes_no_ga_knobs(monkeypatch):
     assert "ga_generations" not in kw
     assert "ga_max_time_s" not in kw
     assert kw["effort"] == 1  # the user's effort radio default, unchanged
-    assert res.json()["stopped"] is False
 
 
 @pytest.mark.asyncio
@@ -516,28 +515,3 @@ async def test_quality_in_dedup_key_distinguishes_best_and_fast(monkeypatch):
         listing = await client.get("/layouts")
     assert f.json()["id"] != b.json()["id"]
     assert len(listing.json()) == 2
-
-
-@pytest.mark.asyncio
-async def test_quality_stopped_returns_warm_start_cached_as_fast(monkeypatch):
-    import api.main as main_mod
-    from core.layout.cancellation import StoppedWithWarmStart
-    warm = ([SimpleNamespace(piece_id="p0", x=1.0, y=2.0, rotation_deg=0.0)], 999.0, 60.0)
-
-    def fake(*args, **kwargs):
-        if kwargs.get("ga_generations"):       # the best/better path
-            raise StoppedWithWarmStart(warm)
-        return warm                             # the fast path
-
-    monkeypatch.setattr(main_mod, "auto_layout_polygon", fake)
-    body = {"filename": "s.dxf", "pieces": [_square_piece()],
-            "fabric_width_mm": 1500, "grain_mode": "single"}
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        best = await client.post("/auto-layout", json={**body, "quality": "best"})
-        fast = await client.post("/auto-layout", json={**body, "quality": "fast"})
-    assert best.status_code == 200
-    assert best.json()["stopped"] is True
-    assert best.json()["marker_length_mm"] == 999.0
-    # The stopped Best run was cached as Fast -> a later Fast run dedups to it.
-    assert fast.json()["stopped"] is False
-    assert fast.json()["id"] == best.json()["id"]

@@ -38,16 +38,3 @@ def is_cancelled() -> bool:
 
 class CancellationError(RuntimeError):
     """Raised by the layout loop when cancellation has been requested."""
-
-
-class StoppedWithWarmStart(Exception):
-    """Raised by auto_layout_polygon when a GA meta-heuristic run is cancelled
-    AFTER the warm-start has been computed. Carries the warm-start result so the
-    API layer can return it (HTTP 200) instead of discarding the whole run.
-
-    `result` is the (placements, marker_length_mm, utilization_pct) tuple.
-    """
-
-    def __init__(self, result) -> None:
-        super().__init__("Optimizer cancelled; returning warm-start result.")
-        self.result = result

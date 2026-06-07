@@ -671,17 +671,20 @@ Add new entries here as work progresses. Each entry should record:
   `_do_layout` maps `better`/`best` to `auto_layout_polygon(ga_generations=12,
   ga_max_time_s=<budget>, ga_seed=42, effort=4)`. Budgets: `better=180s`,
   `best=420s` (`api.main.QUALITY_BUDGETS_S`).
-- **Stop:** a GA cancellation now returns the pre-computed warm-start
-  (`StoppedWithWarmStart`) as HTTP 200 + `stopped=true`, cached as `fast`.
+- **Stop:** cancels the run ("Auto layout stopped."), as before. A
+  warm-start-on-cancel fallback was prototyped but **dropped** — it can't surface
+  in the GUI (the client aborts the HTTP request on Stop, so the engine's
+  fallback response is discarded).
 - **Cache:** `quality` joined the dedup key (a Best run never returns a cached Fast result).
-- **Frontend:** `QualityPanel` radio group + live elapsed timer; SA stays engine-only.
+- **Frontend:** `QualityPanel` radio group + live elapsed timer + indeterminate
+  progress bar; the Parallel-effort radio is disabled for Better/Best (they force
+  all-but-one core); SA stays engine-only.
 - **Validation** (`bench_optimizer_tiers.py`, sample_2.dxf ×10, fabric=1651, bi-grain @90, effort=4):
   fast=11699.4mm/79.39%; better=11531.9mm/80.54% (~222s wall); best=11456.2mm/81.08%
-  (~486s wall) — both beat the bar (11699mm). GATES: PASS.
-- **Code:** `engine/api/main.py` (tier map + stopped handling),
-  `engine/core/layout/heuristic.py` (`_ga_phase_or_warm_start`),
-  `engine/core/layout/cancellation.py` (`StoppedWithWarmStart`),
+  (~486s wall) — both beat the bar (11699mm). GATES: PASS. Cross-import check via
+  `bench_optimizer_tiers_multi.py`.
+- **Code:** `engine/api/main.py` (tier map),
   `engine/core/layout/cache.py` (quality key),
-  `frontend/src/components/sidebar/QualityPanel.tsx`.
+  `frontend/src/components/sidebar/QualityPanel.tsx`, `frontend/src/app/App.tsx`.
   Spec: `docs/superpowers/specs/2026-06-06-expose-optimizer-gui-design.md`;
   plan: `docs/superpowers/plans/2026-06-06-expose-optimizer-gui.md`.

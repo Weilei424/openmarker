@@ -13,7 +13,7 @@ import shapely.affinity
 from shapely.geometry import Polygon as ShapelyPolygon, box as shapely_box
 from shapely.ops import unary_union
 
-from core.layout.cancellation import CancellationError, StoppedWithWarmStart, is_cancelled
+from core.layout.cancellation import CancellationError, is_cancelled
 from core.layout.clustering import Cluster, pre_cluster_pieces, expand_cluster_placement
 from core.layout.grain import allowed_rotations
 from core.layout.sa import WarmStart, run_sa, NO_GRAINLINE_ROTATION_CAP, SAConfig
@@ -1039,7 +1039,7 @@ def auto_layout_polygon(
                 effort, disable_nfp_cache, disable_pruning, clusters, sa_config,
             )
         if ga_generations > 0:
-            return _ga_phase_or_warm_start(
+            return _run_ga_phase(
                 best, warm_starts, blf_input, fabric_width_mm, grain_mode,
                 fabric_grain_deg, ga_generations, ga_max_time_s, ga_seed,
                 effort, disable_nfp_cache, clusters, ga_config,
@@ -1116,7 +1116,7 @@ def auto_layout_polygon(
             effort, disable_nfp_cache, disable_pruning, clusters, sa_config,
         )
     if ga_generations > 0:
-        return _ga_phase_or_warm_start(
+        return _run_ga_phase(
             best, warm_starts, blf_input, fabric_width_mm, grain_mode,
             fabric_grain_deg, ga_generations, ga_max_time_s, ga_seed,
             effort, disable_nfp_cache, clusters, ga_config,
@@ -1371,28 +1371,3 @@ def _run_ga_phase(
     if clusters:
         best_placements = _expand_clustered_placements(best_placements, clusters)
     return best_placements, best_marker, best_util
-
-
-def _ga_phase_or_warm_start(
-    warm_start_best, warm_starts, blf_input, fabric_width_mm, grain_mode,
-    fabric_grain_deg, ga_generations, ga_max_time_s, ga_seed, effort,
-    disable_nfp_cache, clusters, ga_config,
-):
-    """Run the GA phase; if it is cancelled, raise StoppedWithWarmStart so the
-    API layer can return the pre-computed warm-start (HTTP 200).
-
-    `warm_start_best` is the pre-cluster-expansion BLF result. Returning it
-    directly is safe because `ga_generations > 0` combined with
-    `disable_clustering=False` raises ValueError up front in auto_layout_polygon,
-    so `clusters` is always [] on the GA path. If that mutual exclusion is ever
-    relaxed, cluster expansion must be applied before raising
-    StoppedWithWarmStart."""
-    try:
-        result = _run_ga_phase(
-            warm_start_best, warm_starts, blf_input, fabric_width_mm, grain_mode,
-            fabric_grain_deg, ga_generations, ga_max_time_s, ga_seed, effort,
-            disable_nfp_cache, clusters, ga_config,
-        )
-    except CancellationError:
-        raise StoppedWithWarmStart(warm_start_best)
-    return result

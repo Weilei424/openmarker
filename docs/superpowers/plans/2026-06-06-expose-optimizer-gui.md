@@ -10,6 +10,12 @@
 
 **Design spec:** `docs/superpowers/specs/2026-06-06-expose-optimizer-gui-design.md`.
 
+> **Update (2026-06-06, post-manual-test):** the Stop→warm-start fallback (Task 1
+> `StoppedWithWarmStart`, Task 2 `_ga_phase_or_warm_start`, and the `stopped`
+> wiring in Tasks 4 / 6 / 9) was **removed before merge** — it can't surface in
+> the GUI (the client aborts the request on Stop). Stop just cancels. Everything
+> else in this plan shipped.
+
 ---
 
 ## Environment setup (worktree has no venv / node_modules — both are git-ignored)

@@ -1026,27 +1026,3 @@ def test_ga_phase_invoked_only_when_enabled(monkeypatch):
     auto_layout_polygon(pieces, 1651.0, "bi", 90.0, effort=5,
                         ga_generations=3, ga_config=GAConfig(population_size=6))
     assert calls["n"] == 1                          # GA on -> phase invoked once
-
-
-def test_ga_cancel_falls_back_to_warm_start(monkeypatch):
-    """When the GA phase raises CancellationError, auto_layout_polygon re-raises
-    StoppedWithWarmStart carrying the warm-start the GA phase was handed."""
-    from core.layout import heuristic
-    from core.layout.cancellation import CancellationError, StoppedWithWarmStart
-
-    pieces = _two_simple_pieces()
-    seen = {}
-
-    def fake_phase(warm_start_best, *args, **kwargs):
-        seen["wsb"] = warm_start_best
-        raise CancellationError("simulated GA cancel")
-
-    monkeypatch.setattr(heuristic, "_run_ga_phase", fake_phase)
-
-    with pytest.raises(StoppedWithWarmStart) as excinfo:
-        heuristic.auto_layout_polygon(
-            pieces, fabric_width_mm=500, grain_mode="single",
-            fabric_grain_deg=0.0, ga_generations=1, effort=1,
-        )
-    # Same object (not a copy): the wrapper passes warm_start_best through unchanged.
-    assert excinfo.value.result is seen["wsb"]

@@ -62,8 +62,6 @@ export interface AutoLayoutResponse {
   placements: AutoLayoutPlacement[];
   marker_length_mm: number;
   utilization_pct: number;
-  // True when a better/best run was cancelled and fell back to the warm-start.
-  stopped?: boolean;
 }
 
 export interface CachedLayoutSummary {

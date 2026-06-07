@@ -174,19 +174,11 @@ export default function App() {
     if (outcome.ok) {
       await refreshCache();
       setActiveId(outcome.data.id);
-      if (outcome.data.stopped) {
-        setStatusMessage(
-          `Stopped — showing best result so far · ` +
-          `Marker: ${Math.round(outcome.data.marker_length_mm)} mm · ` +
-          `Utilization: ${outcome.data.utilization_pct}%`
-        );
-      } else {
-        setStatusMessage(
-          `Auto layout: ${outcome.data.placements.length} piece${outcome.data.placements.length !== 1 ? "s" : ""} · ` +
-          `Marker: ${Math.round(outcome.data.marker_length_mm)} mm · ` +
-          `Utilization: ${outcome.data.utilization_pct}%`
-        );
-      }
+      setStatusMessage(
+        `Auto layout: ${outcome.data.placements.length} piece${outcome.data.placements.length !== 1 ? "s" : ""} · ` +
+        `Marker: ${Math.round(outcome.data.marker_length_mm)} mm · ` +
+        `Utilization: ${outcome.data.utilization_pct}%`
+      );
     } else if (outcome.aborted) {
       setStatusMessage("Auto layout stopped.");
     } else {

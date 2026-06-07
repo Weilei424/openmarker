@@ -6,6 +6,12 @@
 - **Related:** PERFORMANCE.md § 4.6 (SA), § 4.7 (GA), § 6 [2026-06-05]; BACKLOG.md
   "Phase 6 follow-ups — algorithm performance" (the "Expose SA/GA to the GUI" item).
 
+> **Update (2026-06-06, post-manual-test):** § 7 (Stop semantics / warm-start
+> fallback) and the `stopped` response field were **dropped before merge**. The
+> fallback can't surface in the GUI — the client aborts the HTTP request on Stop,
+> so the engine's fallback response is discarded. Stop now just cancels the run
+> ("Auto layout stopped."). Everything else in this design shipped as written.
+
 ## 1. Problem & goal
 
 The GA meta-heuristic (PR #13) reaches **11412.5mm / 81.39%** on the canonical
