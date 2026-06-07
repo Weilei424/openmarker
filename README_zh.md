@@ -1,326 +1,149 @@
-# OpenMarker - 面向服装行业的排料工具
+# OpenMarker
 
-一个 **离线优先 (offline-first)** 的 Windows 桌面应用，用于服装纸样排版（Fabric Layout）和基础自动排料（Basic Fabric Nesting）。
+OpenMarker 是一个离线优先的服装纸样排料桌面工具，用于基础的纸样布局和面料排版。
 
----
+项目面向 Windows 工厂用户，目标是提供简单的本地工作流：导入 DXF 纸样文件，在面料工作区中查看纸样，运行本地自动排料，并在后续版本中导出排料结果。纸样文件不需要上传到云端。
 
-# 项目目的
+<p align="center">
+  <a href="README.md">English</a>
+</p>
 
-OpenMarker 是一个 **非盈利开源项目**，目标是为服装工厂用户提供一个简单、免费、无需网络的排料工具。
+## 项目状态
 
-本项目主要面向 **非技术用户**（例如工厂排版人员、打版师、IE 工程师等），因此软件必须：
+OpenMarker 正在积极开发中，目前还不是生产可用版本。
 
-- 安装简单
-- 使用简单
-- 无需互联网
-- 无需技术背景
+当前开发版本已经包含：
 
-应用程序应该像普通 Windows 软件一样：
+- 运行在 `127.0.0.1` 的本地 FastAPI 引擎
+- 支持 ET CAD 风格 INSERT DXF 文件导入，并提供 flat modelspace 回退解析
+- 多边形归一化、中文名称处理、数量展开和纱向线解析
+- 基于 React + Konva 的纸样预览和排料结果工作区
+- 本地 NFP/BLF 自动排料，支持纱向约束、份数、取消任务、缓存排料标签页和基础指标
 
-- 使用 `.exe` 安装程序安装
-- 从桌面快捷方式启动
-- 导入 ET CAD 导出的 DXF 文件
-- 在可视化工作区中查看纸样
-- 手动拖动、旋转和排布纸样
-- 在本地运行简单自动排料算法
-- 将排版结果导出为本地文件
+仍在计划中：
 
----
+- 排料结果导出
+- Python 引擎作为 Tauri sidecar 打包
+- 一键式 Windows 安装程序
+- 干净 Windows 环境下的安装和可用性验证
 
-# 产品目标
+## 项目目标
 
-## 核心目标
+- Windows 优先的桌面体验
+- 离线优先运行
+- 本地计算，保护纸样数据并提高可靠性
+- 终端用户不需要 Docker、命令行或手动安装依赖
+- 代码边界清晰，便于维护
+- 先完成实用 MVP，再逐步改进工业级排料能力
 
-- Windows 优先的用户体验
-- 一键安装
-- 终端用户无需 Docker / 命令行 / 手动安装依赖
-- 离线优先 (offline-first)
-- 所有计算本地执行（保护隐私并提高性能）
-- 架构足够简单，便于 AI 辅助开发和维护
+## 非目标
 
----
+OpenMarker 的首个版本不包含云端协作、账号系统、ERP/PLM 集成，也不追求立即达到商业工业排料软件的完整功能水平。
 
-## v1 非目标
+## 技术栈
 
-以下功能 **不在 v1 版本范围内**：
+| 模块 | 技术 |
+| --- | --- |
+| 桌面壳 | Tauri 2 |
+| 前端 | React、TypeScript、Konva、Vite |
+| 本地引擎 | Python、FastAPI |
+| DXF 解析 | ezdxf |
+| 几何与排料 | Shapely、Pyclipper |
+| 测试 | Pytest、Vitest |
 
-- 云部署
-- 多用户协作
-- 与 Gerber / Lectra 等工业级排料软件完全对齐
-- ERP / PLM 系统集成
-- 用户账号系统
-
----
-
-# 系统架构概览
-
-该应用对用户来说是 **Windows 桌面软件**，但内部架构为：
-
-**Web UI + 本地计算引擎**
-
----
-
-## 用户视角
-
-用户操作流程：
-
-1. 用户安装 `FabricLayoutTool.exe`
-2. 用户像普通软件一样打开应用
-3. 用户导入 DXF 文件
-4. 用户手动编辑或运行自动排料
-5. 用户导出排料结果
-
-整个流程 **无需网络连接**。
-
----
-
-## 内部技术架构
-
-主要技术栈：
-
-- **桌面壳 (Desktop Shell)**：Tauri
-- **前端 UI**：React + TypeScript + Konva
-- **本地计算引擎**：Python
-- **几何计算库**：Shapely + Pyclipper
-- **DXF 解析库**：ezdxf
-
-该组合可以实现：
-
-- 轻量级桌面应用
-- 现代化 UI
-- 强大的几何处理能力
-
----
-
-# 仓库结构
+## 仓库结构
 
 ```text
-openmarker/
-├── README.md
-├── CODEX.md
-├── CLAUDE.md
-├── ROADMAP.md
-├── SKILLS.md
-├── .github/
-│ └── workflows/
-├── desktop/
-│ └── src-tauri/
-│ ├── capabilities/
-│ ├── icons/
-│ └── src/
-├── frontend/
-│ ├── public/
-│ ├── src/
-│ │ ├── app/
-│ │ ├── components/
-│ │ │ ├── canvas/
-│ │ │ ├── controls/
-│ │ │ ├── layout/
-│ │ │ └── pieces/
-│ │ ├── hooks/
-│ │ ├── lib/
-│ │ ├── styles/
-│ │ └── types/
-│ └── tests/
-├── engine/
-│ ├── api/
-│ ├── core/
-│ │ ├── dxf/
-│ │ ├── export/
-│ │ ├── geometry/
-│ │ ├── models/
-│ │ ├── nesting/
-│ │ └── utils/
-│ ├── scripts/
-│ └── tests/
-│ ├── integration/
-│ └── unit/
-├── docs/
-├── examples/
-│ ├── input/
-│ └── output/
-└── scripts/
+desktop/     Tauri 桌面壳和 Windows 打包相关代码
+frontend/    React UI、Konva 画布、控制面板和前端测试
+engine/      Python DXF 解析、几何处理、排料、缓存和 API
+docs/        规划说明、实现计划和开发文档
+examples/    用于开发和 QA 的示例输入输出文件
+scripts/     本地环境和辅助脚本
 ```
 
----
+## 本地开发
 
-# 目录职责说明
+OpenMarker 以 Windows 为主。Tauri 桌面开发流程建议使用 Windows PowerShell。
 
-## `desktop/`
+### 前置依赖
 
-包含 **Tauri 桌面壳** 和 Windows 打包逻辑。
-
-主要职责：
-
-- Windows 应用打包
-- 桌面窗口管理
-- UI 与本地引擎通信
-
----
-
-## `frontend/`
-
-包含 **React 前端 UI**。
-
-主要功能：
-
-- Canvas 渲染纸样
-- DXF 预览
-- 用户控制面板
-- 拖动 / 旋转 / 编辑操作
-
----
-
-## `engine/`
-
-包含 **Python 排料引擎**。
-
-主要模块：
-
-- DXF 解析
-- 几何归一化
-- 排料算法
-- 导出逻辑
-
----
-
-## `docs/`
-
-包含项目技术文档，例如：
-
-- 架构设计
-- 数据模型
-- 算法说明
-- UI 设计
-- 测试计划
-
----
-
-## `examples/`
-
-包含开发和 QA 使用的示例文件：
-
-- 示例 DXF 输入
-- 排料输出示例
-
----
-
-## `scripts/`
-
-开发辅助脚本，例如：
-
-- 本地开发环境配置
-- 代码检查
-- 打包脚本
-- 发布自动化
-
----
-
-# 开发里程碑
-
-## Milestone 1：应用骨架
-
-- Windows 上运行 Tauri
-- React UI 能显示工作区
-- Python 引擎可被调用
-- 前端与引擎完成简单通信
-
----
-
-## Milestone 2：DXF 导入与可视化
-
-- 导入 DXF 文件
-- 提取纸样轮廓
-- 坐标归一化
-- 在 Canvas 上渲染纸样
-
----
-
-## Milestone 3：手动编辑功能
-
-- 拖动纸样
-- 旋转纸样
-- 缩放 / 平移视图
-- 显示碰撞提示
-
----
-
-## Milestone 4：基础自动排料
-
-- 设置布料宽度
-- 运行基础排料算法
-- 计算排料长度与利用率
-
----
-
-## Milestone 5：导出与打包
-
-- 导出排料数据
-- 打包 Windows 安装程序
-- 与非技术用户进行可用性测试
-
----
-
-# 推荐开发环境
-
-## 前端
-
+- Python 3.11+
 - Node.js LTS
-- 包管理器：pnpm 或 npm
+- Rust stable
+- Tauri CLI v2
 
----
+如果尚未安装 Tauri CLI：
 
-## 排料引擎
+```powershell
+cargo install tauri-cli --version "^2"
+```
 
-- Python 3.10+（推荐 3.11；`pyclipper` 1.4.0 已为 3.10–3.14 提供预编译 wheel，无需本地编译）
-- 使用虚拟环境
+### 启动本地引擎
 
----
+在仓库根目录运行：
 
-## 桌面壳
+```powershell
+scripts\setup-engine.bat
+scripts\dev-engine.bat
+```
 
-- Rust toolchain
-- Tauri Windows 依赖
+引擎会监听 `http://127.0.0.1:8765`。
 
----
+### 启动桌面应用
 
-# 开发规则
+打开第二个 PowerShell 窗口：
 
-开发过程中需遵循以下原则：
+```powershell
+cd frontend
+npm install
+cd ..
+cd desktop\src-tauri
+cargo tauri dev
+```
 
-- 保持 **离线优先**
-- 保持 **安装简单**
-- 尽量避免引入服务器或云依赖
-- 优先保证正确性和可用性
-- 保持引擎模块化，以便未来优化
+Tauri 会启动 Vite 前端并打开桌面窗口。
 
----
+## 测试
 
-# 测试重点
+在仓库根目录运行引擎测试：
 
-重点测试内容：
+```powershell
+engine\.venv\Scripts\python -m pytest engine\tests -v
+```
 
-- DXF 解析正确性
-- 多边形归一化正确性
-- 排料碰撞检测
-- 导出文件正确性
-- Windows 安装稳定性
-- 非技术用户可用性测试
+运行前端测试：
 
----
+```powershell
+cd frontend
+npm test
+```
 
-# 第一阶段实现目标
+构建前端：
 
-1. 创建项目骨架
-2. 实现 DXF 上传
-3. 解析基础纸样轮廓
-4. 在 Canvas 中渲染纸样
-5. 支持拖动与旋转
-6. 显示基础利用率指标
+```powershell
+cd frontend
+npm run build
+```
 
----
+## 路线图
 
-# 许可证与
+1. 使用真实工厂 DXF 文件继续加强解析和几何归一化。
+2. 改进排料质量、运行时间、取消任务和结果稳定性。
+3. 为缓存的排料结果添加本地导出。
+4. 将 Python 引擎打包为 Tauri sidecar。
+5. 发布并验证一键式 Windows 安装程序。
 
-本仓库为 **非盈利开源项目**。
-[Apache 2.0](/LICENSE)
+更多信息见 [ROADMAP.md](ROADMAP.md) 和 [docs/dev-setup.md](docs/dev-setup.md)。
+
+## 贡献
+
+贡献应保持项目的核心约束：离线优先、Windows 易用、安装简单，并保持 UI、桌面壳和本地引擎之间的边界清晰。
+
+提交 pull request 前，请运行相关的引擎和前端测试，并说明你运行过的命令。
+
+请参考 [CONTRIBUTING.md](CONTRIBUTING.md)、[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) 和 [SECURITY.md](SECURITY.md)。
+
+## 许可证
+
+OpenMarker 使用 [Apache License 2.0](LICENSE)。
