@@ -92,7 +92,7 @@ button:disabled {
   }
 }
 
-/* Left-sidebar buttons sized up 1.25x (13px -> 16px) to match the panel fonts. */
+/* Left-sidebar buttons sized up 1.15x (13px -> 15px) to match the panel fonts. */
 .sidebar button {
-  font-size: 16px;
+  font-size: 15px;
 }

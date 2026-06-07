@@ -28,7 +28,7 @@ export function QualityPanel({ quality, onChange }: QualityPanelProps) {
             checked={quality === opt.value}
             onChange={() => onChange(opt.value)}
           />
-          <span style={{ fontSize: 15 }}>{opt.label}</span>
+          <span style={{ fontSize: 14 }}>{opt.label}</span>
           <span style={styles.optHint}>{opt.hint}</span>
         </label>
       ))}
@@ -38,7 +38,7 @@ export function QualityPanel({ quality, onChange }: QualityPanelProps) {
 
 const styles = {
   hint: {
-    fontSize: 14,
+    fontSize: 13,
     color: "var(--color-text-muted)",
     fontStyle: "italic" as const,
     marginTop: 0,
@@ -52,7 +52,7 @@ const styles = {
     cursor: "pointer",
   },
   optHint: {
-    fontSize: 14,
+    fontSize: 13,
     color: "var(--color-text-muted)",
   },
 } as const;
