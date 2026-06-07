@@ -681,8 +681,12 @@ Add new entries here as work progresses. Each entry should record:
   all-but-one core); SA stays engine-only.
 - **Validation** (`bench_optimizer_tiers.py`, sample_2.dxf ×10, fabric=1651, bi-grain @90, effort=4):
   fast=11699.4mm/79.39%; better=11531.9mm/80.54% (~222s wall); best=11456.2mm/81.08%
-  (~486s wall) — both beat the bar (11699mm). GATES: PASS. Cross-import check via
-  `bench_optimizer_tiers_multi.py`.
+  (~486s wall) — both beat the bar (11699mm). GATES: PASS.
+- **Cross-import** (`bench_optimizer_tiers_multi.py`, ×6 copies, effort=4) — the
+  tier ordering best ≤ better ≤ fast holds on every import (GA never regresses):
+  sample_3 5530.9 → 5339.6 → 5255.6mm; sample_4 5556.5 → 5182.4 → 5121.6mm (best
+  beats fast by 5–8%). sample_1 is a sparse workload (fast=better=best=50.8mm; GA
+  correctly finds no improvement). GATES: PASS.
 - **Code:** `engine/api/main.py` (tier map),
   `engine/core/layout/cache.py` (quality key),
   `frontend/src/components/sidebar/QualityPanel.tsx`, `frontend/src/app/App.tsx`.

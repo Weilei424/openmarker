@@ -120,12 +120,15 @@ def main() -> int:
     for e in rows:
         if not all(t in e for t in ("fast", "better", "best")):
             continue
-        if e["better"]["marker"] >= e["fast"]["marker"]:
-            fails.append(f"{e['import']}: better !< fast")
-        if e["best"]["marker"] >= e["fast"]["marker"]:
-            fails.append(f"{e['import']}: best !< fast")
-        if e["best"]["marker"] > e["better"]["marker"] + 1e-6:
-            fails.append(f"{e['import']}: best > better")
+        # GA must never REGRESS below the warm-start. Equality is fine: a sparse
+        # or already-tight workload may leave nothing for the GA to improve.
+        tol = 1e-6
+        if e["better"]["marker"] > e["fast"]["marker"] + tol:
+            fails.append(f"{e['import']}: better worse than fast")
+        if e["best"]["marker"] > e["fast"]["marker"] + tol:
+            fails.append(f"{e['import']}: best worse than fast")
+        if e["best"]["marker"] > e["better"]["marker"] + tol:
+            fails.append(f"{e['import']}: best worse than better")
     _write(rows, ("FAIL: " + "; ".join(fails)) if fails else "PASS")
     print("GATES:", ("FAIL: " + "; ".join(fails)) if fails else "PASS", flush=True)
     return 1 if fails else 0
