@@ -280,7 +280,9 @@ export default function App() {
             </label>
             <p style={styles.advancedHint}>For benchmarking: same settings at different effort levels create separate tabs.</p>
 
-            <div style={{ marginTop: 8 }}>
+            {/* Parallel effort applies to the Fast tier only. Better/Best force
+                all-but-one core for more GA islands, so the radio is disabled then. */}
+            <div style={{ marginTop: 8, opacity: quality !== "fast" ? 0.5 : 1 }}>
               <div style={styles.settingLabel}>Parallel effort</div>
               {[
                 { value: 1, label: "Eco (serial)" },
@@ -294,12 +296,17 @@ export default function App() {
                     type="radio"
                     name="effort"
                     checked={effort === opt.value}
+                    disabled={quality !== "fast"}
                     onChange={() => setEffort(opt.value)}
                   />
                   <span style={{ fontSize: 12 }}>{opt.label}</span>
                 </label>
               ))}
-              <p style={styles.advancedHint}>Cancellation may not interrupt parallel runs immediately.</p>
+              <p style={styles.advancedHint}>
+                {quality !== "fast"
+                  ? "Better/Best use all but one core; this applies to Fast only."
+                  : "Cancellation may not interrupt parallel runs immediately."}
+              </p>
             </div>
           </Section>
 
@@ -340,10 +347,12 @@ export default function App() {
             )}
 
             {autoStatus === "loading" && (
-              <p style={styles.advancedHint}>
-                {`Optimizing (${quality})… ${formatDuration(elapsedMs)} elapsed`}
-                {quality !== "fast" ? " · this can take several minutes" : ""}
-              </p>
+              <>
+                <p style={styles.advancedHint}>
+                  {`Optimizing (${quality})… ${formatDuration(elapsedMs)} elapsed`}
+                </p>
+                <div className="progress-indeterminate" />
+              </>
             )}
 
             {autoStatus === "error" && autoError && (

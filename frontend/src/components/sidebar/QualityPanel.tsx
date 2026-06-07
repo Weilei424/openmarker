@@ -5,17 +5,19 @@ interface QualityPanelProps {
   onChange: (q: LayoutQuality) => void;
 }
 
+// No time estimates: total time varies with hardware, import, and copies, so a
+// single sample run can't predict it. Hints are qualitative only.
 const OPTIONS: { value: LayoutQuality; label: string; hint: string }[] = [
-  { value: "fast", label: "Fast", hint: "instant" },
-  { value: "better", label: "Better", hint: "~3 min, tighter" },
-  { value: "best", label: "Best", hint: "~7 min, tightest" },
+  { value: "fast", label: "Fast", hint: "quick" },
+  { value: "better", label: "Better", hint: "tighter" },
+  { value: "best", label: "Best", hint: "tightest" },
 ];
 
 export function QualityPanel({ quality, onChange }: QualityPanelProps) {
   return (
     <div>
       <p style={styles.hint}>
-        Higher quality packs tighter but takes minutes. Click Stop to keep the
+        Higher quality packs tighter but takes longer. Click Stop to keep the
         best result so far.
       </p>
       {OPTIONS.map((opt) => (

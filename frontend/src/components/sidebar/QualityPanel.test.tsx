@@ -24,4 +24,10 @@ describe("QualityPanel", () => {
     fireEvent.click(screen.getByLabelText(/Better/i));
     expect(onChange).toHaveBeenCalledWith("better");
   });
+
+  it("shows no time estimate (total time is not predictable)", () => {
+    render(<QualityPanel quality="fast" onChange={() => {}} />);
+    expect(screen.queryByText(/min/i)).toBeNull();
+    expect(screen.queryByText(/\d+\s*(min|sec|s)\b/i)).toBeNull();
+  });
 });
