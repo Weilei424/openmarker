@@ -126,7 +126,7 @@ Note on what's NOT here: there is intentionally no `useCollisions`, no `collisio
 
 ### Desktop shell (`desktop/src-tauri/`)
 
-Thin Tauri 2.x wrapper. `tauri.conf.json` sets window size (1280×800, min 900×600) and points to the Vite dev server. No direct Rust↔engine calls; all communication goes through the browser HTTP client.
+Thin Tauri 2.x wrapper. `src/lib.rs` computes the default window size at runtime — 16:9 aspect at ~80.5% of the monitor's logical height (clamped to 95% width) — and shows the window once sized. `tauri.conf.json` sets min 900×600, starts the window hidden, and points to the Vite dev server. No direct Rust↔engine calls; all communication goes through the browser HTTP client.
 
 ---
 

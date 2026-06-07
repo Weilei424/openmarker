@@ -172,7 +172,18 @@ Task checklist:
 - [x] Lock fabric grain at 90° + fix bench/docs (resolves §5.C bench-vs-GUI variance). See PERFORMANCE.md § 5.C + § 6 [2026-06-04].
 - [x] SA hyperparameter tuning at grain=90 — rotation-flip-weighted default (`SAConfig`) beats the bar (11578.5mm vs 11699). See PERFORMANCE.md § 4.6 + § 6 [2026-06-05].
 - [x] GA meta-heuristic wrapper (opt-in island-model GA) — reuses the `WarmStart`/`ProcessPoolExecutor` scaffolding + `sa.py` move operators. Uniform-weight default **beats the bar AND SA** (11426.6mm / 81.29%, < bar on 5/5 seeds; deterministic per seed). See PERFORMANCE.md § 4.7 + § 6 [2026-06-05].
-- [ ] Expose SA/GA to the GUI (opt-in "optimize harder") so users actually get the tuning win — `POST /auto-layout` + frontend wiring; both are engine-Python-only today (would use the existing `/cancel-layout` + `sa_max_time_s` / `ga_max_time_s`). GA is the stronger default (§ 4.7). See PERFORMANCE.md § 4.6 + § 4.7.
+- [x] Expose SA/GA to the GUI (opt-in "optimize harder") so users actually get the tuning win — `POST /auto-layout` + frontend wiring; both are engine-Python-only today (would use the existing `/cancel-layout` + `sa_max_time_s` / `ga_max_time_s`). GA is the stronger default (§ 4.7). See PERFORMANCE.md § 4.6 + § 4.7.
+
+  > **Plan:** `docs/superpowers/plans/2026-06-06-expose-optimizer-gui.md`. Design: `docs/superpowers/specs/2026-06-06-expose-optimizer-gui-design.md`. Fast/Better/Best quality selector → GA-only (SA stays engine-only); `quality` joins the cache key. (A Stop→warm-start fallback was prototyped then dropped — it can't surface in the GUI, since the client aborts the request on Stop; Stop just cancels.)
+  - [x] Engine: `quality` in the cache dedup key (`cache.py`)
+  - [x] Engine: `/auto-layout` `quality` field → GA knobs in `_do_layout` (`api/main.py`)
+  - [x] Engine: budget-validation bench locks `better`/`best` budgets (`bench_optimizer_tiers.py`)
+  - [x] Frontend: `LayoutQuality` type (`types/engine.ts`)
+  - [x] Frontend: `QualityPanel` Fast/Better/Best selector (+ test)
+  - [x] Frontend: `useAutoLayout` sends `quality` (+ test)
+  - [x] Frontend: `App.tsx` quality state, panel section, elapsed timer, progress bar
+  - [x] Docs: PERFORMANCE.md § 6 entry + check off this list
+
 - [ ] Make parallel SA's improving path deterministic (deterministic only with `disable_pruning` today — timing-dependent cutoff pruning). See PERFORMANCE.md § 6 [2026-06-05].
 - [ ] Remaining clustering follow-ups (heterogeneous clustering, cluster-aware sort) + open meta items. See PERFORMANCE.md § 5.
 

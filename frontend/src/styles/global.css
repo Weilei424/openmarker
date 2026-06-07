@@ -17,7 +17,7 @@
   --color-error: #f44336;
   --color-warning: #ff9800;
 
-  --sidebar-width: 240px;
+  --sidebar-width: 360px;
   --topbar-height: 44px;
   --statusbar-height: 28px;
 }
@@ -57,4 +57,42 @@ button:hover {
 button:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* Indeterminate progress bar — for long optimizer runs whose total time we
+   can't estimate (warm-start + GA budget + overhead vary by hardware/import).
+   A sliding accent segment conveys "working" without a misleading %/ETA. */
+.progress-indeterminate {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  background: var(--color-border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-indeterminate::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 40%;
+  background: var(--color-accent);
+  border-radius: 2px;
+  animation: progress-indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes progress-indeterminate {
+  0% {
+    left: -40%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
+/* Left-sidebar buttons sized up 1.15x (13px -> 15px) to match the panel fonts. */
+.sidebar button {
+  font-size: 15px;
 }

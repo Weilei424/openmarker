@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from "react";
-import type { Piece, GrainMode, AutoLayoutResponse } from "../types/engine";
+import type { Piece, GrainMode, AutoLayoutResponse, LayoutQuality } from "../types/engine";
 
 const ENGINE_URL = "http://127.0.0.1:8765";
 
@@ -25,6 +25,7 @@ export function useAutoLayout() {
       effort: number = 1,
       maxCacheEntries: number = 5,
       includeEffortInKey: boolean = false, // TEMP(phase6-bench)
+      quality: LayoutQuality = "fast",
     ): Promise<AutoLayoutOutcome> => {
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -47,6 +48,7 @@ export function useAutoLayout() {
             effort,
             max_cache_entries: maxCacheEntries,
             include_effort_in_key: includeEffortInKey, // TEMP(phase6-bench)
+            quality,
           }),
           signal: controller.signal,
         });

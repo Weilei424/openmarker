@@ -2,7 +2,7 @@
 // Layout: topbar | preview-panel | (sidebar + (tabs / canvas)) | bottom-panel | statusbar.
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import type { EngineStatus, PingResponse, GrainMode, Piece } from "../types/engine";
+import type { EngineStatus, PingResponse, GrainMode, Piece, LayoutQuality } from "../types/engine";
 import { useImportDxf, type ImportOutcome } from "../hooks/useImportDxf";
 import { usePlacements } from "../hooks/usePlacements";
 import { useAutoLayout } from "../hooks/useAutoLayout";
@@ -10,10 +10,11 @@ import { useLayoutCache } from "../hooks/useLayoutCache";
 import { PreviewPanel } from "../components/PreviewPanel";
 import { MenuBar } from "../components/MenuBar";
 import { CachedLayoutTabs } from "../components/CachedLayoutTabs";
-import { BottomPanel } from "../components/BottomPanel";
+import { BottomPanel, formatDuration } from "../components/BottomPanel";
 import { CanvasWorkspace } from "../components/canvas/CanvasWorkspace";
 import { FabricPanel } from "../components/sidebar/FabricPanel";
 import { GrainPanel } from "../components/sidebar/GrainPanel";
+import { QualityPanel } from "../components/sidebar/QualityPanel";
 
 const FABRIC_GRAIN_DEG = 90;
 const ENGINE_URL = "http://127.0.0.1:8765";
@@ -32,6 +33,8 @@ export default function App() {
   const [copiesInput, setCopiesInput] = useState<string>("");
   const [disableNfpCache, setDisableNfpCache] = useState<boolean>(false);
   const [effort, setEffort] = useState<number>(1);
+  const [quality, setQuality] = useState<LayoutQuality>("fast");
+  const [elapsedMs, setElapsedMs] = useState<number>(0);
   const [maxCacheEntries, setMaxCacheEntries] = useState<number>(5);
   // TEMP(phase6-bench): include effort in dedup key so the same settings at
   // different effort levels create separate cache tabs for benchmarking.
@@ -105,6 +108,19 @@ export default function App() {
     return () => { cancelled = true; };
   }, [currentFileName]);
 
+  // Live elapsed timer while an auto-layout runs (mainly for the multi-minute
+  // Better/Best tiers). Resets to 0 when not loading.
+  useEffect(() => {
+    if (autoStatus !== "loading") {
+      setElapsedMs(0);
+      return;
+    }
+    const startedAt = Date.now();
+    setElapsedMs(0);
+    const id = setInterval(() => setElapsedMs(Date.now() - startedAt), 1000);
+    return () => clearInterval(id);
+  }, [autoStatus]);
+
   const pingEngine = useCallback(async () => {
     setEngineStatus("connecting");
     setStatusMessage("Connecting to engine...");
@@ -153,7 +169,7 @@ export default function App() {
       setCopiesInput(canonical);
     }
     const outcome = await runAutoLayout(
-      currentFileName, expandedPieces, fabricWidthMm, grainMode, FABRIC_GRAIN_DEG, copies, disableNfpCache, effort, maxCacheEntries, includeEffortInKey,
+      currentFileName, expandedPieces, fabricWidthMm, grainMode, FABRIC_GRAIN_DEG, copies, disableNfpCache, effort, maxCacheEntries, includeEffortInKey, quality,
     );
     if (outcome.ok) {
       await refreshCache();
@@ -168,7 +184,7 @@ export default function App() {
     } else {
       setStatusMessage(`Auto layout failed: ${outcome.errorMessage}`);
     }
-  }, [expandedPieces, currentFileName, fabricWidthMm, grainMode, copies, copiesInput, disableNfpCache, effort, maxCacheEntries, includeEffortInKey, runAutoLayout, refreshCache, setActiveId]);
+  }, [expandedPieces, currentFileName, fabricWidthMm, grainMode, copies, copiesInput, disableNfpCache, effort, maxCacheEntries, includeEffortInKey, quality, runAutoLayout, refreshCache, setActiveId]);
 
   const importButtonLabel = importStatus === "loading" ? "Importing..." : "Import DXF";
 
@@ -183,7 +199,7 @@ export default function App() {
       />
 
       <div style={styles.body}>
-        <div style={styles.sidebar}>
+        <div className="sidebar" style={styles.sidebar}>
           <Section title="Engine">
             <button onClick={pingEngine} disabled={engineStatus === "connecting"}>
               {engineStatus === "connecting" ? "Connecting..." : "Ping Engine"}
@@ -241,7 +257,7 @@ export default function App() {
                 checked={disableNfpCache}
                 onChange={(e) => setDisableNfpCache(e.target.checked)}
               />
-              <span style={{ fontSize: 12 }}>Disable NFP cache</span>
+              <span style={{ fontSize: 14 }}>Disable NFP cache</span>
             </label>
             <p style={styles.advancedHint}>For benchmarking. Layout result is identical either way; only speed changes.</p>
 
@@ -252,11 +268,13 @@ export default function App() {
                 checked={includeEffortInKey}
                 onChange={(e) => setIncludeEffortInKey(e.target.checked)}
               />
-              <span style={{ fontSize: 12 }}>[TEMP] Include effort in cache key</span>
+              <span style={{ fontSize: 14 }}>[TEMP] Include effort in cache key</span>
             </label>
             <p style={styles.advancedHint}>For benchmarking: same settings at different effort levels create separate tabs.</p>
 
-            <div style={{ marginTop: 8 }}>
+            {/* Parallel effort applies to the Fast tier only. Better/Best force
+                all-but-one core for more GA islands, so the radio is disabled then. */}
+            <div style={{ marginTop: 8, opacity: quality !== "fast" ? 0.5 : 1 }}>
               <div style={styles.settingLabel}>Parallel effort</div>
               {[
                 { value: 1, label: "Eco (serial)" },
@@ -270,13 +288,22 @@ export default function App() {
                     type="radio"
                     name="effort"
                     checked={effort === opt.value}
+                    disabled={quality !== "fast"}
                     onChange={() => setEffort(opt.value)}
                   />
-                  <span style={{ fontSize: 12 }}>{opt.label}</span>
+                  <span style={{ fontSize: 14 }}>{opt.label}</span>
                 </label>
               ))}
-              <p style={styles.advancedHint}>Cancellation may not interrupt parallel runs immediately.</p>
+              <p style={styles.advancedHint}>
+                {quality !== "fast"
+                  ? "Better/Best use all but one core; this applies to Fast only."
+                  : "Cancellation may not interrupt parallel runs immediately."}
+              </p>
             </div>
+          </Section>
+
+          <Section title="Layout quality">
+            <QualityPanel quality={quality} onChange={setQuality} />
           </Section>
 
           <Section title="Layout">
@@ -305,10 +332,19 @@ export default function App() {
             {autoStatus === "loading" && (
               <button
                 onClick={abortAutoLayout}
-                style={{ fontSize: 12, background: "var(--color-error, #b91c1c)", color: "#fff" }}
+                style={{ fontSize: 14, background: "var(--color-error, #b91c1c)", color: "#fff" }}
               >
                 Stop
               </button>
+            )}
+
+            {autoStatus === "loading" && (
+              <>
+                <p style={styles.advancedHint}>
+                  {`Optimizing (${quality})… ${formatDuration(elapsedMs)} elapsed`}
+                </p>
+                <div className="progress-indeterminate" />
+              </>
             )}
 
             {autoStatus === "error" && autoError && (
@@ -425,7 +461,7 @@ const styles = {
   section: { borderBottom: "1px solid var(--color-border)" },
   sectionTitle: {
     padding: "8px 12px",
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: 600,
     textTransform: "uppercase" as const,
     letterSpacing: "0.05em",
@@ -448,25 +484,25 @@ const styles = {
     color: "var(--color-text-muted)",
     flexShrink: 0,
   },
-  statusDot: { display: "flex", alignItems: "center", gap: 6, fontSize: 12 },
+  statusDot: { display: "flex", alignItems: "center", gap: 6, fontSize: 14 },
   dot: { width: 8, height: 8, borderRadius: "50%", display: "inline-block" },
-  placeholder: { color: "var(--color-text-muted)", fontSize: 12 },
-  errorText: { color: "var(--color-error)", fontSize: 12 },
-  successText: { color: "var(--color-success)", fontSize: 12 },
+  placeholder: { color: "var(--color-text-muted)", fontSize: 14 },
+  errorText: { color: "var(--color-error)", fontSize: 14 },
+  successText: { color: "var(--color-success)", fontSize: 14 },
   warningBlock: { borderTop: "1px solid var(--color-border)", paddingTop: 4 },
-  warningText: { color: "var(--color-warning)", fontSize: 11 },
+  warningText: { color: "var(--color-warning)", fontSize: 13 },
   settingRowVertical: {
     display: "flex",
     flexDirection: "column" as const,
     gap: 6,
-    fontSize: 12,
+    fontSize: 14,
   },
   settingRow: {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between" as const,
     gap: 8,
-    fontSize: 12,
+    fontSize: 14,
   },
   numberInputSmall: {
     width: 60,
@@ -475,10 +511,10 @@ const styles = {
     color: "var(--color-text)",
     border: "1px solid var(--color-border)",
     borderRadius: 3,
-    fontSize: 12,
+    fontSize: 14,
     textAlign: "right" as const,
   },
-  settingLabel: { color: "var(--color-text-muted)" },
+  settingLabel: { color: "var(--color-text-muted)", fontSize: 15 },
   numberInputTall: {
     width: 80,
     height: 44,
@@ -487,7 +523,7 @@ const styles = {
     color: "var(--color-text)",
     border: "1px solid var(--color-border)",
     borderRadius: 3,
-    fontSize: 18,
+    fontSize: 21,
     textAlign: "right" as const,
   },
   advancedCheckRow: {
@@ -495,7 +531,7 @@ const styles = {
     alignItems: "center",
     gap: 6,
     cursor: "pointer",
-    fontSize: 12,
+    fontSize: 14,
   },
   advancedRadioRow: {
     display: "flex",
@@ -505,7 +541,7 @@ const styles = {
     cursor: "pointer",
   },
   advancedHint: {
-    fontSize: 10,
+    fontSize: 12,
     color: "var(--color-text-muted)",
     fontStyle: "italic" as const,
     marginTop: 4,
