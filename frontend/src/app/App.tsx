@@ -199,7 +199,7 @@ export default function App() {
       />
 
       <div style={styles.body}>
-        <div style={styles.sidebar}>
+        <div className="sidebar" style={styles.sidebar}>
           <Section title="Engine">
             <button onClick={pingEngine} disabled={engineStatus === "connecting"}>
               {engineStatus === "connecting" ? "Connecting..." : "Ping Engine"}
@@ -257,7 +257,7 @@ export default function App() {
                 checked={disableNfpCache}
                 onChange={(e) => setDisableNfpCache(e.target.checked)}
               />
-              <span style={{ fontSize: 12 }}>Disable NFP cache</span>
+              <span style={{ fontSize: 15 }}>Disable NFP cache</span>
             </label>
             <p style={styles.advancedHint}>For benchmarking. Layout result is identical either way; only speed changes.</p>
 
@@ -268,7 +268,7 @@ export default function App() {
                 checked={includeEffortInKey}
                 onChange={(e) => setIncludeEffortInKey(e.target.checked)}
               />
-              <span style={{ fontSize: 12 }}>[TEMP] Include effort in cache key</span>
+              <span style={{ fontSize: 15 }}>[TEMP] Include effort in cache key</span>
             </label>
             <p style={styles.advancedHint}>For benchmarking: same settings at different effort levels create separate tabs.</p>
 
@@ -291,7 +291,7 @@ export default function App() {
                     disabled={quality !== "fast"}
                     onChange={() => setEffort(opt.value)}
                   />
-                  <span style={{ fontSize: 12 }}>{opt.label}</span>
+                  <span style={{ fontSize: 15 }}>{opt.label}</span>
                 </label>
               ))}
               <p style={styles.advancedHint}>
@@ -332,7 +332,7 @@ export default function App() {
             {autoStatus === "loading" && (
               <button
                 onClick={abortAutoLayout}
-                style={{ fontSize: 12, background: "var(--color-error, #b91c1c)", color: "#fff" }}
+                style={{ fontSize: 15, background: "var(--color-error, #b91c1c)", color: "#fff" }}
               >
                 Stop
               </button>
@@ -461,7 +461,7 @@ const styles = {
   section: { borderBottom: "1px solid var(--color-border)" },
   sectionTitle: {
     padding: "8px 12px",
-    fontSize: 11,
+    fontSize: 14,
     fontWeight: 600,
     textTransform: "uppercase" as const,
     letterSpacing: "0.05em",
@@ -484,25 +484,25 @@ const styles = {
     color: "var(--color-text-muted)",
     flexShrink: 0,
   },
-  statusDot: { display: "flex", alignItems: "center", gap: 6, fontSize: 12 },
+  statusDot: { display: "flex", alignItems: "center", gap: 6, fontSize: 15 },
   dot: { width: 8, height: 8, borderRadius: "50%", display: "inline-block" },
-  placeholder: { color: "var(--color-text-muted)", fontSize: 12 },
-  errorText: { color: "var(--color-error)", fontSize: 12 },
-  successText: { color: "var(--color-success)", fontSize: 12 },
+  placeholder: { color: "var(--color-text-muted)", fontSize: 15 },
+  errorText: { color: "var(--color-error)", fontSize: 15 },
+  successText: { color: "var(--color-success)", fontSize: 15 },
   warningBlock: { borderTop: "1px solid var(--color-border)", paddingTop: 4 },
-  warningText: { color: "var(--color-warning)", fontSize: 11 },
+  warningText: { color: "var(--color-warning)", fontSize: 14 },
   settingRowVertical: {
     display: "flex",
     flexDirection: "column" as const,
     gap: 6,
-    fontSize: 12,
+    fontSize: 15,
   },
   settingRow: {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between" as const,
     gap: 8,
-    fontSize: 12,
+    fontSize: 15,
   },
   numberInputSmall: {
     width: 60,
@@ -511,10 +511,10 @@ const styles = {
     color: "var(--color-text)",
     border: "1px solid var(--color-border)",
     borderRadius: 3,
-    fontSize: 12,
+    fontSize: 15,
     textAlign: "right" as const,
   },
-  settingLabel: { color: "var(--color-text-muted)" },
+  settingLabel: { color: "var(--color-text-muted)", fontSize: 16 },
   numberInputTall: {
     width: 80,
     height: 44,
@@ -523,7 +523,7 @@ const styles = {
     color: "var(--color-text)",
     border: "1px solid var(--color-border)",
     borderRadius: 3,
-    fontSize: 18,
+    fontSize: 23,
     textAlign: "right" as const,
   },
   advancedCheckRow: {
@@ -531,7 +531,7 @@ const styles = {
     alignItems: "center",
     gap: 6,
     cursor: "pointer",
-    fontSize: 12,
+    fontSize: 15,
   },
   advancedRadioRow: {
     display: "flex",
@@ -541,7 +541,7 @@ const styles = {
     cursor: "pointer",
   },
   advancedHint: {
-    fontSize: 10,
+    fontSize: 13,
     color: "var(--color-text-muted)",
     fontStyle: "italic" as const,
     marginTop: 4,

@@ -41,7 +41,7 @@ const styles = {
     gap: 6,
   },
   label: {
-    fontSize: 11,
+    fontSize: 14,
     color: "var(--color-text-muted)",
   },
   input: {
@@ -51,11 +51,11 @@ const styles = {
     border: "1px solid var(--color-border)",
     borderRadius: 4,
     color: "var(--color-text)",
-    fontSize: 13,
+    fontSize: 16,
     padding: "4px 8px",
   },
   display: {
-    fontSize: 11,
+    fontSize: 14,
     color: "var(--color-text-muted)",
   },
 } as const;

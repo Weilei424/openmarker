@@ -31,7 +31,7 @@ export function GrainPanel({
               checked={grainMode === mode}
               onChange={() => onGrainModeChange(mode)}
             />
-            <span style={{ fontSize: 12 }}>{GRAIN_MODE_LABELS[mode]}</span>
+            <span style={{ fontSize: 15 }}>{GRAIN_MODE_LABELS[mode]}</span>
           </label>
         ))}
       </div>
@@ -43,7 +43,7 @@ export function GrainPanel({
             checked={showGrainline}
             onChange={(e) => onShowGrainlineChange(e.target.checked)}
           />
-          <span style={{ fontSize: 12 }}>Show grainline</span>
+          <span style={{ fontSize: 15 }}>Show grainline</span>
         </label>
       </div>
     </div>
@@ -52,7 +52,7 @@ export function GrainPanel({
 
 const styles = {
   label: {
-    fontSize: 11,
+    fontSize: 14,
     fontWeight: 600 as const,
     textTransform: "uppercase" as const,
     letterSpacing: "0.05em",
@@ -60,7 +60,7 @@ const styles = {
     marginBottom: 4,
   },
   hint: {
-    fontSize: 11,
+    fontSize: 14,
     color: "var(--color-text-muted)",
     marginBottom: 4,
     fontStyle: "italic" as const,
