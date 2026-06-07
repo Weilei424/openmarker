@@ -1,5 +1,5 @@
 // OpenMarker — Tauri application entry point.
-// Phase 6: dynamic window size — 70% of monitor logical height, 4:3 aspect ratio.
+// Dynamic window size — 70% of monitor logical height bumped 15% larger, 4:3 aspect ratio.
 
 use tauri::{Manager, LogicalSize, Size};
 
@@ -10,7 +10,7 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 if let Err(err) = size_and_show(&window) {
                     eprintln!("[OpenMarker] window sizing failed: {err}");
-                    let _ = window.set_size(Size::Logical(LogicalSize { width: 1280.0, height: 800.0 }));
+                    let _ = window.set_size(Size::Logical(LogicalSize { width: 1472.0, height: 920.0 }));
                     let _ = window.center();
                     let _ = window.show();
                 }
@@ -32,7 +32,9 @@ fn size_and_show(window: &tauri::WebviewWindow) -> Result<(), Box<dyn std::error
     let logical_w = physical.width as f64 / scale;
     let logical_h = physical.height as f64 / scale;
 
-    let mut height = logical_h * 0.7;
+    // 70% of monitor height as the base, bumped 15% larger (-> 80.5%). Width
+    // tracks at 4:3, so the whole window grows 15% in each dimension.
+    let mut height = logical_h * 0.7 * 1.15;
     let mut width = height * 4.0 / 3.0;
 
     // If the 4:3 width would exceed the monitor, clamp to 95% of monitor width
