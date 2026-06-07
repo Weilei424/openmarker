@@ -679,6 +679,9 @@ Add new entries here as work progresses. Each entry should record:
 - **Frontend:** `QualityPanel` radio group + live elapsed timer + indeterminate
   progress bar; the Parallel-effort radio is disabled for Better/Best (they force
   all-but-one core); SA stays engine-only.
+- **GUI polish (shipped on the same PR):** window aspect 4:3 → 16:9 (height stays
+  ~80.5% of monitor logical height); sidebar width 240 → 360px; left-panel fonts
+  scaled ×1.15.
 - **Validation** (`bench_optimizer_tiers.py`, sample_2.dxf ×10, fabric=1651, bi-grain @90, effort=4):
   fast=11699.4mm/79.39%; better=11531.9mm/80.54% (~222s wall); best=11456.2mm/81.08%
   (~486s wall) — both beat the bar (11699mm). GATES: PASS.
