@@ -399,9 +399,9 @@ the bench is the path to flipping the default.
 | **Grain-compatible mirroring** — when `grain_mode == "bi"`, allow horizontal reflection of pieces (flip x-coords within bbox center). Adds reflected copies to the rotation candidate set. | Medium      | 1–3pp |
 | **Concave-bay fill pass** — post-pass after primary BLF: for each large piece with a concave bay (armhole curves), tuck small unplaced pieces into the bay region. Bays detected via polygon difference of bbox minus polygon. | High — bay-detection geometry + second placement pass | 1–3pp on garment workloads |
 | **SA + GA meta-heuristic wrappers** — BOTH SHIPPED OPT-IN; tuned 2026-06-05 (see § 4.6 / § 4.7 + § 6). Wrap NFP-BLF as fitness over (ordering × per-piece rotation); SA = multi-restart Metropolis chains, GA = island-model populations. Both reuse the same `ProcessPoolExecutor` + `WarmStart` scaffolding. | Medium (both shipped) | At grain=90 both beat the bar: rotation-flip-weighted **SA 11578.5mm** (~1.0%); uniform-weight **GA 11426.6mm** (~2.3%, ~0.8% better than SA), < bar on 5/5 seeds. Prior grain=0 figures superseded. |
-| **Compaction post-pass (translate-only)** — settle placed pieces down-then-left into BLF's leftover gaps (fixpoint or N-pass). Hard-constraint-safe by construction: translate-only preserves grain / rotation allowance / handedness. Entry point to the separation family. Reimplement (Shapely). See § 6 [2026-06-07]. | Medium | unmeasured — spike first |
+| **Compaction post-pass (translate-only)** — settle placed pieces down-then-left into BLF's leftover gaps (fixpoint or N-pass). Hard-constraint-safe by construction: translate-only preserves grain / rotation allowance / handedness. Entry point to the separation family. Reimplement (Shapely). **SHELVED — spiked 2026-06-07, measured ≈0 (§ 6).** | Medium | ≈0 (0 to −13mm, <0.1pp) |
 | **Overlap-and-separate + Guided Local Search** — drop pieces into a too-short strip (overlaps allowed), then GLS-weighted local search nudges colliding pieces apart to feasibility; shrink strip; repeat. The academic SOTA paradigm (Umetani 2009 → sparrow 2025) for irregular **strip** packing — directly targets the ordering-brittleness wall our SA/GA-over-BLF hit. Restricted rotations ({0°,180°}) + no-flip are first-class, so manufacturing-compatible. Reimplement in Python from the papers, or wrap Rust jagua-rs/sparrow (MIT/MPL-2.0 — packaging cost). See § 6 [2026-06-07]. | High | ~0.3–5% over prior best on academic benchmarks (NOT cross-comparable to our 81.4%) |
-| **LP compaction / separation (Li–Milenkovic 1995)** — rigorous version of the compaction post-pass: solve for new non-overlapping positions via linear programming. Originally invented for garment **marker making** (fixed-width cloth, minimize length — our exact problem). Needs an LP solver (scipy). See § 6 [2026-06-07]. | Medium-High | unmeasured |
+| **LP compaction / separation (Li–Milenkovic 1995)** — rigorous version of the compaction post-pass: solve for new non-overlapping positions via linear programming. Originally invented for garment **marker making** (fixed-width cloth, minimize length — our exact problem). Needs an LP solver (scipy). **SHELVED — spiked 2026-06-07, measured ≈0 (§ 6).** | Medium-High | ≈0 (−2 to −12mm, <0.1pp) |
 
 ### 5.C Pruning meta-improvements (compose with PRs #7/#8)
 
@@ -735,12 +735,20 @@ Add new entries here as work progresses. Each entry should record:
   borrow — Li & Milenkovic 1995 invented LP-based compaction/separation specifically
   for *garment marker making* (packing polygons on fixed-width cloth to minimize
   length). Optimal compaction is NP-complete; they find local minima via LP.
-- **Decision / next step:** Compaction (translate-only) is both the cheapest win and
-  the on-ramp to the separation paradigm that targets our actual bottleneck. Plan:
-  (1) measurement spike — translate-only compactor on the GA output for
-  `sample_2.dxf × 10`, measure the marker-length delta; (2) if it pays (≥ 1–2pp),
-  escalate toward a fuller overlap-and-separate + GLS engine (the likely route to the
-  commercial ~86%). Candidates filed in § 5.B.
+- **Decision (measured 2026-06-07):** Spiked BOTH tiers — throwaway
+  `engine/tests/spike_compaction.py` (greedy translate-only) and
+  `spike_compaction_lp.py` (scipy simultaneous-LP, Li–Milenkovic style). **Both
+  recover ≈0 on every workload and baseline, all valid:** greedy warm-start −7.7mm,
+  GA −12.7mm, sample_3 −2.8mm, sample_4 0.0mm; LP warm-start −5.8 to −12.3mm, GA
+  −1.7mm (all < 0.1pp). Root cause is structural — BLF already packs to a tight local
+  optimum, and compaction only refines *within the same arrangement*; the 287mm GA
+  gain comes from different piece *orderings*, which compaction cannot reach. The
+  cooperative LP (its one edge over greedy) bought a few mm then jammed (trust-region
+  step t→0). **Compaction SHELVED (both tiers); scipy NOT added to production.** The
+  real headroom is the **overlap-and-separate paradigm** (Umetani 2009 → sparrow
+  2025), which generates *new* arrangements — now the active direction (evaluating the
+  Rust `sparrow` SOTA on our workload; see the separation-engine spec). The throwaway spikes have been removed; their
+  numbers and method are preserved in this entry.
 - **Key sources:** Bennell & Oliveira 2008, "The geometry of nesting problems: A
   tutorial" (EJOR 184(2):397–415); Umetani et al. 2009, "Solving the irregular strip
   packing problem via guided local search for overlap minimization" (ITOR); Li &
