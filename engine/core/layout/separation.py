@@ -270,3 +270,20 @@ def _run_sparrow(instance: dict, budget_s: float, seed: int) -> dict:
             raise ValueError("sparrow produced no output")
         with open(os.path.join(outdir, finals[0]), encoding="utf-8") as f:
             return json.load(f)
+
+
+def run_separation_layout(pieces: list[Piece], fabric_width_mm: float, grain_mode: str,
+                          fabric_grain_deg: float, budget_s: float, seed: int = 42
+                          ) -> tuple[list[Placement], float, float]:
+    """Run the separation (sparrow) engine. Mirrors auto_layout_polygon's return
+    (placements, marker_length_mm, utilization_pct). Raises CancellationError on
+    kill (-> API 499); ValueError on invalid/empty output (-> API 400)."""
+    if not pieces:
+        raise ValueError("no pieces to lay out")
+    items = _group_to_items(pieces, grain_mode, fabric_grain_deg)
+    strip_height = fabric_width_mm - 2 * EDGE_GAP
+    solution = _run_sparrow(_instance_json(items, strip_height), budget_s, seed)
+    placements = _reconstruct(solution, items, fabric_width_mm)
+    _validate_layout(placements, pieces, fabric_width_mm, grain_mode, fabric_grain_deg)
+    marker_length, utilization = _compute_metrics(placements, pieces, fabric_width_mm, _polygon_dims)
+    return placements, marker_length, utilization

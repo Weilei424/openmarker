@@ -184,3 +184,31 @@ def test_kill_current_sparrow_terminates_registered_proc():
     assert d.killed is True
     sep._set_current_sparrow(None)
     sep.kill_current_sparrow()  # no-op when none registered
+
+
+# --- run_separation_layout ---
+
+import core.layout.separation as sep_mod
+
+
+def test_run_separation_layout_assembles(monkeypatch):
+    pieces = [_rect("piece_0__c0", 60, 40, 90.0), _rect("piece_0__c1", 60, 40, 90.0)]
+    items = sep_mod._group_to_items(pieces, "bi", 90.0)
+    w = items[0].emitted.bounds[2]
+    h = items[0].emitted.bounds[3]
+    fabric = h + 2 * EDGE_GAP
+    canned = {"solution": {"strip_width": 2 * w, "layout": {"placed_items": [
+        {"item_id": 0, "transformation": {"rotation": 0.0,   "translation": [0.0, 0.0]}},
+        {"item_id": 0, "transformation": {"rotation": 180.0, "translation": [2 * w, h]}},
+    ]}}}
+    monkeypatch.setattr(sep_mod, "_run_sparrow", lambda instance, budget_s, seed: canned)
+    placements, marker, util = sep_mod.run_separation_layout(
+        pieces, fabric_width_mm=fabric, grain_mode="bi", fabric_grain_deg=90.0, budget_s=5, seed=42)
+    assert {p.piece_id for p in placements} == {"piece_0__c0", "piece_0__c1"}
+    assert marker > 0 and 0 < util <= 100
+    assert all(round(p.rotation_deg) % 180 == 0 for p in placements)
+
+
+def test_run_separation_layout_empty_raises():
+    with pytest.raises(ValueError, match="no pieces"):
+        sep_mod.run_separation_layout([], 200.0, "bi", 90.0, budget_s=5)

@@ -58,3 +58,14 @@ def test_cancellation_kills_sparrow():
     th.join(timeout=15)
     reset_cancellation()
     assert result.get("cancelled") is True
+
+
+def test_run_separation_layout_end_to_end():
+    reset_cancellation()
+    pieces = [_rect("p__c0", 80, 40), _rect("p__c1", 80, 40), _rect("q__c0", 60, 30)]
+    placements, marker_length, utilization = sep.run_separation_layout(
+        pieces, fabric_width_mm=300.0, grain_mode="bi", fabric_grain_deg=90.0,
+        budget_s=5, seed=42)
+    assert len(placements) == len(pieces)
+    assert marker_length > 0 and 0 < utilization <= 100
+    assert all(round(pl.rotation_deg) % 180 == 0 for pl in placements)
