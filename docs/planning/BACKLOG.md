@@ -186,6 +186,9 @@ Task checklist:
 
 - [ ] Make parallel SA's improving path deterministic (deterministic only with `disable_pruning` today — timing-dependent cutoff pruning). See PERFORMANCE.md § 6 [2026-06-05].
 - [ ] Remaining clustering follow-ups (heterogeneous clustering, cluster-aware sort) + open meta items. See PERFORMANCE.md § 5.
+- [x] Compaction post-pass — spiked greedy + LP (scipy), measured ≈0 on every workload/baseline; **SHELVED**. See PERFORMANCE.md § 5.B + § 6 [2026-06-07].
+- [x] Separation engine (sparrow) — Phase 0/1 evaluation: **GO**. Built + ran the Rust SOTA nester on our workloads; grain gate passes; beats GA ~4.35% on sample_2×10 (10916.5mm / 85.08%, valid), approaching commercial 86.1%. PR #15. See PERFORMANCE.md § 5.B + § 6 [2026-06-07].
+  - [ ] **Phase 2 — productionize** (bundled offline sidecar + GUI "Ultra" tier, gated ≥3%): rigorous output→`Placement` parser, subprocess + cancellation, cache key, packaging. Spec: `docs/superpowers/specs/2026-06-07-separation-engine-design.md`; Phase-0/1 plan: `docs/superpowers/plans/2026-06-07-separation-engine-phase0-1.md` (Phase-2 plan pending).
 
 ### Phase 7 — Export
 - [ ] Export layout as DXF or PNG (sourced from any cached layout tab)
