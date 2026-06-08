@@ -117,3 +117,47 @@ def test_reconstruct_round_trip_grain_and_no_overlap():
     # and so cannot surface here. It is caught by _validate_layout's within-fabric-width check on
     # real length-dominant markers (integration test + bench), where a reflection drops the marker
     # length onto the width axis and is rejected.
+
+
+from core.layout.separation import _validate_layout
+from core.layout.heuristic import Placement
+
+
+def _clean_placements():
+    # two 60x40 copies, grainline 90, bi-grain: side by side, no overlap, rotation 0
+    pieces = [_rect("piece_0__c0", 60, 40, 90.0), _rect("piece_0__c1", 60, 40, 90.0)]
+    placements = [Placement("piece_0__c0", 10.0, 10.0, 0.0),
+                  Placement("piece_0__c1", 10.0, 60.0, 0.0)]
+    return pieces, placements
+
+
+def test_validate_passes_clean():
+    pieces, placements = _clean_placements()
+    _validate_layout(placements, pieces, fabric_width_mm=200.0, grain_mode="bi", fabric_grain_deg=90.0)
+
+
+def test_validate_rejects_off_grain():
+    pieces, placements = _clean_placements()
+    placements[1] = Placement("piece_0__c1", 10.0, 60.0, 90.0)  # 90 not in {0,180}
+    with pytest.raises(ValueError, match="off-grain"):
+        _validate_layout(placements, pieces, 200.0, "bi", 90.0)
+
+
+def test_validate_rejects_overlap():
+    pieces, placements = _clean_placements()
+    placements[1] = Placement("piece_0__c1", 10.0, 10.0, 0.0)  # identical position
+    with pytest.raises(ValueError, match="overlap"):
+        _validate_layout(placements, pieces, 200.0, "bi", 90.0)
+
+
+def test_validate_rejects_over_width():
+    pieces, placements = _clean_placements()
+    placements[1] = Placement("piece_0__c1", 10.0, 5000.0, 0.0)  # far outside fabric width
+    with pytest.raises(ValueError, match="outside fabric"):
+        _validate_layout(placements, pieces, 40.0, "bi", 90.0)
+
+
+def test_validate_rejects_missing():
+    pieces, placements = _clean_placements()
+    with pytest.raises(ValueError, match="placed 1 of 2"):
+        _validate_layout(placements[:1], pieces, 200.0, "bi", 90.0)
