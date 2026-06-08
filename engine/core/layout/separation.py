@@ -142,6 +142,8 @@ def _reconstruct(solution: dict, items: list[_SepItem], fabric_width_mm: float) 
         jpoly = shapely.affinity.translate(
             shapely.affinity.rotate(it.emitted, r, origin=(0, 0), use_radians=False),
             xoff=float(t[0]), yoff=float(t[1]))
+        # -90 inverts the +90 axis-swap from _emit_shape (jagua X=length -> engine Y;
+        # jagua Y=fabric width -> engine X). base stays folded into rotation_deg below.
         epoly = shapely.affinity.rotate(jpoly, -90.0, origin=(0, 0), use_radians=False)
         j = counters[it.index]
         counters[it.index] += 1

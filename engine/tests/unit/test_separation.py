@@ -112,3 +112,8 @@ def test_reconstruct_round_trip_grain_and_no_overlap():
     for poly in polys:                                      # cross-grain landed on X, within width
         assert poly.bounds[0] >= -0.5 and poly.bounds[2] <= fabric + 0.5
         assert poly.bounds[1] >= -0.5
+    # NOTE: a global axis-map SIGN error (-90 vs +90) is a whole-layout reflection, which is
+    # reflection-invariant for symmetric/identical pieces (same bbox; rotation_deg is analytic)
+    # and so cannot surface here. It is caught by _validate_layout's within-fabric-width check on
+    # real length-dominant markers (integration test + bench), where a reflection drops the marker
+    # length onto the width axis and is rejected.
