@@ -24,6 +24,7 @@ from core.layout.cancellation import (
     reset_cancellation,
 )
 from core.layout.heuristic import auto_layout_polygon
+from core.layout.separation import run_separation_layout
 from core.layout.grain import FABRIC_GRAIN_DEG
 from core.models.piece import BoundingBox, Piece as PieceModel
 
@@ -93,11 +94,11 @@ async def import_dxf(file: UploadFile) -> dict:
 # "fast" runs no meta-heuristic (today's warm-start). "better"/"best" run the
 # island-model GA with a wall-clock budget. Budgets validated by
 # engine/tests/bench_optimizer_tiers.py on the canonical workload.
-VALID_QUALITIES = ("fast", "better", "best")
+VALID_QUALITIES = ("fast", "better", "best", "ultra")
 GA_GENERATIONS_CAP = 12        # generation cap; binds on small jobs, time binds on big
 GA_GUI_SEED = 42               # fixed -> deterministic per (input, quality)
 OPTIMIZED_EFFORT = 4           # "all but one core": more islands, machine stays usable
-QUALITY_BUDGETS_S = {"better": 180.0, "best": 420.0}
+QUALITY_BUDGETS_S = {"better": 180.0, "best": 420.0, "ultra": 600.0}
 
 
 @app.post("/auto-layout")
@@ -226,6 +227,11 @@ async def auto_layout_endpoint(request: Request) -> dict:
                 disable_nfp_cache=disable_nfp_cache,
                 effort=effort,
             )
+        if quality == "ultra":
+            return run_separation_layout(
+                pieces, fabric_width_mm, grain_mode, FABRIC_GRAIN_DEG,
+                budget_s=QUALITY_BUDGETS_S["ultra"], seed=GA_GUI_SEED,
+            )
         # better / best: island-model GA with a wall-clock budget. effort is
         # forced to OPTIMIZED_EFFORT (all-but-one core) for more GA islands.
         return auto_layout_polygon(
@@ -299,6 +305,8 @@ def cancel_layout() -> dict:
     # the top-level imports tidy; called only on the one-shot cancel path.
     from core.layout.heuristic import kill_current_executor
     kill_current_executor()
+    from core.layout.separation import kill_current_sparrow
+    kill_current_sparrow()
     return {"ok": True}
 
 
