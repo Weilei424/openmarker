@@ -231,25 +231,38 @@ def _run_sparrow(instance: dict, budget_s: float, seed: int) -> dict:
     """Write the instance, run sparrow in a scratch dir, return the parsed output.
 
     Raises CancellationError if /cancel-layout killed the child; ValueError on a
-    genuine sparrow failure or missing output.
+    genuine sparrow failure or missing output (with the stderr tail for diagnosis).
     """
     exe = _resolve_sparrow_path()
     with tempfile.TemporaryDirectory() as td:
         ipath = os.path.join(td, "inst.json")
         with open(ipath, "w", encoding="utf-8") as f:
             json.dump(instance, f)
-        proc = subprocess.Popen(
-            [exe, "-i", ipath, "-t", str(int(budget_s)), "-s", str(int(seed))],
-            cwd=td, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        _set_current_sparrow(proc)
-        try:
-            proc.wait()
-        finally:
-            _set_current_sparrow(None)
+        # stderr -> a scratch file (not PIPE): a long run can log verbosely; a file
+        # avoids both pipe-buffer deadlock and unbounded in-memory capture.
+        log_path = os.path.join(td, "sparrow.stderr.log")
+        with open(log_path, "wb") as logf:
+            proc = subprocess.Popen(
+                [exe, "-i", ipath, "-t", str(int(budget_s)), "-s", str(int(seed))],
+                cwd=td, stdout=subprocess.DEVNULL, stderr=logf)
+            _set_current_sparrow(proc)
+            try:
+                # Close the tiny race where cancel lands between Popen and registration.
+                if is_cancelled():
+                    proc.terminate()
+                proc.wait()
+            finally:
+                _set_current_sparrow(None)
         if is_cancelled():
             raise CancellationError("sparrow run cancelled")
         if proc.returncode != 0:
-            raise ValueError(f"sparrow exited with code {proc.returncode}")
+            tail = ""
+            try:
+                with open(log_path, encoding="utf-8", errors="replace") as f:
+                    tail = f.read()[-500:].strip()
+            except OSError:
+                pass
+            raise ValueError(f"sparrow exited with code {proc.returncode}: {tail}")
         outdir = os.path.join(td, "output")
         finals = ([x for x in os.listdir(outdir) if x.startswith("final_") and x.endswith(".json")]
                   if os.path.isdir(outdir) else [])
