@@ -92,8 +92,9 @@ async def import_dxf(file: UploadFile) -> dict:
 # Optimizer quality tiers -> GA knobs (see
 # docs/superpowers/specs/2026-06-06-expose-optimizer-gui-design.md).
 # "fast" runs no meta-heuristic (today's warm-start). "better"/"best" run the
-# island-model GA with a wall-clock budget. Budgets validated by
-# engine/tests/bench_optimizer_tiers.py on the canonical workload.
+# island-model GA with a wall-clock budget. "ultra" runs the separation engine
+# (bundled sparrow sidecar) at a 600s budget. Budgets validated by
+# engine/tests/bench_optimizer_tiers.py + bench_separation.py.
 VALID_QUALITIES = ("fast", "better", "best", "ultra")
 GA_GENERATIONS_CAP = 12        # generation cap; binds on small jobs, time binds on big
 GA_GUI_SEED = 42               # fixed -> deterministic per (input, quality)
@@ -115,9 +116,9 @@ async def auto_layout_endpoint(request: Request) -> dict:
         "filename": "...",          // required
         "copies": 1,                // optional, defaults to 1
         "disable_nfp_cache": false, // optional, A/B benchmark toggle
-        "effort": 1,                // optional, 1=serial..5=all cores; ignored when quality is better/best (forced to 4)
+        "effort": 1,                // optional, 1=serial..5=all cores; ignored for better/best (forced to 4) and ultra
         "max_cache_entries": 5,     // optional, 5..20; sets FIFO cap before dedup check
-        "quality": "fast",          // optional: "fast" | "better" | "best"; better/best run GA
+        "quality": "fast",          // optional: "fast" | "better" | "best" | "ultra"; better/best run GA, ultra runs sparrow
     }
 
     Response JSON:

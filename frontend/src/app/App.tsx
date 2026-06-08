@@ -297,7 +297,7 @@ export default function App() {
               ))}
               <p style={styles.advancedHint}>
                 {quality !== "fast"
-                  ? "Better/Best use all but one core; this applies to Fast only."
+                  ? "Better/Best/Ultra ignore parallel effort; it applies to Fast only."
                   : "Cancellation may not interrupt parallel runs immediately."}
               </p>
             </div>
