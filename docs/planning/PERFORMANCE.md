@@ -793,3 +793,38 @@ Add new entries here as work progresses. Each entry should record:
   metric — small convention diffs, but ±20mm ≪ the 496mm win. Phase-2 build needs the
   rigorous per-placement parser into engine `Placement`s + the sidecar/cancellation/cache
   wiring. Longer budgets (up to 600s) and cross-import (sample_3) likely improve further.
+
+### 2026-06-08 — Separation engine PRODUCTIONIZED as the "Ultra" GUI tier
+
+- **What:** Phase 2 shipped the separation engine end-to-end as the GUI **Ultra** quality tier
+  (spec `docs/superpowers/specs/2026-06-07-separation-engine-phase2-design.md`, plan
+  `…/plans/2026-06-07-separation-engine-phase2.md`). New `core/layout/separation.py`: pieces →
+  grain-aligned + 90° axis-mapped `jagua-rs` JSON → bundled `sparrow.exe` subprocess → inverse
+  axis-map reconstruction → hard-fail validation (grain / overlap / width / coverage) →
+  `_compute_metrics`. `POST /auto-layout` routes `quality="ultra"` at a 600s budget;
+  `/cancel-layout` kills the child; `QualityPanel` gains an Ultra radio. `sparrow.exe` (MIT, on
+  MPL-2.0 `jagua-rs` 0.7.2; upstream `a4bfbbe`, rustc 1.89.0) is committed at
+  `engine/vendor/sparrow/` for offline one-click install (a `.gitignore` `*.exe` negation).
+- **Grain (hard constraint) honored:** per-item `allowed_orientations` is DERIVED from grain_mode +
+  grainline (single → `[0]` no flip; bi → `[0,180]`; no-grainline → cardinals), not hardcoded. The
+  output validator re-asserts grain ∈ {target, target+180}, no area-overlap, and within-width on
+  every placement; every measured marker passed (190/190, 48/48). 242 tests green, incl. 3
+  real-sparrow integration tests (tiny run, cancellation kill, full pipeline).
+- **Result (production `run_separation_layout`, seed 42, all markers validated):**
+
+  | workload | budget | marker | util | vs GA | gate (≤3%) |
+  | --- | --- | --- | --- | --- | --- |
+  | `sample_2.dxf ×10` | 180s | 10929.2mm | 84.98% | **+4.23%** | PASS |
+  | `sample_2.dxf ×10` | **600s (shipped)** | **10819.5mm** | **85.85%** | **+5.20%** | PASS |
+  | `sample_4.dxf ×6` | 600s | 4540.7mm | 80.63% | **+11.34%** | PASS |
+
+  The 600s default clears the ≥3% gate with margin on both workloads and reproduces the Phase-1
+  eval (180s → 10929 vs the eval's 10916.5, within convention noise). 600s improves on 180s
+  (+5.20% vs +4.23%), so the user-chosen max budget pays off — `sample_2` reaches **85.85%**,
+  approaching the commercial 86.1%.
+- **Stop / offline:** Stop kills sparrow → no marker (consistent with Better/Best; "best-so-far from
+  `sols_<name>/` snapshots" filed as a follow-up). Fully offline via the committed binary +
+  `_resolve_sparrow_path` ladder (env → vendored → PyInstaller `_MEIPASS` → dev `tools/`).
+- **Decision: SHIPPED.** Ultra is now the best quality tier (85.85% on the canonical workload vs
+  GA's 81.39%). Bench harness: `engine/tests/bench_separation.py` (production module, not the
+  Phase-1 `bench_sparrow.py` spike).
