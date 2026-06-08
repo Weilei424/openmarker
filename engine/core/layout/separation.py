@@ -61,3 +61,63 @@ def _resolve_sparrow_path() -> str:
         "sparrow binary not found. Set OPENMARKER_SPARROW_PATH, or vendor it at "
         "engine/vendor/sparrow/sparrow.exe (see the Phase 2 spec §10)."
     )
+
+
+@dataclass
+class _SepItem:
+    index: int
+    piece_ids: list[str]         # expanded "__cN" ids, in placement-assignment order
+    base_angle: float            # engine pre-rotation reference (engine_set[0])
+    emitted: ShapelyPolygon      # grain-aligned + 90deg axis-mapped, origin-normalized
+    allowed_offsets: list[float] # jagua allowed_orientations = engine_set - base_angle
+
+
+def _emit_shape(piece: Piece, base_angle: float) -> ShapelyPolygon:
+    """Grain-align (base) + 90deg axis swap; origin-normalize bbox-min -> (0,0)."""
+    poly = shapely.affinity.rotate(
+        ShapelyPolygon(piece.polygon), base_angle + 90.0, origin=(0, 0), use_radians=False)
+    minx, miny = poly.bounds[0], poly.bounds[1]
+    return shapely.affinity.translate(poly, xoff=-minx, yoff=-miny)
+
+
+def _group_to_items(pieces: list[Piece], grain_mode: str, fabric_grain_deg: float) -> list[_SepItem]:
+    """Collapse expanded pieces to base groups and build one jagua item per group.
+
+    allowed_offsets follows the grain table (single -> [0]; bi -> [0,180];
+    no-grainline -> [0,90,180,270]) by re-expressing _layout_rotations relative
+    to base_angle. base_angle (= engine_set[0]) is folded into the final rotation
+    on reconstruction, so net engine rotation lands exactly in the engine set.
+    """
+    groups = group_pieces_by_base_id(pieces)
+    items: list[_SepItem] = []
+    for index, members in enumerate(groups.values()):
+        rep = members[0]
+        engine_set = _layout_rotations(grain_mode, fabric_grain_deg, rep.grainline_direction_deg)
+        base = engine_set[0]
+        items.append(_SepItem(
+            index=index,
+            piece_ids=[p.id for p in members],
+            base_angle=base,
+            emitted=_emit_shape(rep, base),
+            allowed_offsets=[round((a - base) % 360.0, 6) for a in engine_set],
+        ))
+    return items
+
+
+def _instance_json(items: list[_SepItem], strip_height: float, name: str = "openmarker") -> dict:
+    return {
+        "name": name,
+        "strip_height": float(strip_height),
+        "items": [
+            {
+                "id": it.index,
+                "demand": len(it.piece_ids),
+                "allowed_orientations": [float(o) for o in it.allowed_offsets],
+                "shape": {
+                    "type": "simple_polygon",
+                    "data": [[float(x), float(y)] for x, y in it.emitted.exterior.coords[:-1]],
+                },
+            }
+            for it in items
+        ],
+    }
