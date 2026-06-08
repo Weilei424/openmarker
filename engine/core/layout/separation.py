@@ -171,27 +171,31 @@ def _validate_layout(placements: list[Placement], pieces: list[Piece], fabric_wi
     if len(placements) != len(pieces):
         issues.append(f"placed {len(placements)} of {len(pieces)} pieces")
 
-    polys: list[ShapelyPolygon] = []
+    placed: list[tuple[Placement, ShapelyPolygon]] = []
     for pl in placements:
-        piece = piece_map[pl.piece_id]
+        piece = piece_map.get(pl.piece_id)
+        if piece is None:                       # unknown id -> clean ValueError, not KeyError
+            issues.append(f"{pl.piece_id}: unknown piece_id")
+            continue
         allowed = _layout_rotations(grain_mode, fabric_grain_deg, piece.grainline_direction_deg)
+        # circular distance: min angular gap to an allowed rotation, wrapping at 360
         if not any(abs(((pl.rotation_deg - a + 180.0) % 360.0) - 180.0) <= tol_deg for a in allowed):
             issues.append(f"{pl.piece_id}: off-grain rotation {pl.rotation_deg} (allowed {allowed})")
         poly = _placed_polygon(piece, pl.x, pl.y, pl.rotation_deg)
         b = poly.bounds
         if b[0] < -0.5 or b[2] > fabric_width_mm + 0.5 or b[1] < -0.5:
             issues.append(f"{pl.piece_id}: outside fabric bounds {tuple(round(v, 1) for v in b)}")
-        polys.append(poly)
+        placed.append((pl, poly))
 
-    n = len(polys)
+    n = len(placed)
     for i in range(n):
-        bi = polys[i].bounds
+        bi = placed[i][1].bounds
         for j in range(i + 1, n):
-            bj = polys[j].bounds
+            bj = placed[j][1].bounds
             if bi[2] < bj[0] or bj[2] < bi[0] or bi[3] < bj[1] or bj[3] < bi[1]:
                 continue
-            if _has_area_overlap(polys[i], polys[j]):
-                issues.append(f"overlap: {placements[i].piece_id} & {placements[j].piece_id}")
+            if _has_area_overlap(placed[i][1], placed[j][1]):
+                issues.append(f"overlap: {placed[i][0].piece_id} & {placed[j][0].piece_id}")
                 break
         if len(issues) > 8:
             break

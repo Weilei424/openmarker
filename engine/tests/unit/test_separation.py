@@ -161,3 +161,11 @@ def test_validate_rejects_missing():
     pieces, placements = _clean_placements()
     with pytest.raises(ValueError, match="placed 1 of 2"):
         _validate_layout(placements[:1], pieces, 200.0, "bi", 90.0)
+
+
+def test_validate_rejects_unknown_piece_id():
+    # A placed id not present in pieces -> clean ValueError (not an uncaught KeyError).
+    pieces, placements = _clean_placements()
+    placements[1] = Placement("ghost__c0", 10.0, 60.0, 0.0)
+    with pytest.raises(ValueError, match="unknown piece_id"):
+        _validate_layout(placements, pieces, 200.0, "bi", 90.0)
