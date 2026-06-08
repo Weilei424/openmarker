@@ -202,3 +202,58 @@ def _validate_layout(placements: list[Placement], pieces: list[Piece], fabric_wi
 
     if issues:
         raise ValueError("separation layout invalid: " + "; ".join(issues[:6]))
+
+
+# --- subprocess + cancellation plumbing ---
+_sparrow_lock = threading.Lock()
+_current_sparrow: "subprocess.Popen | None" = None
+
+
+def _set_current_sparrow(proc) -> None:
+    global _current_sparrow
+    with _sparrow_lock:
+        _current_sparrow = proc
+
+
+def kill_current_sparrow() -> None:
+    """Terminate the in-flight sparrow child (called by /cancel-layout). No-op if none."""
+    with _sparrow_lock:
+        proc = _current_sparrow
+    if proc is None:
+        return
+    try:
+        proc.terminate()
+    except Exception:
+        pass
+
+
+def _run_sparrow(instance: dict, budget_s: float, seed: int) -> dict:
+    """Write the instance, run sparrow in a scratch dir, return the parsed output.
+
+    Raises CancellationError if /cancel-layout killed the child; ValueError on a
+    genuine sparrow failure or missing output.
+    """
+    exe = _resolve_sparrow_path()
+    with tempfile.TemporaryDirectory() as td:
+        ipath = os.path.join(td, "inst.json")
+        with open(ipath, "w", encoding="utf-8") as f:
+            json.dump(instance, f)
+        proc = subprocess.Popen(
+            [exe, "-i", ipath, "-t", str(int(budget_s)), "-s", str(int(seed))],
+            cwd=td, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        _set_current_sparrow(proc)
+        try:
+            proc.wait()
+        finally:
+            _set_current_sparrow(None)
+        if is_cancelled():
+            raise CancellationError("sparrow run cancelled")
+        if proc.returncode != 0:
+            raise ValueError(f"sparrow exited with code {proc.returncode}")
+        outdir = os.path.join(td, "output")
+        finals = ([x for x in os.listdir(outdir) if x.startswith("final_") and x.endswith(".json")]
+                  if os.path.isdir(outdir) else [])
+        if not finals:
+            raise ValueError("sparrow produced no output")
+        with open(os.path.join(outdir, finals[0]), encoding="utf-8") as f:
+            return json.load(f)
