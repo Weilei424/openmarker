@@ -91,6 +91,9 @@ desktop/src-tauri/gen/
 *.dll
 *.msi
 
+# Exception: the vendored sparrow sidecar must be committed (offline Ultra tier)
+!engine/vendor/sparrow/sparrow.exe
+
 # installers
 *.zip
 *.tar
