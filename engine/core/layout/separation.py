@@ -121,3 +121,39 @@ def _instance_json(items: list[_SepItem], strip_height: float, name: str = "open
             for it in items
         ],
     }
+
+
+def _reconstruct(solution: dict, items: list[_SepItem], fabric_width_mm: float) -> list[Placement]:
+    """Invert the axis map and build engine Placements.
+
+    For each placed copy: rebuild its jagua-frame polygon (rotate emitted by r,
+    translate by t), rotate the WHOLE layout by -90deg (axis-swap inverse), then
+    shift bbox-min -> (EDGE_GAP, EDGE_GAP). rotation_deg = (base + r) lands exactly
+    in the engine grain set; (x, y) = rotated-bbox-min so the existing
+    _placed_polygon reproduces the polygon for metrics/validation/render.
+    """
+    by_index = {it.index: it for it in items}
+    counters: dict[int, int] = {it.index: 0 for it in items}
+    raw: list[tuple[str, float, ShapelyPolygon]] = []  # (piece_id, rotation_deg, engine_poly)
+    for pi in solution["solution"]["layout"]["placed_items"]:
+        it = by_index[pi["item_id"]]
+        r = float(pi["transformation"]["rotation"]) % 360.0
+        t = pi["transformation"]["translation"]
+        jpoly = shapely.affinity.translate(
+            shapely.affinity.rotate(it.emitted, r, origin=(0, 0), use_radians=False),
+            xoff=float(t[0]), yoff=float(t[1]))
+        epoly = shapely.affinity.rotate(jpoly, -90.0, origin=(0, 0), use_radians=False)
+        j = counters[it.index]
+        counters[it.index] += 1
+        raw.append((it.piece_ids[j], round((it.base_angle + r) % 360.0, 6), epoly))
+
+    if not raw:
+        return []
+    dx = EDGE_GAP - min(p.bounds[0] for _, _, p in raw)
+    dy = EDGE_GAP - min(p.bounds[1] for _, _, p in raw)
+    placements: list[Placement] = []
+    for piece_id, rotation_deg, epoly in raw:
+        shifted = shapely.affinity.translate(epoly, xoff=dx, yoff=dy)
+        placements.append(Placement(piece_id, round(shifted.bounds[0], 4),
+                                    round(shifted.bounds[1], 4), rotation_deg))
+    return placements

@@ -84,3 +84,31 @@ def test_instance_json_shape():
     assert inst["items"][0]["allowed_orientations"] == [0.0, 180.0]
     assert inst["items"][0]["shape"]["type"] == "simple_polygon"
     assert len(inst["items"][0]["shape"]["data"]) == 4  # no closing dup
+
+
+from core.layout.separation import _reconstruct
+from core.layout.heuristic import _placed_polygon, _has_area_overlap
+
+
+def test_reconstruct_round_trip_grain_and_no_overlap():
+    pieces = [_rect("piece_0__c0", 60, 40, 90.0), _rect("piece_0__c1", 60, 40, 90.0)]
+    items = _group_to_items(pieces, "bi", 90.0)
+    w = items[0].emitted.bounds[2]   # along-grain extent -> jagua X (length)
+    h = items[0].emitted.bounds[3]   # cross-grain extent -> jagua Y (width)
+    # Simulated sparrow solution: two copies side-by-side, second flipped 180.
+    sol = {"solution": {"strip_width": 2 * w, "layout": {"placed_items": [
+        {"item_id": 0, "transformation": {"rotation": 0.0,   "translation": [0.0, 0.0]}},
+        {"item_id": 0, "transformation": {"rotation": 180.0, "translation": [2 * w, h]}},
+    ]}}}
+    fabric = h + 2 * EDGE_GAP
+    placements = _reconstruct(sol, items, fabric_width_mm=fabric)
+
+    assert {pl.piece_id for pl in placements} == {"piece_0__c0", "piece_0__c1"}
+    for pl in placements:                                  # grain: engine set {0,180}
+        assert round(pl.rotation_deg) % 180 == 0
+    pmap = {p.id: p for p in pieces}
+    polys = [_placed_polygon(pmap[pl.piece_id], pl.x, pl.y, pl.rotation_deg) for pl in placements]
+    assert not _has_area_overlap(polys[0], polys[1])        # round-trip is overlap-free
+    for poly in polys:                                      # cross-grain landed on X, within width
+        assert poly.bounds[0] >= -0.5 and poly.bounds[2] <= fabric + 0.5
+        assert poly.bounds[1] >= -0.5
