@@ -30,4 +30,16 @@ describe("QualityPanel", () => {
     expect(screen.queryByText(/min/i)).toBeNull();
     expect(screen.queryByText(/\d+\s*(min|sec|s)\b/i)).toBeNull();
   });
+
+  it("renders the Ultra radio", () => {
+    render(<QualityPanel quality="fast" onChange={() => {}} />);
+    expect(screen.getByLabelText(/Ultra/i)).toBeTruthy();
+  });
+
+  it("calls onChange with 'ultra' when Ultra clicked", () => {
+    const onChange = vi.fn();
+    render(<QualityPanel quality="fast" onChange={onChange} />);
+    fireEvent.click(screen.getByLabelText(/Ultra/i));
+    expect(onChange).toHaveBeenCalledWith("ultra");
+  });
 });

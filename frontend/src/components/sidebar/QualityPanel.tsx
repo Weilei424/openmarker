@@ -10,7 +10,8 @@ interface QualityPanelProps {
 const OPTIONS: { value: LayoutQuality; label: string; hint: string }[] = [
   { value: "fast", label: "Fast", hint: "quick" },
   { value: "better", label: "Better", hint: "tighter" },
-  { value: "best", label: "Best", hint: "tightest" },
+  { value: "best", label: "Best", hint: "very tight" },
+  { value: "ultra", label: "Ultra", hint: "tightest" },
 ];
 
 export function QualityPanel({ quality, onChange }: QualityPanelProps) {

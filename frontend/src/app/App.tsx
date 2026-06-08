@@ -273,7 +273,8 @@ export default function App() {
             <p style={styles.advancedHint}>For benchmarking: same settings at different effort levels create separate tabs.</p>
 
             {/* Parallel effort applies to the Fast tier only. Better/Best force
-                all-but-one core for more GA islands, so the radio is disabled then. */}
+                all-but-one core for more GA islands; Ultra runs the sparrow
+                sidecar (no effort knob) — so the radio is disabled for all of them. */}
             <div style={{ marginTop: 8, opacity: quality !== "fast" ? 0.5 : 1 }}>
               <div style={styles.settingLabel}>Parallel effort</div>
               {[
