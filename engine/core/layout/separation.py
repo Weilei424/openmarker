@@ -306,7 +306,7 @@ def run_separation_layout(pieces: list[Piece], fabric_width_mm: float, grain_mod
         return _solve_one(items, instance, pieces, fabric_width_mm, grain_mode,
                           fabric_grain_deg, budget_s, seeds[0])
 
-    results: list[tuple] = []
+    results: list[tuple[list[Placement], float, float]] = []
     errors: list[str] = []
     cancelled = False
     with ThreadPoolExecutor(max_workers=len(seeds)) as ex:

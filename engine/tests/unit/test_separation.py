@@ -249,3 +249,17 @@ def test_best_of_n_all_invalid_raises(monkeypatch):
     with pytest.raises(ValueError, match="all separation attempts invalid"):
         sep.run_separation_layout([_rect("p__c0", 60, 40, 90.0)], 200.0, "bi", 90.0,
                                   budget_s=5, seed=42, n_seeds=2)
+
+
+def test_best_of_n_cancel_takes_precedence(monkeypatch):
+    # Even when one seed returns a valid result, a cancelled attempt makes the whole
+    # run raise CancellationError (Stop must never return a partial best-of-N result).
+    from core.layout.cancellation import CancellationError
+    def fake_solve(items, instance, pieces, fw, gm, fg, budget_s, seed):
+        if seed == 42:
+            return ([_Pl("p__c0", 0.0, 0.0, 0.0)], 900.0, 50.0)
+        raise CancellationError("cancelled")
+    monkeypatch.setattr(sep, "_solve_one", fake_solve)
+    with pytest.raises(CancellationError):
+        sep.run_separation_layout([_rect("p__c0", 60, 40, 90.0)], 200.0, "bi", 90.0,
+                                  budget_s=5, seed=42, n_seeds=2)
