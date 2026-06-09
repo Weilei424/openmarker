@@ -63,4 +63,15 @@ describe("QualityPanel", () => {
     expect(screen.getByLabelText(/time budget/i)).toBeTruthy();
     expect(screen.getByLabelText(/seeds/i)).toBeTruthy();
   });
+
+  it("clamps the time budget to [360, 1500]", () => {
+    const onUltraBudgetChange = vi.fn();
+    render(<QualityPanel quality="ultra" onChange={() => {}} ultraBudgetS={600}
+                         onUltraBudgetChange={onUltraBudgetChange} ultraSeeds={1} />);
+    const input = screen.getByLabelText(/time budget/i);
+    fireEvent.change(input, { target: { value: "2000" } });
+    expect(onUltraBudgetChange).toHaveBeenCalledWith(1500);
+    fireEvent.change(input, { target: { value: "100" } });
+    expect(onUltraBudgetChange).toHaveBeenCalledWith(360);
+  });
 });

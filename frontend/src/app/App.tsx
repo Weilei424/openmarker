@@ -274,9 +274,9 @@ export default function App() {
             </label>
             <p style={styles.advancedHint}>For benchmarking: same settings at different effort levels create separate tabs.</p>
 
-            {/* Parallel effort applies to the Fast tier only. Better/Best force
-                all-but-one core for more GA islands; Ultra runs the sparrow
-                sidecar (no effort knob) — so the radio is disabled for all of them. */}
+            {/* Parallel effort applies to NFP-BLF only. The Genetic Algorithm tiers
+                force all-but-one core for more GA islands; Separation runs the sparrow
+                sidecar (its own threads) — so the radio is disabled for all of them. */}
             <div style={{ marginTop: 8, opacity: quality !== "fast" ? 0.5 : 1 }}>
               <div style={styles.settingLabel}>Parallel effort</div>
               {[
@@ -299,7 +299,7 @@ export default function App() {
               ))}
               <p style={styles.advancedHint}>
                 {quality !== "fast"
-                  ? "Better/Best/Ultra ignore parallel effort; it applies to Fast only."
+                  ? "Only NFP-BLF uses parallel effort; the Genetic and Separation tiers don't."
                   : "Cancellation may not interrupt parallel runs immediately."}
               </p>
             </div>
