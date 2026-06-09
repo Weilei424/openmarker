@@ -112,7 +112,7 @@ async def test_ultra_is_a_valid_quality(monkeypatch):
     from core.layout.heuristic import Placement
     import api.main as main
 
-    def _stub(pieces, fabric_width_mm, grain_mode, fabric_grain_deg, budget_s, seed=42):
+    def _stub(pieces, fabric_width_mm, grain_mode, fabric_grain_deg, budget_s, seed=42, n_seeds=1):
         return [Placement(pieces[0].id, 10.0, 10.0, 0.0)], 123.0, 45.6
 
     monkeypatch.setattr(main, "run_separation_layout", _stub)
@@ -139,3 +139,56 @@ async def test_ultra_invalid_output_returns_400(monkeypatch):
 
     assert resp.status_code == 400
     assert "invalid" in resp.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# ultra_budget_s and ultra_seeds validation + wiring
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_ultra_budget_out_of_range_422():
+    """ultra_budget_s outside 360..1500 must return 422."""
+    for bad in (359, 1501):
+        body = _one_piece_body(quality="ultra")
+        body["ultra_budget_s"] = bad
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post("/auto-layout", json=body)
+        assert resp.status_code == 422, f"expected 422 for ultra_budget_s={bad}, got {resp.status_code}"
+
+
+@pytest.mark.asyncio
+async def test_ultra_seeds_out_of_range_422():
+    """ultra_seeds outside 1..4 must return 422."""
+    for bad in (0, 5):
+        body = _one_piece_body(quality="ultra")
+        body["ultra_seeds"] = bad
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post("/auto-layout", json=body)
+        assert resp.status_code == 422, f"expected 422 for ultra_seeds={bad}, got {resp.status_code}"
+
+
+@pytest.mark.asyncio
+async def test_ultra_passes_budget_and_seeds(monkeypatch):
+    """ultra_budget_s and ultra_seeds are forwarded to run_separation_layout."""
+    from core.layout.heuristic import Placement
+    import api.main as main
+
+    captured: dict = {}
+
+    def _stub(pieces, fabric_width_mm, grain_mode, fabric_grain_deg, budget_s, seed=42, n_seeds=1):
+        captured["budget_s"] = budget_s
+        captured["n_seeds"] = n_seeds
+        return [Placement(pieces[0].id, 10.0, 10.0, 0.0)], 99.0, 50.0
+
+    monkeypatch.setattr(main, "run_separation_layout", _stub)
+
+    body = _one_piece_body(quality="ultra")
+    body["ultra_budget_s"] = 900
+    body["ultra_seeds"] = 3
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/auto-layout", json=body)
+
+    assert resp.status_code == 200
+    assert captured["budget_s"] == 900.0
+    assert captured["n_seeds"] == 3

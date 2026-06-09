@@ -154,6 +154,26 @@ async def auto_layout_endpoint(request: Request) -> dict:
             detail=f"`quality` must be one of {VALID_QUALITIES}, got {quality!r}",
         )
 
+    ultra_budget_s = body.get("ultra_budget_s", QUALITY_BUDGETS_S["ultra"])
+    try:
+        ultra_budget_s = float(ultra_budget_s)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="`ultra_budget_s` must be a number")
+    if ultra_budget_s < 360 or ultra_budget_s > 1500:
+        raise HTTPException(
+            status_code=422,
+            detail=f"`ultra_budget_s` must be 360..1500, got {ultra_budget_s}",
+        )
+    try:
+        ultra_seeds = int(body.get("ultra_seeds", 1))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="`ultra_seeds` must be an integer")
+    if ultra_seeds < 1 or ultra_seeds > 4:
+        raise HTTPException(
+            status_code=422,
+            detail=f"`ultra_seeds` must be 1..4, got {ultra_seeds}",
+        )
+
     # TEMP(phase6-bench): when True, dedup key also includes the effort level,
     # so the same settings run at different effort levels produce distinct entries.
     include_effort_in_key = bool(body.get("include_effort_in_key", False))
@@ -205,6 +225,8 @@ async def auto_layout_endpoint(request: Request) -> dict:
         fabric_width_mm=fabric_width_mm,
         quality=quality,
         effort=effort if include_effort_in_key else None,  # TEMP(phase6-bench)
+        ultra_budget_s=ultra_budget_s,
+        ultra_seeds=ultra_seeds,
     )
     if existing is not None:
         return {
@@ -231,7 +253,7 @@ async def auto_layout_endpoint(request: Request) -> dict:
         if quality == "ultra":
             return run_separation_layout(
                 pieces, fabric_width_mm, grain_mode, FABRIC_GRAIN_DEG,
-                budget_s=QUALITY_BUDGETS_S["ultra"], seed=GA_GUI_SEED,
+                budget_s=ultra_budget_s, seed=GA_GUI_SEED, n_seeds=ultra_seeds,
             )
         # better / best: island-model GA with a wall-clock budget. effort is
         # forced to OPTIMIZED_EFFORT (all-but-one core) for more GA islands.
@@ -278,6 +300,8 @@ async def auto_layout_endpoint(request: Request) -> dict:
         # Wall-clock display lives in `timestamp`.
         created_at=time.monotonic(),
         quality=quality,
+        ultra_budget_s=ultra_budget_s,
+        ultra_seeds=ultra_seeds,
     )
     # TEMP(phase6-bench): tag the entry with the effort level used to compute it,
     # so future lookups with include_effort_in_key=True can find it.

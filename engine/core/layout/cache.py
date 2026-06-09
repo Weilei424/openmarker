@@ -28,6 +28,10 @@ class CachedLayout:
     # Part of the dedup key so a Best run never returns a cached Fast result.
     # Defaults to "fast" so legacy/auxiliary constructions dedup as the warm-start.
     quality: str = "fast"
+    # Separation ("ultra") run parameters — part of the dedup key so different
+    # budget/seeds produce distinct entries. Defaults match non-ultra requests.
+    ultra_budget_s: float = 600.0
+    ultra_seeds: int = 1
     # Internal tiebreaker assigned by LayoutCache.insert when the entry is
     # accepted. Strictly increasing per-cache; not part of the public API
     # and not serialized to clients.
@@ -91,17 +95,21 @@ class LayoutCache:
         fabric_width_mm: float,
         quality: str = "fast",
         effort: int | None = None,  # TEMP(phase6-bench): include in key when not None
+        ultra_budget_s: float = 600.0,
+        ultra_seeds: int = 1,
     ) -> CachedLayout | None:
         """Return the newest entry matching ALL of (filename, grain_mode, copies,
-        fabric_width_mm, quality), or None. Used to dedup re-runs with identical
-        settings."""
+        fabric_width_mm, quality, ultra_budget_s, ultra_seeds), or None. Used to
+        dedup re-runs with identical settings."""
         matches = []
         for e in self._entries.values():
             if not (e.filename == filename
                     and e.grain_mode == grain_mode
                     and e.copies == copies
                     and e.fabric_width_mm == fabric_width_mm
-                    and e.quality == quality):
+                    and e.quality == quality
+                    and e.ultra_budget_s == ultra_budget_s
+                    and e.ultra_seeds == ultra_seeds):
                 continue
             # TEMP(phase6-bench): if effort is part of the key, require it to match.
             # Entries inserted without the bench flag won't have _bench_effort set,
