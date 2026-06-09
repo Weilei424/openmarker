@@ -816,12 +816,18 @@ Add new entries here as work progresses. Each entry should record:
   | --- | --- | --- | --- | --- | --- |
   | `sample_2.dxf ×10` | 180s | 10929.2mm | 84.98% | **+4.23%** | PASS |
   | `sample_2.dxf ×10` | **600s (shipped)** | **10819.5mm** | **85.85%** | **+5.20%** | PASS |
+  | `sample_2.dxf ×10` | 1200s | 10770.3mm | 86.24% | +5.63% | PASS |
   | `sample_4.dxf ×6` | 600s | 4540.7mm | 80.63% | **+11.34%** | PASS |
 
   The 600s default clears the ≥3% gate with margin on both workloads and reproduces the Phase-1
   eval (180s → 10929 vs the eval's 10916.5, within convention noise). 600s improves on 180s
   (+5.20% vs +4.23%), so the user-chosen max budget pays off — `sample_2` reaches **85.85%**,
   approaching the commercial 86.1%.
+- **Budget sensitivity (2026-06-09):** doubling 600→1200s gains only **+0.39pp** (85.85→86.24%,
+  just past the commercial 86.1%) for 2× the wait — steep diminishing returns (sparrow's shrink
+  ratio decays linearly with time). 180→600s gained +0.87pp; the marginal rate ~tripled down. So
+  600s is a sound default knee; a longer budget (or best-of-N-seeds) is the lever for the last
+  fraction of a percent.
 - **Stop / offline:** Stop kills sparrow → no marker (consistent with Better/Best; "best-so-far from
   `sols_<name>/` snapshots" filed as a follow-up). Fully offline via the committed binary +
   `_resolve_sparrow_path` ladder (env → vendored → PyInstaller `_MEIPASS` → dev `tools/`).
