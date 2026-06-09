@@ -206,25 +206,29 @@ def _validate_layout(placements: list[Placement], pieces: list[Piece], fabric_wi
 
 # --- subprocess + cancellation plumbing ---
 _sparrow_lock = threading.Lock()
-_current_sparrow: "subprocess.Popen | None" = None
+_current_sparrows: "set[subprocess.Popen]" = set()
 
 
-def _set_current_sparrow(proc) -> None:
-    global _current_sparrow
+def _register_sparrow(proc) -> None:
     with _sparrow_lock:
-        _current_sparrow = proc
+        _current_sparrows.add(proc)
+
+
+def _unregister_sparrow(proc) -> None:
+    with _sparrow_lock:
+        _current_sparrows.discard(proc)
 
 
 def kill_current_sparrow() -> None:
-    """Terminate the in-flight sparrow child (called by /cancel-layout). No-op if none."""
+    """Terminate ALL in-flight sparrow children (called by /cancel-layout).
+    No-op if none. Kills every concurrent best-of-N attempt."""
     with _sparrow_lock:
-        proc = _current_sparrow
-    if proc is None:
-        return
-    try:
-        proc.terminate()
-    except Exception:
-        pass
+        procs = list(_current_sparrows)
+    for proc in procs:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
 
 
 def _run_sparrow(instance: dict, budget_s: float, seed: int) -> dict:
@@ -245,14 +249,14 @@ def _run_sparrow(instance: dict, budget_s: float, seed: int) -> dict:
             proc = subprocess.Popen(
                 [exe, "-i", ipath, "-t", str(int(budget_s)), "-s", str(int(seed))],
                 cwd=td, stdout=subprocess.DEVNULL, stderr=logf)
-            _set_current_sparrow(proc)
+            _register_sparrow(proc)
             try:
                 # Close the tiny race where cancel lands between Popen and registration.
                 if is_cancelled():
                     proc.terminate()
                 proc.wait()
             finally:
-                _set_current_sparrow(None)
+                _unregister_sparrow(proc)
         if is_cancelled():
             raise CancellationError("sparrow run cancelled")
         if proc.returncode != 0:

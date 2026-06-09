@@ -174,16 +174,27 @@ def test_validate_rejects_unknown_piece_id():
 from core.layout import separation as sep
 
 
-def test_kill_current_sparrow_terminates_registered_proc():
+def test_kill_current_sparrow_terminates_one():
     class _Dummy:
         def __init__(self): self.killed = False
         def terminate(self): self.killed = True
     d = _Dummy()
-    sep._set_current_sparrow(d)
+    sep._register_sparrow(d)
     sep.kill_current_sparrow()
     assert d.killed is True
-    sep._set_current_sparrow(None)
-    sep.kill_current_sparrow()  # no-op when none registered
+    sep._unregister_sparrow(d)
+    sep.kill_current_sparrow()  # no-op when empty
+
+
+def test_kill_current_sparrow_terminates_all_concurrent():
+    class _Dummy:
+        def __init__(self): self.killed = False
+        def terminate(self): self.killed = True
+    a, b = _Dummy(), _Dummy()
+    sep._register_sparrow(a); sep._register_sparrow(b)
+    sep.kill_current_sparrow()
+    assert a.killed and b.killed
+    sep._unregister_sparrow(a); sep._unregister_sparrow(b)
 
 
 # --- run_separation_layout ---
