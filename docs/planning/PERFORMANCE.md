@@ -834,3 +834,25 @@ Add new entries here as work progresses. Each entry should record:
 - **Decision: SHIPPED.** Ultra is now the best quality tier (85.85% on the canonical workload vs
   GA's 81.39%). Bench harness: `engine/tests/bench_separation.py` (production module, not the
   Phase-1 `bench_sparrow.py` spike).
+
+### 2026-06-09 — Separation GUI controls: algorithm names + user budget + best-of-N-seeds
+
+- **What:** Exposed the separation engine's knobs in the GUI (spec
+  `docs/superpowers/specs/2026-06-09-separation-controls-design.md`). The QualityPanel now shows
+  **algorithm names** (NFP-BLF / Genetic Algorithm — quick / — thorough / Separation (sparrow))
+  instead of Fast/Better/Best/Ultra; selecting Separation reveals a **time-budget** box
+  (360–1500s, default 600) and a **best-of-N-seeds** selector (1–4, default 1).
+- **Best-of-N:** `run_separation_layout(..., n_seeds)` runs N sparrow attempts (seeds 42…42+N−1)
+  **in parallel** (ThreadPoolExecutor) and keeps the shortest VALID marker; all-invalid → error;
+  any cancelled attempt → `CancellationError` (Stop never returns a partial best-of-N result). The
+  kill registry became a set so `/cancel-layout` terminates ALL concurrent attempts. Each sparrow
+  uses 3 threads (`jagua-rs`/rayon default), so N=4 ≈ 12 threads — wall stays ≈ budget on a typical
+  box. Best-of-N is the recommended quality lever over a longer single budget (per the budget
+  sensitivity above).
+- **API/cache:** `ultra_budget_s` (360–1500) + `ultra_seeds` (1–4) validated (422 out of range) and
+  added to the cache dedup key, so different budget/seeds produce distinct cached tabs. `quality`
+  enum unchanged (display-only relabel). Note: raw algorithm names depart from the
+  "non-technical operator" UI principle — accepted as an explicit product choice.
+- **Tests:** engine unit (best-of-N selection + cancellation precedence + multi-kill registry) +
+  API (budget/seeds validation + routing + cache distinction) + frontend (conditional controls,
+  clamp) all green.
