@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
 import shapely.affinity
@@ -276,18 +277,50 @@ def _run_sparrow(instance: dict, budget_s: float, seed: int) -> dict:
             return json.load(f)
 
 
-def run_separation_layout(pieces: list[Piece], fabric_width_mm: float, grain_mode: str,
-                          fabric_grain_deg: float, budget_s: float, seed: int = 42
-                          ) -> tuple[list[Placement], float, float]:
-    """Run the separation (sparrow) engine. Mirrors auto_layout_polygon's return
-    (placements, marker_length_mm, utilization_pct). Raises CancellationError on
-    kill (-> API 499); ValueError on invalid/empty output (-> API 400)."""
-    if not pieces:
-        raise ValueError("no pieces to lay out")
-    items = _group_to_items(pieces, grain_mode, fabric_grain_deg)
-    strip_height = fabric_width_mm - 2 * EDGE_GAP
-    solution = _run_sparrow(_instance_json(items, strip_height), budget_s, seed)
+def _solve_one(items: list[_SepItem], instance: dict, pieces: list[Piece],
+               fabric_width_mm: float, grain_mode: str, fabric_grain_deg: float,
+               budget_s: float, seed: int) -> tuple[list[Placement], float, float]:
+    """One sparrow attempt: run -> reconstruct -> validate -> metrics. Raises
+    CancellationError on kill, ValueError on invalid/empty output."""
+    solution = _run_sparrow(instance, budget_s, seed)
     placements = _reconstruct(solution, items, fabric_width_mm)
     _validate_layout(placements, pieces, fabric_width_mm, grain_mode, fabric_grain_deg)
     marker_length, utilization = _compute_metrics(placements, pieces, fabric_width_mm, _polygon_dims)
     return placements, marker_length, utilization
+
+
+def run_separation_layout(pieces: list[Piece], fabric_width_mm: float, grain_mode: str,
+                          fabric_grain_deg: float, budget_s: float, seed: int = 42,
+                          n_seeds: int = 1) -> tuple[list[Placement], float, float]:
+    """Run the separation (sparrow) engine. With n_seeds>1, run that many attempts
+    (seeds seed..seed+n_seeds-1) IN PARALLEL and keep the shortest VALID marker.
+    Mirrors auto_layout_polygon's return. Raises CancellationError on kill (->499);
+    ValueError on empty input or when every attempt is invalid (->400)."""
+    if not pieces:
+        raise ValueError("no pieces to lay out")
+    items = _group_to_items(pieces, grain_mode, fabric_grain_deg)
+    instance = _instance_json(items, fabric_width_mm - 2 * EDGE_GAP)
+    seeds = [seed + k for k in range(max(1, n_seeds))]
+
+    if len(seeds) == 1:
+        return _solve_one(items, instance, pieces, fabric_width_mm, grain_mode,
+                          fabric_grain_deg, budget_s, seeds[0])
+
+    results: list[tuple] = []
+    errors: list[str] = []
+    cancelled = False
+    with ThreadPoolExecutor(max_workers=len(seeds)) as ex:
+        futures = [ex.submit(_solve_one, items, instance, pieces, fabric_width_mm,
+                             grain_mode, fabric_grain_deg, budget_s, s) for s in seeds]
+        for fut in as_completed(futures):
+            try:
+                results.append(fut.result())
+            except CancellationError:
+                cancelled = True
+            except ValueError as e:
+                errors.append(str(e))
+    if cancelled:
+        raise CancellationError("separation run cancelled")
+    if not results:
+        raise ValueError("all separation attempts invalid: " + "; ".join(errors[:3]))
+    return min(results, key=lambda r: r[1])  # shortest marker_length

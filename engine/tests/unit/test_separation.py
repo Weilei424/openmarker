@@ -223,3 +223,29 @@ def test_run_separation_layout_assembles(monkeypatch):
 def test_run_separation_layout_empty_raises():
     with pytest.raises(ValueError, match="no pieces"):
         sep_mod.run_separation_layout([], 200.0, "bi", 90.0, budget_s=5)
+
+
+from core.layout.heuristic import Placement as _Pl
+
+
+def test_best_of_n_returns_shortest_valid(monkeypatch):
+    calls = []
+    def fake_solve(items, instance, pieces, fw, gm, fg, budget_s, seed):
+        calls.append(seed)
+        marker = {42: 1000.0, 43: 800.0, 44: 1200.0}[seed]
+        return ([_Pl("p__c0", 0.0, 0.0, 0.0)], marker, 50.0)
+    monkeypatch.setattr(sep, "_solve_one", fake_solve)
+    pieces = [_rect("p__c0", 60, 40, 90.0)]
+    placements, marker, util = sep.run_separation_layout(
+        pieces, 200.0, "bi", 90.0, budget_s=5, seed=42, n_seeds=3)
+    assert sorted(calls) == [42, 43, 44]
+    assert marker == 800.0   # shortest valid wins
+
+
+def test_best_of_n_all_invalid_raises(monkeypatch):
+    def fake_solve(*a, **k):
+        raise ValueError("separation layout invalid: off-grain")
+    monkeypatch.setattr(sep, "_solve_one", fake_solve)
+    with pytest.raises(ValueError, match="all separation attempts invalid"):
+        sep.run_separation_layout([_rect("p__c0", 60, 40, 90.0)], 200.0, "bi", 90.0,
+                                  budget_s=5, seed=42, n_seeds=2)
