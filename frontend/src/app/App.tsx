@@ -34,6 +34,8 @@ export default function App() {
   const [disableNfpCache, setDisableNfpCache] = useState<boolean>(false);
   const [effort, setEffort] = useState<number>(1);
   const [quality, setQuality] = useState<LayoutQuality>("fast");
+  const [ultraBudgetS, setUltraBudgetS] = useState<number>(600);
+  const [ultraSeeds, setUltraSeeds] = useState<number>(1);
   const [elapsedMs, setElapsedMs] = useState<number>(0);
   const [maxCacheEntries, setMaxCacheEntries] = useState<number>(5);
   // TEMP(phase6-bench): include effort in dedup key so the same settings at
@@ -169,7 +171,7 @@ export default function App() {
       setCopiesInput(canonical);
     }
     const outcome = await runAutoLayout(
-      currentFileName, expandedPieces, fabricWidthMm, grainMode, FABRIC_GRAIN_DEG, copies, disableNfpCache, effort, maxCacheEntries, includeEffortInKey, quality,
+      currentFileName, expandedPieces, fabricWidthMm, grainMode, FABRIC_GRAIN_DEG, copies, disableNfpCache, effort, maxCacheEntries, includeEffortInKey, quality, ultraBudgetS, ultraSeeds,
     );
     if (outcome.ok) {
       await refreshCache();
@@ -184,7 +186,7 @@ export default function App() {
     } else {
       setStatusMessage(`Auto layout failed: ${outcome.errorMessage}`);
     }
-  }, [expandedPieces, currentFileName, fabricWidthMm, grainMode, copies, copiesInput, disableNfpCache, effort, maxCacheEntries, includeEffortInKey, quality, runAutoLayout, refreshCache, setActiveId]);
+  }, [expandedPieces, currentFileName, fabricWidthMm, grainMode, copies, copiesInput, disableNfpCache, effort, maxCacheEntries, includeEffortInKey, quality, ultraBudgetS, ultraSeeds, runAutoLayout, refreshCache, setActiveId]);
 
   const importButtonLabel = importStatus === "loading" ? "Importing..." : "Import DXF";
 
@@ -304,7 +306,14 @@ export default function App() {
           </Section>
 
           <Section title="Layout quality">
-            <QualityPanel quality={quality} onChange={setQuality} />
+            <QualityPanel
+              quality={quality}
+              onChange={setQuality}
+              ultraBudgetS={ultraBudgetS}
+              onUltraBudgetChange={setUltraBudgetS}
+              ultraSeeds={ultraSeeds}
+              onUltraSeedsChange={setUltraSeeds}
+            />
           </Section>
 
           <Section title="Layout">
