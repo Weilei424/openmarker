@@ -40,6 +40,29 @@ Canonical real-workload benchmark used for all gain comparisons:
 `grain_mode="bi"`, `fabric_grain_deg=90.0` (the locked production grain — see
 § 5.C; 190 pieces total — 19 distinct base pieces × 10 identical copies each).
 
+> **⚠️ Regime change (2026-06-12): `EDGE_GAP` removed — pieces now touch the
+> fabric edges (no 10mm selvedge buffer, no marker head/tail).** Every marker /
+> utilization figure measured *before* this date — the entire "historical" table
+> below and the § 6 entries through 2026-06-09 — assumes the old 10mm buffer and
+> is **superseded**. The "pre-PR-#7 baseline = 11699mm" stays the historical
+> milestone the narrative refers to; current numbers are lower. See § 6 [2026-06-12].
+
+**Current — no edge gap (2026-06-12, canonical workload):**
+
+| Tier                                   | Marker (mm) | Utilization | Prior (10mm gap)  |
+| -------------------------------------- | ----------- | ----------- | ----------------- |
+| Commercial reference (external)        | 10599       | 86.1%       | external          |
+| Fast — unclustered NFP-BLF (effort=5)  | **11393.2** | **81.52%**  | 11699.4 / 79.39%  |
+| GA — uniform-weight, opt-in (gens=12)  | **11232.3** | **82.69%**  | 11412.5 / 81.39%  |
+| **Ultra — separation (sparrow) @600s** | **10716.9** | **86.67%**  | 10819.5 / 85.85%  |
+
+Removing the buffer dropped every tier's marker (~10mm tail + 20mm more usable
+width): Fast −306mm (~2.6%), GA −180mm (~1.6%), Ultra −103mm (~0.9%). Ultra's
+utilization (86.67%) now edges past the external commercial reference (86.1%);
+its marker (10716.9mm) is still within ~1.1% of the commercial 10599mm.
+
+**Historical — 10mm selvedge buffer (DEPRECATED 2026-06-12):**
+
 | Source                                                | Marker length (mm) | Utilization | Notes                                                        |
 | ----------------------------------------------------- | ------------------ | ----------- | ------------------------------------------------------------ |
 | Commercial reference                                  | 10599              | 86.1%       | Out-of-scope aspirational target. ~9% better than the bar.   |
@@ -856,3 +879,42 @@ Add new entries here as work progresses. Each entry should record:
 - **Tests:** engine unit (best-of-N selection + cancellation precedence + multi-kill registry) +
   API (budget/seeds validation + routing + cache distinction) + frontend (conditional controls,
   clamp) all green.
+
+### 2026-06-12 — EDGE_GAP removed: pieces may touch the fabric edges
+
+- **What:** Removed the 10mm `EDGE_GAP` selvedge buffer entirely — the constant
+  plus every arithmetic site — from `heuristic.py`, `clustering.py`, and
+  `separation.py`. Pieces may now touch each other (already allowed) AND all four
+  fabric edges; marker length is the bottom edge with no head/tail, and usable
+  width is the full fabric (1651mm, was 1631mm) on the NFP-BLF, clustering, and
+  separation paths. Commit `206f2eb`.
+- **Why:** User decision — the 10mm buffer was an inherited default, not a
+  validated selvedge requirement. It cost ~1pp of utilization: ~10mm of marker
+  tail plus 20mm of usable width the packer could never use.
+- **Result (sample_2.dxf ×10, fabric=1651, bi-grain @90, seed 42):**
+
+  | tier | 10mm gap (old) | no gap (new) | Δ marker | Δ util |
+  | --- | --- | --- | --- | --- |
+  | Fast / warm-start NFP-BLF (effort=5) | 11699.4 / 79.39% | 11393.2 / 81.52% | −306.2mm | +2.13pp |
+  | GA (gens=12, pop=30) | 11412.5 / 81.39% | 11232.3 / 82.69% | −180.2mm | +1.30pp |
+  | Ultra / separation @600s | 10819.5 / 85.85% | 10716.9 / 86.67% | −102.6mm | +0.82pp |
+
+  Every tier improved. Ultra's utilization (86.67%) now exceeds the external
+  commercial reference (86.1%) — though its marker (10716.9mm) is still ~1.1%
+  above the commercial 10599mm (the commercial utilization uses a different
+  convention, so the two are only loosely comparable). Ultra @600s wall = 601.4s.
+- **Validation:** 250 engine tests green, including the 3 real-sparrow
+  integration tests (they exercise the new `strip_height = full fabric` +
+  shift-to-(0,0) separation round-trip). One bbox-cluster grain test updated: with
+  no inset, a cluster whose width-at-rotation equals the full fabric is now
+  feasible, so the test correctly picks the 2×5 grid (marker contribution 400mm)
+  over the old 3×4 (600mm). The separation validator already tolerated edge
+  contact (`±0.5mm` bounds), so it needed no change.
+- **Decision: SHIPPED as default** — there is no flag; the buffer is simply gone.
+  Deleted the deprecated `bench_sparrow.py` Phase-1 spike (it imported `EDGE_GAP`
+  and pointed at a now-absent `tools/sparrow` path; superseded by
+  `bench_separation.py`).
+- **Note:** the historical "bar = 11699mm" and every pre-2026-06-12 figure /
+  formula in this doc (e.g. the § 2 pruning bound `current_max_bottom + EDGE_GAP`)
+  assume the old 10mm buffer. § 1 now carries both a current (no-gap) table and
+  the deprecated historical table.

@@ -192,6 +192,7 @@ Task checklist:
     - [x] **GUI controls (2026-06-09):** strategy labels show algorithm names (NFP-BLF / Genetic Algorithm — quick/thorough / Separation (sparrow)); Separation gets a user time-budget box (360–1500s) + best-of-N-seeds (1–4, parallel, keep shortest valid); multi-process kill registry; `ultra_budget_s`/`ultra_seeds` validated + in the cache key. Spec: `docs/superpowers/specs/2026-06-09-separation-controls-design.md`. See PERFORMANCE.md § 6 [2026-06-09].
     - [x] **Number-input UX (2026-06-12):** Copies, Cached results, and Time budget share a `NumberField` — grey default placeholder, free typing while focused, blur-validation that pops an in-app `AlertModal` and resets to default on NaN / out-of-range (no per-keystroke auto-correct). 58 frontend tests green.
     - [ ] Follow-ups: best-so-far from `sols_<name>/` snapshots on Stop; Windows packaging (PyInstaller `--add-binary` the vendored sidecar) when Phase 8 lands; sample_3 cross-import.
+- [x] Remove EDGE_GAP — pieces may touch the fabric edges (no 10mm selvedge buffer). Default behavior, no flag. Improved every tier ~1pp util on the canonical workload: Fast 11393.2/81.52%, GA 11232.3/82.69%, Ultra@600s 10716.9/86.67% (now past commercial 86.1%). Commit `206f2eb`. See PERFORMANCE.md § 6 [2026-06-12].
 
 ### Phase 7 — Export
 - [ ] Export layout as DXF or PNG (sourced from any cached layout tab)
