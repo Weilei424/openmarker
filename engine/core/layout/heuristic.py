@@ -258,11 +258,8 @@ def _run_sa_chain(worker_index: int, iterations: int, max_time_s: float | None, 
 # polygons up to ~2 km square stay within int32 range.
 _NFP_SCALE = 1000
 
-# mm — selvedge buffer between piece bbox and fabric edge.
-# Pieces may touch each other directly (no inter-piece gap) but stay this far from edges.
-EDGE_GAP = 10.0
-# Kept as alias for any external callers that previously imported GAP.
-GAP = EDGE_GAP
+# Pieces may touch each other AND the fabric edges directly: no selvedge buffer
+# and no inter-piece gap. Only positive-area overlap (> 0.5 mm^2) is rejected.
 
 
 @dataclass
@@ -350,7 +347,7 @@ def _compute_metrics(
 ) -> tuple[float, float]:
     """Return (marker_length_mm, utilization_pct).
 
-    Marker length = lowest Y bottom edge across all placements + edge gap.
+    Marker length = lowest Y bottom edge across all placements (pieces touch the head).
     Y is the "length" direction we minimize (X is fabric width, fixed).
     """
     if not placements:
@@ -359,7 +356,7 @@ def _compute_metrics(
     marker_length = max(
         pl.y + dim_fn(piece_map[pl.piece_id], pl.rotation_deg)[1]
         for pl in placements
-    ) + EDGE_GAP
+    )
     total_area = sum(p.area for p in pieces)
     utilization = round(total_area / (marker_length * fabric_width_mm) * 100, 2)
     return round(marker_length, 2), utilization
@@ -379,10 +376,10 @@ def _validate_pieces_fit(
     for piece in pieces:
         rotations = _layout_rotations(grain_mode, fabric_grain_deg, piece.grainline_direction_deg)
         min_w = min(dim_fn(piece, r)[0] for r in rotations)
-        if min_w + 2 * EDGE_GAP > fabric_width_mm:
+        if min_w > fabric_width_mm:
             raise ValueError(
                 f"Piece '{piece.name}' minimum width {min_w:.1f} mm cannot fit within "
-                f"usable fabric width {fabric_width_mm - 2 * EDGE_GAP:.1f} mm at any allowed rotation."
+                f"fabric width {fabric_width_mm:.1f} mm at any allowed rotation."
             )
 
 
@@ -613,7 +610,7 @@ def _blf_pack_nfp(
         _validate_pieces_fit(sorted_pieces, fabric_width_mm, grain_mode, fabric_grain_deg, _polygon_dims)
 
     # Finite IFP height: piece heights stacked tallest-on-tallest as a hard upper bound.
-    max_y_search = sum(max(p.bbox.width, p.bbox.height) for p in pieces) + EDGE_GAP
+    max_y_search = sum(max(p.bbox.width, p.bbox.height) for p in pieces)
 
     placements: list[Placement] = []
     placed: list[_Placed] = []
@@ -652,9 +649,9 @@ def _blf_pack_nfp(
                 continue
             minx, miny, maxx, maxy = new_poly_origin.bounds
 
-            nfx_min = EDGE_GAP - minx
-            nfx_max = fabric_width_mm - EDGE_GAP - maxx
-            nfy_min = EDGE_GAP - miny
+            nfx_min = -minx
+            nfx_max = fabric_width_mm - maxx
+            nfy_min = -miny
             nfy_max = nfy_min + max_y_search
 
             if nfx_min > nfx_max:
@@ -702,11 +699,11 @@ def _blf_pack_nfp(
                 candidate_poly = _placed_polygon(piece, bbox_tl_x, bbox_tl_y, rot)
 
                 # Sanity guards.
-                if candidate_poly.bounds[2] > fabric_width_mm - EDGE_GAP + 1e-3:
+                if candidate_poly.bounds[2] > fabric_width_mm + 1e-3:
                     continue
-                if candidate_poly.bounds[0] < EDGE_GAP - 1e-3:
+                if candidate_poly.bounds[0] < -1e-3:
                     continue
-                if candidate_poly.bounds[1] < EDGE_GAP - 1e-3:
+                if candidate_poly.bounds[1] < -1e-3:
                     continue
                 if any(_has_area_overlap(candidate_poly, rec.polygon) for rec in placed):
                     continue
@@ -715,23 +712,24 @@ def _blf_pack_nfp(
                 break  # vertices sorted ascending; first valid is best at this rotation
 
         # Fallback: if NFP found nothing usable, force a "new shelf" placement
-        # below every placed piece at the first rotation whose width fits.
-        # The candidate sits strictly below max_placed_bottom + EDGE_GAP, so by
-        # construction it cannot overlap any placed piece — no overlap check.
+        # below every placed piece at the first rotation whose width fits. The
+        # candidate's top edge sits at max_placed_bottom (the lowest placed bottom
+        # edge), so by construction it cannot overlap any placed piece — at worst
+        # it touches the row above, which is allowed. No overlap check.
         if best is None:
             max_placed_bottom = max(
-                (rec.polygon.bounds[3] for rec in placed), default=EDGE_GAP
+                (rec.polygon.bounds[3] for rec in placed), default=0.0
             )
-            fallback_y = max_placed_bottom + EDGE_GAP
+            fallback_y = max_placed_bottom
             for rot in rotations:
                 pw, _ = _polygon_dims(piece, rot)
-                if pw + 2 * EDGE_GAP > fabric_width_mm:
+                if pw > fabric_width_mm:
                     continue
-                candidate_poly = _placed_polygon(piece, EDGE_GAP, fallback_y, rot)
+                candidate_poly = _placed_polygon(piece, 0.0, fallback_y, rot)
                 orig_coords = _polygon_at_origin(piece, rot)
                 orig_minx = min(c[0] for c in orig_coords)
                 orig_miny = min(c[1] for c in orig_coords)
-                best = (fallback_y, EDGE_GAP, rot, candidate_poly, orig_minx, orig_miny)
+                best = (fallback_y, 0.0, rot, candidate_poly, orig_minx, orig_miny)
                 break
 
         if best is None:
@@ -760,7 +758,7 @@ def _blf_pack_nfp(
             sv = shared_best_value.value
             if effective_cutoff is None or sv < effective_cutoff:
                 effective_cutoff = sv
-        if effective_cutoff is not None and current_max_bottom + EDGE_GAP >= effective_cutoff:
+        if effective_cutoff is not None and current_max_bottom >= effective_cutoff:
             raise _PrunedRun()
 
     marker_length, utilization = _compute_metrics(placements, pieces, fabric_width_mm, _polygon_dims)

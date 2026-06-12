@@ -24,7 +24,6 @@ from core.models.piece import Piece
 from core.layout.cancellation import CancellationError, is_cancelled
 from core.layout.clustering import group_pieces_by_base_id
 from core.layout.heuristic import (
-    EDGE_GAP,
     Placement,
     _compute_metrics,
     _has_area_overlap,
@@ -129,7 +128,7 @@ def _reconstruct(solution: dict, items: list[_SepItem], fabric_width_mm: float) 
 
     For each placed copy: rebuild its jagua-frame polygon (rotate emitted by r,
     translate by t), rotate the WHOLE layout by -90deg (axis-swap inverse), then
-    shift bbox-min -> (EDGE_GAP, EDGE_GAP). rotation_deg = (base + r) lands exactly
+    shift bbox-min -> (0, 0). rotation_deg = (base + r) lands exactly
     in the engine grain set; (x, y) = rotated-bbox-min so the existing
     _placed_polygon reproduces the polygon for metrics/validation/render.
     """
@@ -152,8 +151,8 @@ def _reconstruct(solution: dict, items: list[_SepItem], fabric_width_mm: float) 
 
     if not raw:
         return []
-    dx = EDGE_GAP - min(p.bounds[0] for _, _, p in raw)
-    dy = EDGE_GAP - min(p.bounds[1] for _, _, p in raw)
+    dx = -min(p.bounds[0] for _, _, p in raw)
+    dy = -min(p.bounds[1] for _, _, p in raw)
     placements: list[Placement] = []
     for piece_id, rotation_deg, epoly in raw:
         shifted = shapely.affinity.translate(epoly, xoff=dx, yoff=dy)
@@ -299,7 +298,7 @@ def run_separation_layout(pieces: list[Piece], fabric_width_mm: float, grain_mod
     if not pieces:
         raise ValueError("no pieces to lay out")
     items = _group_to_items(pieces, grain_mode, fabric_grain_deg)
-    instance = _instance_json(items, fabric_width_mm - 2 * EDGE_GAP)
+    instance = _instance_json(items, fabric_width_mm)
     seeds = [seed + k for k in range(max(1, n_seeds))]
 
     if len(seeds) == 1:

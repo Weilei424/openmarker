@@ -31,7 +31,7 @@ def test_resolve_missing_raises(monkeypatch):
         _resolve_sparrow_path()
 
 
-from core.layout.separation import _group_to_items, _instance_json, EDGE_GAP
+from core.layout.separation import _group_to_items, _instance_json
 
 
 # --- _group_to_items: grouping + demand ---
@@ -100,7 +100,7 @@ def test_reconstruct_round_trip_grain_and_no_overlap():
         {"item_id": 0, "transformation": {"rotation": 0.0,   "translation": [0.0, 0.0]}},
         {"item_id": 0, "transformation": {"rotation": 180.0, "translation": [2 * w, h]}},
     ]}}}
-    fabric = h + 2 * EDGE_GAP
+    fabric = h
     placements = _reconstruct(sol, items, fabric_width_mm=fabric)
 
     assert {pl.piece_id for pl in placements} == {"piece_0__c0", "piece_0__c1"}
@@ -207,7 +207,7 @@ def test_run_separation_layout_assembles(monkeypatch):
     items = sep_mod._group_to_items(pieces, "bi", 90.0)
     w = items[0].emitted.bounds[2]
     h = items[0].emitted.bounds[3]
-    fabric = h + 2 * EDGE_GAP
+    fabric = h
     canned = {"solution": {"strip_width": 2 * w, "layout": {"placed_items": [
         {"item_id": 0, "transformation": {"rotation": 0.0,   "translation": [0.0, 0.0]}},
         {"item_id": 0, "transformation": {"rotation": 180.0, "translation": [2 * w, h]}},

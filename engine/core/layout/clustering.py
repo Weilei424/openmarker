@@ -18,9 +18,8 @@ from shapely.ops import unary_union
 
 from core.models.piece import Piece, BoundingBox
 
-# Must match heuristic.EDGE_GAP. Duplicated here to keep clustering.py
-# importable without pulling in heuristic.py (which would create a cycle).
-EDGE_GAP = 10.0
+# No selvedge buffer: pieces may touch the fabric edges and each other (matches
+# heuristic.py). Cluster mini-fabric widths below use the piece extent directly.
 
 # Maximum exterior vertex count for a union cluster polygon. Beyond this we
 # simplify; if still over cap, the union candidate is rejected and pre_cluster_pieces
@@ -87,7 +86,7 @@ def pack_cluster_bbox(
 
     Returns None when:
       - N < 2 (single copy: no clustering benefit)
-      - No aspect ratio fits within fabric_width_mm - 2*EDGE_GAP at any
+      - No aspect ratio fits within fabric_width_mm at any
         BLF-allowed rotation
 
     Among feasible aspect ratios (cols, rows) with cols*rows >= N, picks the
@@ -138,7 +137,7 @@ def pack_cluster_bbox(
     # use float (height_at_rotation can return either piece_w or piece_h, both float);
     # cluster_h/cluster_w are also float (piece_w * cols / piece_h * rows).
     candidates: list[tuple[float, float, float, float, int, int]] = []
-    usable_width = fabric_width_mm - 2 * EDGE_GAP
+    usable_width = fabric_width_mm
     for cols in range(1, n + 1):
         rows = math.ceil(n / cols)
         cluster_w = cols * piece_w
@@ -278,7 +277,7 @@ def pack_cluster_union(
             return w
         return max(w, h)
 
-    usable_width = fabric_width_mm - 2 * EDGE_GAP
+    usable_width = fabric_width_mm
     best_candidate: tuple[float, float, float, float, Cluster] | None = None  # (sort_h, sort_w, cluster_h, cluster_w, cluster)
 
     # NFP cache shared across all `cols` iterations. NFPs depend only on
@@ -303,15 +302,15 @@ def pack_cluster_union(
         if not feasible_outer_rots:
             continue
 
-        # Inner BLF on a mini-fabric of width (cols * piece_w + 2*EDGE_GAP + 1)
-        # so the effective packing area is cols * piece_w. The +1 mm slack is
-        # needed so the rightmost piece's touching position (nfx = cols*piece_w)
-        # is strictly inside the IFP (not on its boundary where Shapely's
-        # difference would not include it as a valid-region vertex).
+        # Inner BLF on a mini-fabric of width (cols * piece_w + 1) so the
+        # effective packing area is cols * piece_w. The +1 mm slack is needed so
+        # the rightmost piece's touching position (nfx = cols*piece_w) is strictly
+        # inside the IFP (not on its boundary where Shapely's difference would not
+        # include it as a valid-region vertex).
         # Skip validation (we already pre-filtered widths above) and override rotations.
         try:
             inner_placements, _, _ = _blf_pack_nfp(
-                pieces, fabric_width_mm=bbox_w_upper + 2 * EDGE_GAP + 1,
+                pieces, fabric_width_mm=bbox_w_upper + 1,
                 grain_mode="single", fabric_grain_deg=0.0,
                 override_rotations=cluster_local_rotations,
                 skip_validation=True,
@@ -323,12 +322,9 @@ def pack_cluster_union(
         if len(inner_placements) != n:
             continue
 
-        # Shift placements by -EDGE_GAP so cluster-local frame starts at (0, 0)
-        # rather than (EDGE_GAP, EDGE_GAP). Outer BLF adds its own EDGE_GAP.
-        shifted = [
-            Placement(pl.piece_id, pl.x - EDGE_GAP, pl.y - EDGE_GAP, pl.rotation_deg)
-            for pl in inner_placements
-        ]
+        # Inner BLF already starts the cluster-local frame at (0, 0) (no selvedge
+        # inset), so the placed copies need no further shift.
+        shifted = list(inner_placements)
 
         # Build the union of placed copies in cluster-local frame.
         pieces_by_id = {p.id: p for p in pieces}
@@ -375,7 +371,7 @@ def pack_cluster_union(
         # Origin-normalize: translate polygon coords AND copy_offsets so the
         # cluster polygon starts at (0, 0). The first piece placed by inner BLF
         # always lands at (0, 0) under the current invariants (lowest-leftmost
-        # IFP corner = (EDGE_GAP, EDGE_GAP), shifted to (0, 0)), so this is
+        # IFP corner = (0, 0)), so this is
         # usually a no-op. The explicit translation makes the
         # `BoundingBox(0, 0, w, h, w, h)` claim accurate even if a future
         # change to inner BLF or the shift logic breaks the implicit invariant.

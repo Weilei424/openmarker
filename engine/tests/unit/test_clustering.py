@@ -254,22 +254,24 @@ def test_pack_cluster_grain_rotates_cluster_to_fit():
     (the actual marker contribution when placed). For target=90°, height at that
     rotation = cluster_w. So the cluster with smallest cluster_w wins.
 
-    10 copies of 200×100, grainline=0°, target=90°, fabric=500 (usable=480):
-      cols=10: cluster_w=2000, cluster_h=100. Width-at-90°=100 ≤ 480. sort_h=2000.
-      cols=5:  cluster_w=1000, cluster_h=200. Width-at-90°=200 ≤ 480. sort_h=1000.
-      cols=4:  cluster_w=800,  cluster_h=300. Width-at-90°=300 ≤ 480. sort_h=800.
-      cols=3:  cluster_w=600,  cluster_h=400. Width-at-90°=400 ≤ 480. sort_h=600.
-      cols=2:  cluster_w=400,  cluster_h=500. Width-at-90°=500 > 480. Infeasible.
-      cols=1:  cluster_w=200,  cluster_h=1000. Width-at-90°=1000 > 480. Infeasible.
-    Winner by grain-rotation sort: 3×4 (sort_h=600 = cluster_w at 90°).
-    Placed at 90°: width=400mm (cluster_h), marker contribution=600mm (cluster_w).
+    10 copies of 200×100, grainline=0°, target=90°, fabric=500 (usable=500,
+    pieces may touch the edges):
+      cols=10: cluster_w=2000, cluster_h=100. Width-at-90°=100 ≤ 500. sort_h=2000.
+      cols=5:  cluster_w=1000, cluster_h=200. Width-at-90°=200 ≤ 500. sort_h=1000.
+      cols=4:  cluster_w=800,  cluster_h=300. Width-at-90°=300 ≤ 500. sort_h=800.
+      cols=3:  cluster_w=600,  cluster_h=400. Width-at-90°=400 ≤ 500. sort_h=600.
+      cols=2:  cluster_w=400,  cluster_h=500. Width-at-90°=500 ≤ 500. sort_h=400.
+      cols=1:  cluster_w=200,  cluster_h=1000. Width-at-90°=1000 > 500. Infeasible.
+    Winner by grain-rotation sort: 2×5 (sort_h=400 = cluster_w at 90°).
+    Placed at 90°: width=500mm (cluster_h, = full fabric), marker contribution=400mm (cluster_w).
     """
     pieces = [_rect(f"wide__c{i}", 200, 100, grainline=0.0) for i in range(10)]
     cluster = pack_cluster_bbox(pieces, fabric_width_mm=500, grain_mode="single", fabric_grain_deg=90.0)
     assert cluster is not None
-    # 3×4 wins: smallest sort_h (= cluster_w = 600) among feasible grids.
-    assert cluster.super_piece.bbox.width == 600
-    assert cluster.super_piece.bbox.height == 400
+    # 2×5 wins: smallest sort_h (= cluster_w = 400) among feasible grids now that
+    # the cluster may touch both fabric edges (width-at-90° = 500 = full fabric).
+    assert cluster.super_piece.bbox.width == 400
+    assert cluster.super_piece.bbox.height == 500
 
 
 def test_expand_cluster_applies_local_rotation():

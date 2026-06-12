@@ -139,9 +139,9 @@ def test_polygon_touching_is_not_collision():
         pieces, fabric_width_mm=350, grain_mode="single", fabric_grain_deg=0.0
     )
     assert len(placements) == 3
-    # In a 350mm-wide fabric with EDGE_GAP=10 on each side, the usable width is
-    # 330mm. Three 100mm squares (3*100=300) need at most 30mm of slack,
-    # so they should all land on the same shelf (touching each other).
+    # In a 350mm-wide fabric (pieces may touch the edges), three 100mm squares
+    # (3*100=300) fit within the 350mm width, so they should all land on the
+    # same shelf (touching each other).
     ys = {pl.y for pl in placements}
     assert len(ys) == 1, f"expected single shelf with touching pieces; got y-values {ys}"
 
@@ -552,7 +552,7 @@ def test_blf_pack_nfp_skip_validation_allows_oversize_input():
     Caller is trusted (e.g., pack_cluster_union's candidate-width pre-filter).
     Test setup: 600x50 piece with grainline_deg=0.0 and grain_mode='single' so
     _layout_rotations returns [0.0] only — at 0° the piece is 600 wide,
-    600 + 2*EDGE_GAP=620 > fabric=200, so _validate_pieces_fit WILL raise
+    600 > fabric=200, so _validate_pieces_fit WILL raise
     unless skipped. Override forces 90° (50 wide → fits)."""
     from core.layout.heuristic import _blf_pack_nfp
     # grainline=0.0 + grain_mode='single' locks validation to a single
