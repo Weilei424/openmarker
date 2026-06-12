@@ -918,3 +918,82 @@ Add new entries here as work progresses. Each entry should record:
   formula in this doc (e.g. the § 2 pruning bound `current_max_bottom + EDGE_GAP`)
   assume the old 10mm buffer. § 1 now carries both a current (no-gap) table and
   the deprecated historical table.
+
+### 2026-06-12 — sparrow knob evaluation (explore/compress split · n_workers · inter-item gap): all NO-GO
+
+- **What / why:** Investigated three un-benched sparrow tuning knobs to try to
+  shorten the Ultra-tier marker below the shipped 600s baseline. Pure evaluation;
+  productionize only a knob that demonstrably wins (≥3 seeds + holds on sample_4×6,
+  beating the vendored exe at the same budget). **Result: none won — the vendored
+  config (`a4bfbbe`, 3 workers, 0.8/0.2 split) is already at/near the knee.**
+- **Method:** throwaway spike `engine/tests/spike_sparrow_knobs.py` (deleted after)
+  reusing the PRODUCTION helpers (`_group_to_items` / `_instance_json` /
+  `_reconstruct` / `_validate_layout` / `_compute_metrics`) but shelling out with a
+  flexible arg list; candidate worker-count binaries built at
+  `tools/sparrow/builds/sparrow_w{N}.exe` from the pinned commit (rustc 1.89.0).
+  The committed `engine/vendor/sparrow/sparrow.exe` was never touched. All timed
+  runs on a quiet 16-physical-core box; builds done first to keep the box quiet
+  (sparrow's `-t` is wall-clock — concurrent CPU load corrupts a fixed-budget A/B).
+- **Noise floor (must beat to count as a win):** sparrow's result varies run-to-run
+  even at a fixed seed (the iteration count that fits the wall budget is
+  timing-dependent). Vendored exe, `sample_2×10` @600s, seeds 42/43/44 →
+  10664.8 / 10671.8 / 10723.7mm, **mean 10686.7, spread 58.9mm (0.55%)**. The §1
+  headline 10716.9 (single seed-42 sample) sits inside this spread.
+
+- **Knob 1 — explore/compress split (no rebuild): NO-GO.** Default is explore
+  `0.8` / compress `0.2` (`consts.rs:31-32`); to override, pass BOTH `-e` and `-c`
+  and OMIT `-t` (any other combo `bail!`s — `main.rs:38-49`); total = e+c. Swept
+  f∈{0.5..0.9} at 600s. Seed-42 triage spanned only 10704.9–10722.1mm (17mm band,
+  ≪ noise). 3-seed confirm: **f=0.8 (default) mean 10700.2** vs f=0.6 10708.5 vs
+  f=0.5 10729.3. The default is best on the mean; f=0.5 (the seed-42 "leader") is
+  worst across seeds — a single-seed-noise trap. Reallocating time between the two
+  phases just shuffles within noise at 600s. No `-e`/`-c` plumbing added.
+
+  | split (e/c of 600s) | seed42 | seed43 | seed44 | **mean** |
+  | --- | --- | --- | --- | --- |
+  | f=0.50 (300/300) | 10716.1 | 10746.8 | 10725.0 | 10729.3 |
+  | f=0.60 (360/240) | 10698.6 | 10779.0 | 10648.0 | 10708.5 |
+  | **f=0.80 default (480/120)** | 10713.1 | 10711.8 | 10675.5 | **10700.2** |
+
+- **Knob 2 — rayon `n_workers` (rebuild): NO-GO.** Compile-time `n_workers: 3`
+  (`config.rs:66`+`:83`); each separator runs N worker clones in parallel per
+  iteration and keeps only the best move (`separator.rs:146-178`). On a 16-core box
+  the default 3 leaves cores idle, so this looked promising. Built {3,6,8,12,16}.
+  180s seed-42 triage was non-monotonic (w3 10732, w6 10829, w8 10901, w12 10771,
+  w16 10709 — mid counts WORSE). 600s 3-seed confirm of the best candidate:
+  **w16 mean 10686.6 = vendored-w3 baseline 10686.7** (Δ 0.1mm). More workers only
+  **tightened variance** (w16 spread 21.7mm vs 58.9mm) — it did not shorten the
+  marker. Cause: `move_items_multi` clones the full 190-piece problem to every
+  worker each iteration, so more workers = more per-iteration overhead = fewer
+  iterations, cancelling the better best-of-N move quality.
+  - **Counter-lever (important):** on a multi-core box the already-shipped
+    **best-of-N-seeds** *exploits* the 59mm seed variance (keep the shortest of N
+    independent trajectories), whereas more workers *suppresses* it. Direct evidence:
+    best-of-3 with w3 min **10664.8** < best-of-3 with w16 min **10674.0**. Spending
+    cores on more seeds beats spending them on more workers — the shipped design
+    already does the better thing. A hardcoded high `n_workers` would also
+    *oversubscribe* a small factory box (the offline target); the only safe
+    productionization would be runtime `num_cpus::get_physical()` (crate already in
+    `bench.rs:59`) — not worth it for a 0mm mean gain.
+
+- **Knob 3 — inter-item separation (rebuild): N/A (already disabled).** The premise
+  ("sparrow enforces a small gap we can reduce") is false in the vendored build:
+  `min_item_separation: None` (`config.rs:102`); jagua-rs only inflates items when
+  it's `Some(f)`, by `f/2` (`import.rs:27,37`). The gap is **already zero — pieces
+  may touch** (consistent with the same-day EDGE_GAP removal). Nothing to recover.
+  The domain caveat *inverts*: the only move here is *adding* a blade-clearance gap
+  (set `min_item_separation` to the kerf), which would **cost** utilization across
+  all 190 placements — a cutting-room safety decision for the SME, not an
+  optimization. **Flagged to the user; not actioned.**
+
+- **Bonus checks:** (a) **No upstream refresh available** — `a4bfbbe..origin/main`
+  = 0 commits; the pin is already at/ahead of upstream `main` (HEAD = "bump
+  jagua-rs to v0.7.2"). (b) **Warm-start verified** — `-i` accepts a prior solution
+  JSON (`main.rs:78` → `optimizer/mod.rs:39-44` `prob.restore`); this is the
+  mechanism for the filed "best-so-far on Stop" follow-up, not a utilization knob.
+- **Decision: NO knob productionized.** Ultra's shipped config is confirmed
+  well-tuned for this workload at 600s. The real remaining quality levers stay
+  **best-of-N-seeds** (shipped; exploits seed variance) and **budget** (diminishing
+  — §6 [2026-06-08]). Source map for any future re-investigation: the three knobs
+  live at `config.rs:66/83/102` and `consts.rs:31-32` of the pinned sparrow source
+  (rebuild recipe in `engine/vendor/sparrow/PROVENANCE.md`).
