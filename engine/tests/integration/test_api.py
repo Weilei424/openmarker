@@ -64,3 +64,131 @@ async def test_import_dxf_corrupt_content():
             files={"file": ("pattern.dxf", b"this is garbage not dxf", "application/octet-stream")},
         )
     assert response.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Ultra quality tier — separation engine routing
+# ---------------------------------------------------------------------------
+
+def _one_piece_body(quality: str) -> dict:
+    """Build a minimal /auto-layout request body with a single piece.
+
+    Uses a unique filename per call (includes quality + uuid nonce) so the
+    layout cache never short-circuits the stub engine.
+    """
+    import uuid
+    nonce = uuid.uuid4().hex[:8]
+    return {
+        "filename": f"ultra_test_{quality}_{nonce}.dxf",
+        "fabric_width_mm": 1500.0,
+        "grain_mode": "single",
+        "quality": quality,
+        "copies": 1,
+        "pieces": [
+            {
+                "id": "piece_0",
+                "name": "FRONT",
+                "polygon": [[0.0, 0.0], [100.0, 0.0], [100.0, 80.0], [0.0, 80.0]],
+                "area": 8000.0,
+                "bbox": {
+                    "min_x": 0.0,
+                    "min_y": 0.0,
+                    "max_x": 100.0,
+                    "max_y": 80.0,
+                    "width": 100.0,
+                    "height": 80.0,
+                },
+                "is_valid": True,
+                "validation_notes": [],
+                "grainline_direction_deg": None,
+            }
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_ultra_is_a_valid_quality(monkeypatch):
+    """quality=ultra routes to run_separation_layout; stub avoids needing the binary."""
+    from core.layout.heuristic import Placement
+    import api.main as main
+
+    def _stub(pieces, fabric_width_mm, grain_mode, fabric_grain_deg, budget_s, seed=42, n_seeds=1):
+        return [Placement(pieces[0].id, 10.0, 10.0, 0.0)], 123.0, 45.6
+
+    monkeypatch.setattr(main, "run_separation_layout", _stub)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/auto-layout", json=_one_piece_body(quality="ultra"))
+
+    assert resp.status_code == 200
+    assert resp.json()["marker_length_mm"] == 123.0
+
+
+@pytest.mark.asyncio
+async def test_ultra_invalid_output_returns_400(monkeypatch):
+    """ValueError from run_separation_layout surfaces as HTTP 400 with 'invalid' in detail."""
+    import api.main as main
+
+    def _bad(*a, **k):
+        raise ValueError("separation layout invalid: off-grain")
+
+    monkeypatch.setattr(main, "run_separation_layout", _bad)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/auto-layout", json=_one_piece_body(quality="ultra"))
+
+    assert resp.status_code == 400
+    assert "invalid" in resp.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# ultra_budget_s and ultra_seeds validation + wiring
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_ultra_budget_out_of_range_422():
+    """ultra_budget_s outside 360..1500 must return 422."""
+    for bad in (359, 1501):
+        body = _one_piece_body(quality="ultra")
+        body["ultra_budget_s"] = bad
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post("/auto-layout", json=body)
+        assert resp.status_code == 422, f"expected 422 for ultra_budget_s={bad}, got {resp.status_code}"
+
+
+@pytest.mark.asyncio
+async def test_ultra_seeds_out_of_range_422():
+    """ultra_seeds outside 1..4 must return 422."""
+    for bad in (0, 5):
+        body = _one_piece_body(quality="ultra")
+        body["ultra_seeds"] = bad
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post("/auto-layout", json=body)
+        assert resp.status_code == 422, f"expected 422 for ultra_seeds={bad}, got {resp.status_code}"
+
+
+@pytest.mark.asyncio
+async def test_ultra_passes_budget_and_seeds(monkeypatch):
+    """ultra_budget_s and ultra_seeds are forwarded to run_separation_layout."""
+    from core.layout.heuristic import Placement
+    import api.main as main
+
+    captured: dict = {}
+
+    def _stub(pieces, fabric_width_mm, grain_mode, fabric_grain_deg, budget_s, seed=42, n_seeds=1):
+        captured["budget_s"] = budget_s
+        captured["n_seeds"] = n_seeds
+        return [Placement(pieces[0].id, 10.0, 10.0, 0.0)], 99.0, 50.0
+
+    monkeypatch.setattr(main, "run_separation_layout", _stub)
+
+    body = _one_piece_body(quality="ultra")
+    body["ultra_budget_s"] = 900
+    body["ultra_seeds"] = 3
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/auto-layout", json=body)
+
+    assert resp.status_code == 200
+    assert captured["budget_s"] == 900.0
+    assert captured["n_seeds"] == 3

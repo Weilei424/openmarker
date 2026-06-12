@@ -26,6 +26,8 @@ export function useAutoLayout() {
       maxCacheEntries: number = 5,
       includeEffortInKey: boolean = false, // TEMP(phase6-bench)
       quality: LayoutQuality = "fast",
+      ultraBudgetS: number = 600,
+      ultraSeeds: number = 1,
     ): Promise<AutoLayoutOutcome> => {
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -49,6 +51,8 @@ export function useAutoLayout() {
             max_cache_entries: maxCacheEntries,
             include_effort_in_key: includeEffortInKey, // TEMP(phase6-bench)
             quality,
+            ultra_budget_s: ultraBudgetS,
+            ultra_seeds: ultraSeeds,
           }),
           signal: controller.signal,
         });

@@ -147,3 +147,18 @@ def test_find_by_settings_default_quality_is_fast():
         filename="sample.dxf", grain_mode="single", copies=1, fabric_width_mm=1500.0
     )
     assert hit is not None and hit.id == "f1"
+
+
+def test_dedup_distinguishes_ultra_budget_and_seeds():
+    from core.layout.cache import LayoutCache, CachedLayout
+    c = LayoutCache()
+    def mk(bid, budget, seeds):
+        return CachedLayout(id=bid, filename="f.dxf", timestamp="t", grain_mode="bi",
+                            copies=1, fabric_width_mm=1651.0, placements=[], marker_length_mm=1.0,
+                            utilization_pct=1.0, duration_ms=1, created_at=0.0, quality="ultra",
+                            ultra_budget_s=budget, ultra_seeds=seeds)
+    c.insert(mk("a", 600.0, 1)); c.insert(mk("b", 600.0, 3)); c.insert(mk("d", 900.0, 1))
+    assert c.find_by_settings("f.dxf", "bi", 1, 1651.0, "ultra", ultra_budget_s=600.0, ultra_seeds=1).id == "a"
+    assert c.find_by_settings("f.dxf", "bi", 1, 1651.0, "ultra", ultra_budget_s=600.0, ultra_seeds=3).id == "b"
+    assert c.find_by_settings("f.dxf", "bi", 1, 1651.0, "ultra", ultra_budget_s=900.0, ultra_seeds=1).id == "d"
+    assert c.find_by_settings("f.dxf", "bi", 1, 1651.0, "ultra", ultra_budget_s=1200.0, ultra_seeds=1) is None

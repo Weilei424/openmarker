@@ -44,8 +44,9 @@ export type ImportStatus = "idle" | "loading" | "success" | "error";
 export type GrainMode = "single" | "bi";
 
 // Layout quality tier sent to POST /auto-layout. "fast" = today's warm-start;
-// "better"/"best" run the GA optimizer with a short/long time budget.
-export type LayoutQuality = "fast" | "better" | "best";
+// "better"/"best" run the GA optimizer with a short/long time budget;
+// "ultra" runs the sparrow sidecar for the tightest packing.
+export type LayoutQuality = "fast" | "better" | "best" | "ultra";
 
 export interface AutoLayoutPlacement {
   piece_id: string;

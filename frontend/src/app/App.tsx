@@ -15,6 +15,7 @@ import { CanvasWorkspace } from "../components/canvas/CanvasWorkspace";
 import { FabricPanel } from "../components/sidebar/FabricPanel";
 import { GrainPanel } from "../components/sidebar/GrainPanel";
 import { QualityPanel } from "../components/sidebar/QualityPanel";
+import { NumberField } from "../components/sidebar/NumberField";
 
 const FABRIC_GRAIN_DEG = 90;
 const ENGINE_URL = "http://127.0.0.1:8765";
@@ -30,10 +31,15 @@ export default function App() {
 
   const [grainMode, setGrainMode] = useState<GrainMode>("single");
   const [showGrainline, setShowGrainline] = useState<boolean>(true);
-  const [copiesInput, setCopiesInput] = useState<string>("");
+  const [copies, setCopies] = useState<number>(1);
+  // Bumped on each import to remount the Copies field, clearing its internal
+  // draft back to the grey default.
+  const [importNonce, setImportNonce] = useState<number>(0);
   const [disableNfpCache, setDisableNfpCache] = useState<boolean>(false);
   const [effort, setEffort] = useState<number>(1);
   const [quality, setQuality] = useState<LayoutQuality>("fast");
+  const [ultraBudgetS, setUltraBudgetS] = useState<number>(600);
+  const [ultraSeeds, setUltraSeeds] = useState<number>(1);
   const [elapsedMs, setElapsedMs] = useState<number>(0);
   const [maxCacheEntries, setMaxCacheEntries] = useState<number>(5);
   // TEMP(phase6-bench): include effort in dedup key so the same settings at
@@ -42,14 +48,6 @@ export default function App() {
 
   const { runAutoLayout, abort: abortAutoLayout, status: autoStatus, errorMessage: autoError } = useAutoLayout();
   const { entries, activeId, activeEntry, setActiveId, closeTab, refresh: refreshCache, clearAll: clearCache } = useLayoutCache();
-
-  const copies = useMemo(() => {
-    const trimmed = copiesInput.trim();
-    if (trimmed === "") return 1;
-    const v = parseInt(trimmed, 10);
-    if (!Number.isFinite(v) || v < 1) return 1;
-    return Math.min(20, Math.floor(v));
-  }, [copiesInput]);
 
   // Form-state expansion: used as the input to the next Auto Layout call.
   const expandedPieces = useMemo<Piece[]>(() => {
@@ -149,7 +147,8 @@ export default function App() {
       setFabricWidthMm(1500);
       setGrainMode("single");
       setShowGrainline(true);
-      setCopiesInput("");
+      setCopies(1);
+      setImportNonce((n) => n + 1);
 
       const outcome: ImportOutcome = await handleFileSelected(file);
       if (outcome.ok) {
@@ -164,12 +163,8 @@ export default function App() {
 
   const handleAutoLayout = useCallback(async () => {
     if (expandedPieces.length === 0 || !currentFileName) return;
-    const canonical = String(copies);
-    if (copiesInput.trim() !== canonical) {
-      setCopiesInput(canonical);
-    }
     const outcome = await runAutoLayout(
-      currentFileName, expandedPieces, fabricWidthMm, grainMode, FABRIC_GRAIN_DEG, copies, disableNfpCache, effort, maxCacheEntries, includeEffortInKey, quality,
+      currentFileName, expandedPieces, fabricWidthMm, grainMode, FABRIC_GRAIN_DEG, copies, disableNfpCache, effort, maxCacheEntries, includeEffortInKey, quality, ultraBudgetS, ultraSeeds,
     );
     if (outcome.ok) {
       await refreshCache();
@@ -184,7 +179,7 @@ export default function App() {
     } else {
       setStatusMessage(`Auto layout failed: ${outcome.errorMessage}`);
     }
-  }, [expandedPieces, currentFileName, fabricWidthMm, grainMode, copies, copiesInput, disableNfpCache, effort, maxCacheEntries, includeEffortInKey, quality, runAutoLayout, refreshCache, setActiveId]);
+  }, [expandedPieces, currentFileName, fabricWidthMm, grainMode, copies, disableNfpCache, effort, maxCacheEntries, includeEffortInKey, quality, ultraBudgetS, ultraSeeds, runAutoLayout, refreshCache, setActiveId]);
 
   const importButtonLabel = importStatus === "loading" ? "Importing..." : "Import DXF";
 
@@ -221,35 +216,36 @@ export default function App() {
           </Section>
 
           <Section title="Settings">
-            <label style={styles.settingRowVertical}>
+            <div style={styles.settingRowVertical}>
               <span style={styles.settingLabel}>Copies (1–20)</span>
-              <input
-                type="number"
+              <NumberField
+                key={importNonce}
+                ariaLabel="copies"
+                label="Copies"
+                value={copies}
+                defaultValue={1}
                 min={1}
                 max={20}
-                value={copiesInput}
-                placeholder="1"
-                onChange={(e) => setCopiesInput(e.target.value)}
+                onCommit={setCopies}
                 style={styles.numberInputTall}
               />
-            </label>
+            </div>
           </Section>
 
           <Section title="Advanced">
-            <label style={styles.settingRow}>
+            <div style={styles.settingRow}>
               <span style={styles.settingLabel}>Cached results (5–20)</span>
-              <input
-                type="number"
+              <NumberField
+                ariaLabel="cached results"
+                label="Cached results"
+                value={maxCacheEntries}
+                defaultValue={5}
                 min={5}
                 max={20}
-                value={maxCacheEntries}
-                onChange={(e) => {
-                  const v = parseInt(e.target.value, 10);
-                  if (Number.isFinite(v)) setMaxCacheEntries(Math.max(5, Math.min(20, v)));
-                }}
+                onCommit={setMaxCacheEntries}
                 style={styles.numberInputSmall}
               />
-            </label>
+            </div>
 
             <label style={styles.advancedCheckRow}>
               <input
@@ -272,8 +268,9 @@ export default function App() {
             </label>
             <p style={styles.advancedHint}>For benchmarking: same settings at different effort levels create separate tabs.</p>
 
-            {/* Parallel effort applies to the Fast tier only. Better/Best force
-                all-but-one core for more GA islands, so the radio is disabled then. */}
+            {/* Parallel effort applies to NFP-BLF only. The Genetic Algorithm tiers
+                force all-but-one core for more GA islands; Separation runs the sparrow
+                sidecar (its own threads) — so the radio is disabled for all of them. */}
             <div style={{ marginTop: 8, opacity: quality !== "fast" ? 0.5 : 1 }}>
               <div style={styles.settingLabel}>Parallel effort</div>
               {[
@@ -296,14 +293,21 @@ export default function App() {
               ))}
               <p style={styles.advancedHint}>
                 {quality !== "fast"
-                  ? "Better/Best use all but one core; this applies to Fast only."
+                  ? "Only NFP-BLF uses parallel effort; the Genetic and Separation tiers don't."
                   : "Cancellation may not interrupt parallel runs immediately."}
               </p>
             </div>
           </Section>
 
           <Section title="Layout quality">
-            <QualityPanel quality={quality} onChange={setQuality} />
+            <QualityPanel
+              quality={quality}
+              onChange={setQuality}
+              ultraBudgetS={ultraBudgetS}
+              onUltraBudgetChange={setUltraBudgetS}
+              ultraSeeds={ultraSeeds}
+              onUltraSeedsChange={setUltraSeeds}
+            />
           </Section>
 
           <Section title="Layout">

@@ -793,3 +793,66 @@ Add new entries here as work progresses. Each entry should record:
   metric — small convention diffs, but ±20mm ≪ the 496mm win. Phase-2 build needs the
   rigorous per-placement parser into engine `Placement`s + the sidecar/cancellation/cache
   wiring. Longer budgets (up to 600s) and cross-import (sample_3) likely improve further.
+
+### 2026-06-08 — Separation engine PRODUCTIONIZED as the "Ultra" GUI tier
+
+- **What:** Phase 2 shipped the separation engine end-to-end as the GUI **Ultra** quality tier
+  (spec `docs/superpowers/specs/2026-06-07-separation-engine-phase2-design.md`, plan
+  `…/plans/2026-06-07-separation-engine-phase2.md`). New `core/layout/separation.py`: pieces →
+  grain-aligned + 90° axis-mapped `jagua-rs` JSON → bundled `sparrow.exe` subprocess → inverse
+  axis-map reconstruction → hard-fail validation (grain / overlap / width / coverage) →
+  `_compute_metrics`. `POST /auto-layout` routes `quality="ultra"` at a 600s budget;
+  `/cancel-layout` kills the child; `QualityPanel` gains an Ultra radio. `sparrow.exe` (MIT, on
+  MPL-2.0 `jagua-rs` 0.7.2; upstream `a4bfbbe`, rustc 1.89.0) is committed at
+  `engine/vendor/sparrow/` for offline one-click install (a `.gitignore` `*.exe` negation).
+- **Grain (hard constraint) honored:** per-item `allowed_orientations` is DERIVED from grain_mode +
+  grainline (single → `[0]` no flip; bi → `[0,180]`; no-grainline → cardinals), not hardcoded. The
+  output validator re-asserts grain ∈ {target, target+180}, no area-overlap, and within-width on
+  every placement; every measured marker passed (190/190, 48/48). 242 tests green, incl. 3
+  real-sparrow integration tests (tiny run, cancellation kill, full pipeline).
+- **Result (production `run_separation_layout`, seed 42, all markers validated):**
+
+  | workload | budget | marker | util | vs GA | gate (≤3%) |
+  | --- | --- | --- | --- | --- | --- |
+  | `sample_2.dxf ×10` | 180s | 10929.2mm | 84.98% | **+4.23%** | PASS |
+  | `sample_2.dxf ×10` | **600s (shipped)** | **10819.5mm** | **85.85%** | **+5.20%** | PASS |
+  | `sample_2.dxf ×10` | 1200s | 10770.3mm | 86.24% | +5.63% | PASS |
+  | `sample_4.dxf ×6` | 600s | 4540.7mm | 80.63% | **+11.34%** | PASS |
+
+  The 600s default clears the ≥3% gate with margin on both workloads and reproduces the Phase-1
+  eval (180s → 10929 vs the eval's 10916.5, within convention noise). 600s improves on 180s
+  (+5.20% vs +4.23%), so the user-chosen max budget pays off — `sample_2` reaches **85.85%**,
+  approaching the commercial 86.1%.
+- **Budget sensitivity (2026-06-09):** doubling 600→1200s gains only **+0.39pp** (85.85→86.24%,
+  just past the commercial 86.1%) for 2× the wait — steep diminishing returns (sparrow's shrink
+  ratio decays linearly with time). 180→600s gained +0.87pp; the marginal rate ~tripled down. So
+  600s is a sound default knee; a longer budget (or best-of-N-seeds) is the lever for the last
+  fraction of a percent.
+- **Stop / offline:** Stop kills sparrow → no marker (consistent with Better/Best; "best-so-far from
+  `sols_<name>/` snapshots" filed as a follow-up). Fully offline via the committed binary +
+  `_resolve_sparrow_path` ladder (env → vendored → PyInstaller `_MEIPASS` → dev `tools/`).
+- **Decision: SHIPPED.** Ultra is now the best quality tier (85.85% on the canonical workload vs
+  GA's 81.39%). Bench harness: `engine/tests/bench_separation.py` (production module, not the
+  Phase-1 `bench_sparrow.py` spike).
+
+### 2026-06-09 — Separation GUI controls: algorithm names + user budget + best-of-N-seeds
+
+- **What:** Exposed the separation engine's knobs in the GUI (spec
+  `docs/superpowers/specs/2026-06-09-separation-controls-design.md`). The QualityPanel now shows
+  **algorithm names** (NFP-BLF / Genetic Algorithm — quick / — thorough / Separation (sparrow))
+  instead of Fast/Better/Best/Ultra; selecting Separation reveals a **time-budget** box
+  (360–1500s, default 600) and a **best-of-N-seeds** selector (1–4, default 1).
+- **Best-of-N:** `run_separation_layout(..., n_seeds)` runs N sparrow attempts (seeds 42…42+N−1)
+  **in parallel** (ThreadPoolExecutor) and keeps the shortest VALID marker; all-invalid → error;
+  any cancelled attempt → `CancellationError` (Stop never returns a partial best-of-N result). The
+  kill registry became a set so `/cancel-layout` terminates ALL concurrent attempts. Each sparrow
+  uses 3 threads (`jagua-rs`/rayon default), so N=4 ≈ 12 threads — wall stays ≈ budget on a typical
+  box. Best-of-N is the recommended quality lever over a longer single budget (per the budget
+  sensitivity above).
+- **API/cache:** `ultra_budget_s` (360–1500) + `ultra_seeds` (1–4) validated (422 out of range) and
+  added to the cache dedup key, so different budget/seeds produce distinct cached tabs. `quality`
+  enum unchanged (display-only relabel). Note: raw algorithm names depart from the
+  "non-technical operator" UI principle — accepted as an explicit product choice.
+- **Tests:** engine unit (best-of-N selection + cancellation precedence + multi-kill registry) +
+  API (budget/seeds validation + routing + cache distinction) + frontend (conditional controls,
+  clamp) all green.

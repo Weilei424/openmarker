@@ -24,6 +24,7 @@ from core.layout.cancellation import (
     reset_cancellation,
 )
 from core.layout.heuristic import auto_layout_polygon
+from core.layout.separation import run_separation_layout
 from core.layout.grain import FABRIC_GRAIN_DEG
 from core.models.piece import BoundingBox, Piece as PieceModel
 
@@ -91,13 +92,14 @@ async def import_dxf(file: UploadFile) -> dict:
 # Optimizer quality tiers -> GA knobs (see
 # docs/superpowers/specs/2026-06-06-expose-optimizer-gui-design.md).
 # "fast" runs no meta-heuristic (today's warm-start). "better"/"best" run the
-# island-model GA with a wall-clock budget. Budgets validated by
-# engine/tests/bench_optimizer_tiers.py on the canonical workload.
-VALID_QUALITIES = ("fast", "better", "best")
+# island-model GA with a wall-clock budget. "ultra" runs the separation engine
+# (bundled sparrow sidecar) at a 600s budget. Budgets validated by
+# engine/tests/bench_optimizer_tiers.py + bench_separation.py.
+VALID_QUALITIES = ("fast", "better", "best", "ultra")
 GA_GENERATIONS_CAP = 12        # generation cap; binds on small jobs, time binds on big
 GA_GUI_SEED = 42               # fixed -> deterministic per (input, quality)
 OPTIMIZED_EFFORT = 4           # "all but one core": more islands, machine stays usable
-QUALITY_BUDGETS_S = {"better": 180.0, "best": 420.0}
+QUALITY_BUDGETS_S = {"better": 180.0, "best": 420.0, "ultra": 600.0}
 
 
 @app.post("/auto-layout")
@@ -114,9 +116,9 @@ async def auto_layout_endpoint(request: Request) -> dict:
         "filename": "...",          // required
         "copies": 1,                // optional, defaults to 1
         "disable_nfp_cache": false, // optional, A/B benchmark toggle
-        "effort": 1,                // optional, 1=serial..5=all cores; ignored when quality is better/best (forced to 4)
+        "effort": 1,                // optional, 1=serial..5=all cores; ignored for better/best (forced to 4) and ultra
         "max_cache_entries": 5,     // optional, 5..20; sets FIFO cap before dedup check
-        "quality": "fast",          // optional: "fast" | "better" | "best"; better/best run GA
+        "quality": "fast",          // optional: "fast" | "better" | "best" | "ultra"; better/best run GA, ultra runs sparrow
     }
 
     Response JSON:
@@ -150,6 +152,26 @@ async def auto_layout_endpoint(request: Request) -> dict:
         raise HTTPException(
             status_code=422,
             detail=f"`quality` must be one of {VALID_QUALITIES}, got {quality!r}",
+        )
+
+    ultra_budget_s = body.get("ultra_budget_s", QUALITY_BUDGETS_S["ultra"])
+    try:
+        ultra_budget_s = float(ultra_budget_s)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="`ultra_budget_s` must be a number")
+    if ultra_budget_s < 360 or ultra_budget_s > 1500:
+        raise HTTPException(
+            status_code=422,
+            detail=f"`ultra_budget_s` must be 360..1500, got {ultra_budget_s}",
+        )
+    try:
+        ultra_seeds = int(body.get("ultra_seeds", 1))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="`ultra_seeds` must be an integer")
+    if ultra_seeds < 1 or ultra_seeds > 4:
+        raise HTTPException(
+            status_code=422,
+            detail=f"`ultra_seeds` must be 1..4, got {ultra_seeds}",
         )
 
     # TEMP(phase6-bench): when True, dedup key also includes the effort level,
@@ -203,6 +225,8 @@ async def auto_layout_endpoint(request: Request) -> dict:
         fabric_width_mm=fabric_width_mm,
         quality=quality,
         effort=effort if include_effort_in_key else None,  # TEMP(phase6-bench)
+        ultra_budget_s=ultra_budget_s,
+        ultra_seeds=ultra_seeds,
     )
     if existing is not None:
         return {
@@ -225,6 +249,11 @@ async def auto_layout_endpoint(request: Request) -> dict:
                 pieces, fabric_width_mm, grain_mode, FABRIC_GRAIN_DEG,
                 disable_nfp_cache=disable_nfp_cache,
                 effort=effort,
+            )
+        if quality == "ultra":
+            return run_separation_layout(
+                pieces, fabric_width_mm, grain_mode, FABRIC_GRAIN_DEG,
+                budget_s=ultra_budget_s, seed=GA_GUI_SEED, n_seeds=ultra_seeds,
             )
         # better / best: island-model GA with a wall-clock budget. effort is
         # forced to OPTIMIZED_EFFORT (all-but-one core) for more GA islands.
@@ -271,6 +300,8 @@ async def auto_layout_endpoint(request: Request) -> dict:
         # Wall-clock display lives in `timestamp`.
         created_at=time.monotonic(),
         quality=quality,
+        ultra_budget_s=ultra_budget_s,
+        ultra_seeds=ultra_seeds,
     )
     # TEMP(phase6-bench): tag the entry with the effort level used to compute it,
     # so future lookups with include_effort_in_key=True can find it.
@@ -299,6 +330,8 @@ def cancel_layout() -> dict:
     # the top-level imports tidy; called only on the one-shot cancel path.
     from core.layout.heuristic import kill_current_executor
     kill_current_executor()
+    from core.layout.separation import kill_current_sparrow
+    kill_current_sparrow()
     return {"ok": True}
 
 

@@ -495,10 +495,11 @@ async def test_quality_fast_passes_no_ga_knobs(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_quality_invalid_returns_422():
+    # "ultra" is now valid (separation engine tier); use a genuinely unknown value.
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         res = await client.post("/auto-layout", json={
             "filename": "q.dxf", "pieces": [_square_piece()],
-            "fabric_width_mm": 1500, "grain_mode": "single", "quality": "ultra",
+            "fabric_width_mm": 1500, "grain_mode": "single", "quality": "turbo",
         })
     assert res.status_code == 422
 
