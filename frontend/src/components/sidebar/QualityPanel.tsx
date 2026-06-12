@@ -1,4 +1,5 @@
 import type { LayoutQuality } from "../../types/engine";
+import { NumberField } from "./NumberField";
 
 interface QualityPanelProps {
   quality: LayoutQuality;
@@ -44,19 +45,20 @@ export function QualityPanel({
       ))}
       {quality === "ultra" && (
         <div style={styles.sepControls}>
-          <label style={styles.fieldRow}>
+          <div style={styles.fieldRow}>
             <span style={{ fontSize: 13 }}>Time budget (s)</span>
-            <input
-              type="number" min={360} max={1500} step={30}
-              aria-label="time budget seconds"
+            <NumberField
+              ariaLabel="time budget seconds"
+              label="Time budget"
+              unit="seconds"
               value={ultraBudgetS}
-              onChange={(e) => {
-                const v = Math.round(Number(e.target.value));
-                if (!Number.isNaN(v)) onUltraBudgetChange(Math.min(1500, Math.max(360, v)));
-              }}
+              defaultValue={600}
+              min={360}
+              max={1500}
+              onCommit={onUltraBudgetChange}
               style={{ width: 70 }}
             />
-          </label>
+          </div>
           <div style={{ fontSize: 13, marginTop: 6 }} aria-label="seeds">Seeds (best of N)</div>
           {[1, 2, 3, 4].map((n) => (
             <label key={n} style={styles.radioRow}>

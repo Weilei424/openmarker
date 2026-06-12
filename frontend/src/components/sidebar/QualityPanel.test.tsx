@@ -64,14 +64,25 @@ describe("QualityPanel", () => {
     expect(screen.getByLabelText(/seeds/i)).toBeTruthy();
   });
 
-  it("clamps the time budget to [360, 1500]", () => {
+  it("commits a valid time budget on blur, not while typing", () => {
+    const onUltraBudgetChange = vi.fn();
+    render(<QualityPanel quality="ultra" onChange={() => {}} ultraBudgetS={600}
+                         onUltraBudgetChange={onUltraBudgetChange} ultraSeeds={1} />);
+    const input = screen.getByLabelText(/time budget/i);
+    fireEvent.change(input, { target: { value: "900" } });
+    expect(onUltraBudgetChange).not.toHaveBeenCalled(); // no auto-correct mid-type
+    fireEvent.blur(input);
+    expect(onUltraBudgetChange).toHaveBeenCalledWith(900);
+  });
+
+  it("alerts and resets the budget to the 600s default when blurred out of range", () => {
     const onUltraBudgetChange = vi.fn();
     render(<QualityPanel quality="ultra" onChange={() => {}} ultraBudgetS={600}
                          onUltraBudgetChange={onUltraBudgetChange} ultraSeeds={1} />);
     const input = screen.getByLabelText(/time budget/i);
     fireEvent.change(input, { target: { value: "2000" } });
-    expect(onUltraBudgetChange).toHaveBeenCalledWith(1500);
-    fireEvent.change(input, { target: { value: "100" } });
-    expect(onUltraBudgetChange).toHaveBeenCalledWith(360);
+    fireEvent.blur(input);
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
+    expect(onUltraBudgetChange).toHaveBeenCalledWith(600);
   });
 });
