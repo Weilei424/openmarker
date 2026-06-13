@@ -997,3 +997,122 @@ Add new entries here as work progresses. Each entry should record:
   — §6 [2026-06-08]). Source map for any future re-investigation: the three knobs
   live at `config.rs:66/83/102` and `consts.rs:31-32` of the pinned sparrow source
   (rebuild recipe in `engine/vendor/sparrow/PROVENANCE.md`).
+
+### 2026-06-12 — Ultra squeeze round 2: 13-variant config sweep + best-of-N quantified + **WARM-START WIN (first sub-commercial marker)**
+
+- **What / why:** Second evaluation cycle on the Ultra tier, per user direction:
+  (#1) quantify best-of-N-seeds as a lever, (#4) sweep `poly_simpl_tolerance`,
+  (#6) sweep the remaining sparrow hyperparameters, (#7) bounded evaluation of
+  alternative algorithms + the warm-start mechanism. Tilt tolerance and mirroring
+  explicitly EXCLUDED by user decision. Method mirrors the same-day knob eval:
+  throwaway spikes (`spike_sparrow_knobs.py` + `spike_warmstart.py`, on the
+  `feat/separation-engine-r2` worktree) reusing the production separation helpers;
+  candidate binaries built from the pinned source; vendored exe untouched; all
+  timed runs on a quiet 16-core box. **Headline: every config knob is a NO-GO, but
+  warm-starting sparrow from our own Fast-tier NFP-BLF layout produced the first
+  markers BELOW the commercial reference (10599mm): 10572.3 and 10576.1mm.**
+
+- **Noise floor recalibrated (supersedes the 3-seed 10686.7):** this cycle
+  accumulated **21 vendored-config 600s samples** (par≤5, ≤15 rayon threads ≤ 16
+  physical cores ⇒ contention negligible): **mean 10722.7mm, range
+  10663.1–10783.2 (120mm)**. The earlier 3-seed mean (10686.7) and the §1
+  headline single-seed 10716.9 both sit inside this distribution. Any future claim
+  on this workload should beat 10722.7 (mean) / clear the 120mm spread.
+
+- **#6 + #4 — 13 config variants: ALL NO-GO.** 180s seed-42 solo triage vs
+  default-config control 10732.3 (persist_* triaged at 600s — budget-interacting):
+
+  | variant (edit) | 180s marker | Δ |
+  | --- | --- | --- |
+  | samp_dbl (per-move samples ×2: 50→100, 25→50) | 10672.4 | **−59.9 (only leader)** |
+  | shrink_lo (0.001→0.0005) | 10725.8 | −6.5 |
+  | qd5 (quadtree_depth 4→5) | 10734.6 | +2.3 |
+  | stddev_lo (0.25→0.1) | 10735.1 | +2.8 |
+  | simp_none (no simplification) | 10776.8 | +44.5 |
+  | stddev_hi (0.25→0.5) | 10780.2 | +47.9 |
+  | samp_half (samples ×0.5) | 10785.4 | +53.1 |
+  | gls_hi (decay 0.95→0.98) | 10803.4 | +71.1 |
+  | simp_tight (0.001→0.0001) | 10816.5 | +84.2 |
+  | gls_lo (decay 0.95→0.90) | 10850.6 | +118.3 |
+  | persist_hi @600s (iter_no_imprv 200→400) | 10760.0 | worse |
+  | persist_lo @600s (200→100) | 10681.1 | within seed-42 range |
+
+  The sole triage leader, **samp_dbl, inverted at the 600s ×3-seed confirm:
+  mean 10717.4 (10645.4/10685.6/10821.1) vs vendored 10686.7** — the same
+  single-seed trap as round 1's f=0.5 split. `simp_*` confirmed the
+  pre-registered arithmetic bound (max ~9mm recoverable from the 0.1%
+  area-inflation tolerance, swamped by slower evals — both directions worse).
+  GLS decay and persistence are author-tuned optima. **The shipped binary's
+  config is final; no rebuild ships.**
+
+- **#1 — best-of-N quantified: GO as the documented lever; NO cap change.**
+  Fresh-draw wall blocks (vendored exe): best-of-4 minima **10663.1** (seeds
+  42–45) / **10721.5** (52–55); best-of-5 minima **10685.9** (42–46) /
+  **10674.8** (52–56). E[best-of-4] ≈ 10686 vs single-run mean 10722.7 ⇒
+  **N=4 saves ~35–50mm (~0.3–0.45%) at identical wall time**. N=5 shows **no
+  measurable edge over N=4** (extreme-value flattening) and would push 15 rayon
+  threads. Decision: keep the GUI cap at 4 and default at 1 (a higher default
+  would oversubscribe small factory boxes); document N=4 as the recommended
+  setting on capable hardware. Composes with warm-start (below).
+
+- **#7a — alternative algorithms: NO-GO, evidence-cited.** The sparrow paper
+  (arXiv:2509.13329, revised 2026-02) beats all four academic SOTA heuristics
+  (ROMA, GCS, FLD, ELS) and the open-source field on all 13 benchmark instances
+  — including the garment-like TROUSERS (91.73% vs 90.48%) — and states exact
+  methods (MILP / branch-and-bound, e.g. arXiv:2503.21009) "can generally only
+  handle a small set of items… impractical for many academic instances, let
+  alone complex real-world instances" (we run 190 pieces). RL/quantum/pixel
+  approaches are not competitive on strip packing and would fight the offline
+  packaging constraint. No upstream sparrow/jagua-rs refresh exists (pin =
+  upstream HEAD; no jagua-rs release past 0.7.2). **There is no better engine
+  to adopt; gains must come from how we drive sparrow.**
+
+- **#7b — WARM-START from the Fast tier: GO (the cycle's win).** sparrow's `-i`
+  accepts a full solution JSON (`ExtSPOutput` = instance fields + `solution`);
+  `import_solution` (jagua-rs `spp/io/import.rs:65-80`) consumes only
+  `strip_width` + `placed_items` (`container_id`/`density`/`run_time_sec`
+  parsed-but-ignored ⇒ production can construct the JSON directly, no template
+  solve). Spike converter = exact inverse of `_reconstruct` (+90° axis map,
+  shift into `x∈[0,M]`, per-copy rotation offset `r=(rot−base)%360`, translation
+  from vertex-0 correspondence with a max-deviation assertion). Fed sparrow our
+  **Fast-tier NFP-BLF layout** (11393.2mm) as the start. Results (600s, all
+  markers validator-passed — grain/overlap/width/coverage):
+
+  | arm (sample_2×10) | seeds | markers (mm) | mean | min |
+  | --- | --- | --- | --- | --- |
+  | LBF-init pool (n=21) | various | 10663.1 … 10783.2 | 10722.7 | 10663.1 |
+  | **warm-start solo** | 42/43/44 | **10572.3 / 10621.6 / 10648.9** | **10614.3** | **10572.3** |
+  | **warm-start best-of-4** | 52–55 | 10576.1 / 10702.5 / 10714.9 / 10734.8 | 10682.1 | **10576.1** |
+
+  Matched-seed comparison (same seed, warm vs LBF-init): 6/7 seeds better, mean
+  **−74mm (−0.7%)**; the worst warm-start solo run (10648.9) beats the best of
+  21 LBF-init samples (10663.1). **Two independent seed pools produced markers
+  below the commercial 10599mm reference: 10572.3 (87.85% util) and 10576.1
+  (87.82%)** — OpenMarker's first sub-commercial markers. Budget fairness: the
+  Fast layout costs +28–30s on sample_2 (~+2–3mm equivalent on the 600→1200s
+  curve) — not the explanation. **Why it works:** the paper's own stated
+  weakness — sparrow "lacks a mechanism to repeat compact local patterns" on
+  homogeneous instances — and our canonical workload is exactly that (19 base
+  pieces ×10). NFP-BLF supplies the garment-row structure sparrow cannot
+  discover; sparrow's overlap-and-separate then compresses it far past what
+  BLF/GA can reach.
+  - **Second workload (sample_4×6): neutral, no regression.** Fresh LBF-init
+    baseline 4450.0 mean (4413.6/4465.9/4470.4) vs warm-start 4452.3 mean
+    (4439.2/4453.7/4463.9) — a tie within noise. Cause: the Fast layout is
+    structurally POOR there (5475.8mm, 23% above sparrow's level, vs 6% above on
+    sample_2), so there is no structure worth injecting — and sparrow's explore
+    phase discards it at no cost. Also note Fast @effort=1 took **107s** on
+    sample_4 (complex outlines) vs ~29s on sample_2 — production budget
+    accounting must handle this (reuse a cached Fast result, or carve the cost
+    out of the sparrow budget).
+  - **Decision: PROPOSE productionizing** warm-start in
+    `run_separation_layout` (engine-Python-only; no binary change; offline-safe;
+    composes with best-of-N — all N attempts can share one warm-start file, as
+    the spike already does). Worst measured outcome anywhere = noise-level tie;
+    best = −1.0% mean and sub-commercial minima on the canonical workload.
+    Awaiting user go-ahead; implementation belongs on this branch.
+  - **Follow-ups filed:** (a) GA-layout warm start at equal *total* time;
+    (b) periodic-lattice warm starts (the paper's "vastly superior solutions are
+    attainable" on homogeneous instances — a structured generator could beat the
+    Fast layout as the seed); (c) the previously-filed "best-so-far on Stop" and
+    a "Continue refining" button both ride the same converter.
