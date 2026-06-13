@@ -214,7 +214,8 @@ def test_run_separation_layout_assembles(monkeypatch):
     ]}}}
     monkeypatch.setattr(sep_mod, "_run_sparrow", lambda instance, budget_s, seed: canned)
     placements, marker, util = sep_mod.run_separation_layout(
-        pieces, fabric_width_mm=fabric, grain_mode="bi", fabric_grain_deg=90.0, budget_s=5, seed=42)
+        pieces, fabric_width_mm=fabric, grain_mode="bi", fabric_grain_deg=90.0,
+        budget_s=5, seed=42, warm_start=False)
     assert {p.piece_id for p in placements} == {"piece_0__c0", "piece_0__c1"}
     assert marker > 0 and 0 < util <= 100
     assert all(round(p.rotation_deg) % 180 == 0 for p in placements)
@@ -237,7 +238,7 @@ def test_best_of_n_returns_shortest_valid(monkeypatch):
     monkeypatch.setattr(sep, "_solve_one", fake_solve)
     pieces = [_rect("p__c0", 60, 40, 90.0)]
     placements, marker, util = sep.run_separation_layout(
-        pieces, 200.0, "bi", 90.0, budget_s=5, seed=42, n_seeds=3)
+        pieces, 200.0, "bi", 90.0, budget_s=5, seed=42, n_seeds=3, warm_start=False)
     assert sorted(calls) == [42, 43, 44]
     assert marker == 800.0   # shortest valid wins
 
@@ -248,7 +249,7 @@ def test_best_of_n_all_invalid_raises(monkeypatch):
     monkeypatch.setattr(sep, "_solve_one", fake_solve)
     with pytest.raises(ValueError, match="all separation attempts invalid"):
         sep.run_separation_layout([_rect("p__c0", 60, 40, 90.0)], 200.0, "bi", 90.0,
-                                  budget_s=5, seed=42, n_seeds=2)
+                                  budget_s=5, seed=42, n_seeds=2, warm_start=False)
 
 
 def test_best_of_n_cancel_takes_precedence(monkeypatch):
@@ -262,4 +263,108 @@ def test_best_of_n_cancel_takes_precedence(monkeypatch):
     monkeypatch.setattr(sep, "_solve_one", fake_solve)
     with pytest.raises(CancellationError):
         sep.run_separation_layout([_rect("p__c0", 60, 40, 90.0)], 200.0, "bi", 90.0,
-                                  budget_s=5, seed=42, n_seeds=2)
+                                  budget_s=5, seed=42, n_seeds=2, warm_start=False)
+
+
+# --- warm start (#7b): Fast-tier NFP-BLF layout fed to sparrow via -i ---
+
+from core.layout.heuristic import auto_layout_polygon
+
+
+def test_placements_to_jagua_round_trips_through_reconstruct():
+    # The warm-start converter is the exact inverse of _reconstruct: a real Fast layout
+    # encoded to jagua placed_items, then reconstructed, must reproduce a geometrically
+    # FAITHFUL engine layout (validator passes; marker length preserved within slack).
+    # copies of a base id are identical (real pieces come from replace(b, id=...)); the
+    # converter relies on that — one `emitted` per base id covers all its copies.
+    pieces = [_rect("piece_0__c0", 60, 40, 90.0), _rect("piece_0__c1", 60, 40, 90.0),
+              _rect("piece_1__c0", 80, 30, 90.0)]
+    fabric = 200.0
+    placements, marker, _ = auto_layout_polygon(pieces, fabric, "bi", 90.0, effort=1)
+    items = _group_to_items(pieces, "bi", 90.0)
+    placed_items = sep._placements_to_jagua(items, pieces, placements, marker)
+    assert len(placed_items) == len(pieces)
+
+    sol = {"solution": {"strip_width": marker + 1.0, "layout": {"placed_items": placed_items}}}
+    rebuilt = _reconstruct(sol, items, fabric_width_mm=fabric)
+    _validate_layout(rebuilt, pieces, fabric, "bi", 90.0)          # faithful: grain/overlap/width
+    pmap = {p.id: p for p in pieces}
+    rebuilt_marker = max(_placed_polygon(pmap[pl.piece_id], pl.x, pl.y, pl.rotation_deg).bounds[3]
+                         for pl in rebuilt)
+    assert abs(rebuilt_marker - marker) < 1.0                       # marker length preserved
+
+
+def test_build_warm_start_returns_solution_dict():
+    pieces = [_rect("piece_0__c0", 60, 40, 90.0), _rect("piece_0__c1", 60, 40, 90.0)]
+    items = _group_to_items(pieces, "bi", 90.0)
+    ws = sep._build_warm_start(items, pieces, 200.0, "bi", 90.0)
+    assert ws is not None
+    assert ws["strip_width"] > 0
+    assert len(ws["layout"]["placed_items"]) == 2
+    assert "rotation" in ws["layout"]["placed_items"][0]["transformation"]
+
+
+def test_build_warm_start_none_on_blf_failure(monkeypatch):
+    # A Fast-layout failure must degrade to None (caller falls back to a cold start),
+    # never propagate — warm start is pure upside and must never break Ultra.
+    def boom(*a, **k):
+        raise RuntimeError("blf exploded")
+    monkeypatch.setattr(sep, "auto_layout_polygon", boom)
+    pieces = [_rect("piece_0__c0", 60, 40, 90.0)]
+    items = _group_to_items(pieces, "bi", 90.0)
+    assert sep._build_warm_start(items, pieces, 200.0, "bi", 90.0) is None
+
+
+def test_build_warm_start_propagates_cancellation(monkeypatch):
+    # Stop during the Fast prelude must cancel the whole run, not silently fall back.
+    from core.layout.cancellation import CancellationError
+    def cancel(*a, **k):
+        raise CancellationError("stop")
+    monkeypatch.setattr(sep, "auto_layout_polygon", cancel)
+    pieces = [_rect("piece_0__c0", 60, 40, 90.0)]
+    items = _group_to_items(pieces, "bi", 90.0)
+    with pytest.raises(CancellationError):
+        sep._build_warm_start(items, pieces, 200.0, "bi", 90.0)
+
+
+def _capture_instance(monkeypatch, pieces, **kwargs):
+    captured = {}
+    items = _group_to_items(pieces, "bi", 90.0)
+    w, h = items[0].emitted.bounds[2], items[0].emitted.bounds[3]
+    # one valid placed_item per copy, laid side-by-side along jagua-x (no overlap)
+    placed, k = [], 0
+    for it in items:
+        for _ in it.piece_ids:
+            placed.append({"item_id": it.index,
+                           "transformation": {"rotation": 0.0, "translation": [k * w, 0.0]}})
+            k += 1
+    canned = {"solution": {"strip_width": k * w, "layout": {"placed_items": placed}}}
+
+    def fake_run(instance, budget_s, seed):
+        captured["instance"] = instance
+        return canned
+    monkeypatch.setattr(sep, "_run_sparrow", fake_run)
+    sep.run_separation_layout(pieces, h, "bi", 90.0, budget_s=5, seed=42, **kwargs)
+    return captured["instance"]
+
+
+def test_run_separation_layout_warm_start_injects_solution(monkeypatch):
+    # warm_start=True must attach a "solution" key (ExtSPOutput) to the instance sparrow sees.
+    pieces = [_rect("piece_0__c0", 60, 40, 90.0), _rect("piece_0__c1", 60, 40, 90.0)]
+    instance = _capture_instance(monkeypatch, pieces, warm_start=True)
+    assert "solution" in instance
+    assert len(instance["solution"]["layout"]["placed_items"]) == len(pieces)
+
+
+def test_run_separation_layout_no_warm_start_omits_solution(monkeypatch):
+    pieces = [_rect("piece_0__c0", 60, 40, 90.0), _rect("piece_0__c1", 60, 40, 90.0)]
+    instance = _capture_instance(monkeypatch, pieces, warm_start=False)
+    assert "solution" not in instance
+
+
+def test_run_separation_layout_warm_start_failure_falls_back(monkeypatch):
+    # If the Fast layout fails, warm_start=True still runs sparrow cold (no "solution").
+    monkeypatch.setattr(sep, "auto_layout_polygon", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
+    pieces = [_rect("piece_0__c0", 60, 40, 90.0), _rect("piece_0__c1", 60, 40, 90.0)]
+    instance = _capture_instance(monkeypatch, pieces, warm_start=True)
+    assert "solution" not in instance
