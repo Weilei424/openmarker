@@ -53,7 +53,7 @@ export function QualityPanel({
               unit="seconds"
               value={ultraBudgetS}
               defaultValue={600}
-              min={360}
+              min={180}
               max={1500}
               onCommit={onUltraBudgetChange}
               style={{ width: 70 }}

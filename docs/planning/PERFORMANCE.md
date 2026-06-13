@@ -54,12 +54,16 @@ Canonical real-workload benchmark used for all gain comparisons:
 | Commercial reference (external)        | 10599       | 86.1%       | external          |
 | Fast — unclustered NFP-BLF (effort=5)  | **11393.2** | **81.52%**  | 11699.4 / 79.39%  |
 | GA — uniform-weight, opt-in (gens=12)  | **11232.3** | **82.69%**  | 11412.5 / 81.39%  |
-| **Ultra — separation (sparrow) @600s** | **10716.9** | **86.67%**  | 10819.5 / 85.85%  |
+| **Ultra — separation (sparrow) @600s, warm-started** | **10597.8** | **87.64%**  | 10819.5 / 85.85%  |
 
 Removing the buffer dropped every tier's marker (~10mm tail + 20mm more usable
-width): Fast −306mm (~2.6%), GA −180mm (~1.6%), Ultra −103mm (~0.9%). Ultra's
-utilization (86.67%) now edges past the external commercial reference (86.1%);
-its marker (10716.9mm) is still within ~1.1% of the commercial 10599mm.
+width): Fast −306mm (~2.6%), GA −180mm (~1.6%), Ultra −103mm (~0.9%, then a
+further −119mm from warm-start). **As of 2026-06-12 round 2 the Ultra tier is
+warm-started from the Fast NFP-BLF layout at budgets ≥360s** (§6 [round 2]); at
+the 600s default that takes the canonical marker to **10597.8mm / 87.64%** —
+OpenMarker's first marker *below* the external commercial reference (10599mm /
+86.1%). (Cold sparrow without warm-start is 10716.7mm / 86.67% at 600s — still
+past the commercial utilization, but warm-start is what crosses the marker.)
 
 **Historical — 10mm selvedge buffer (DEPRECATED 2026-06-12):**
 
@@ -1105,12 +1109,29 @@ Add new entries here as work progresses. Each entry should record:
     sample_4 (complex outlines) vs ~29s on sample_2 — production budget
     accounting must handle this (reuse a cached Fast result, or carve the cost
     out of the sparrow budget).
-  - **Decision: PROPOSE productionizing** warm-start in
-    `run_separation_layout` (engine-Python-only; no binary change; offline-safe;
-    composes with best-of-N — all N attempts can share one warm-start file, as
-    the spike already does). Worst measured outcome anywhere = noise-level tie;
-    best = −1.0% mean and sub-commercial minima on the canonical workload.
-    Awaiting user go-ahead; implementation belongs on this branch.
+  - **Decision: SHIPPED** (PR #17) — `run_separation_layout(warm_start=True)`
+    (engine-Python-only; no binary change; offline-safe; built ONCE and shared
+    across best-of-N; graceful cold-start fallback; Stop during the prelude
+    cancels). `_build_warm_start` constructs the `ExtSPOutput` JSON DIRECTLY (dummy
+    `container_id`/`density`; `import_solution` ignores them — confirmed: sparrow
+    accepts it), `_placements_to_jagua` = the exact inverse of `_reconstruct` with
+    a pure-translation guard. **Production budget curve (seed 42, sample_2×10,
+    warm vs cold, both validated):**
+
+    | budget | warm_start=True | warm_start=False | Δ |
+    | --- | --- | --- | --- |
+    | 180s | 10716.4 | 10713.8 | +2.6 (tie) |
+    | 360s | 10682.9 | 10722.2 | **−39.3 (−0.37%)** |
+    | 600s | **10597.8** (87.64%, sub-commercial) | 10716.7 | **−118.9 (−1.11%)** |
+
+    Key finding: **cold sparrow plateaus (~10715mm at every budget)** — extra time
+    barely helps it; warm-start is what makes the time-budget lever productive (the
+    win GROWS with budget as the injected garment-row structure compresses).
+    **Budget-gated at `WARM_START_MIN_BUDGET_S = 360.0`** (API): warm-start is ON for
+    budgets ≥360s (incl. the 600s default), OFF below — so the new 180s "fast" floor
+    isn't taxed by the Fast-layout prelude (~26s sample_2, ~107s sample_4) where it
+    only ties. Also lowered the GUI/API budget floor 360→180s. 259 engine + frontend
+    tests green.
   - **Follow-ups filed:** (a) GA-layout warm start at equal *total* time;
     (b) periodic-lattice warm starts (the paper's "vastly superior solutions are
     attainable" on homogeneous instances — a structured generator could beat the

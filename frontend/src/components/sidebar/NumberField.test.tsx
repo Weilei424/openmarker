@@ -93,7 +93,7 @@ describe("NumberField", () => {
         unit="seconds"
         value={600}
         defaultValue={600}
-        min={360}
+        min={180}
         max={1500}
         onCommit={onCommit}
       />
@@ -101,7 +101,7 @@ describe("NumberField", () => {
     const input = screen.getByLabelText(/time budget/i);
     fireEvent.change(input, { target: { value: "100" } });
     fireEvent.blur(input);
-    expect(screen.getByRole("alertdialog").textContent).toMatch(/360 to 1500 seconds/);
+    expect(screen.getByRole("alertdialog").textContent).toMatch(/180 to 1500 seconds/);
   });
 
   it("dismisses the alert when OK is clicked", () => {
