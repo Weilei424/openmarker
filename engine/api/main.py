@@ -100,6 +100,11 @@ GA_GENERATIONS_CAP = 12        # generation cap; binds on small jobs, time binds
 GA_GUI_SEED = 42               # fixed -> deterministic per (input, quality)
 OPTIMIZED_EFFORT = 4           # "all but one core": more islands, machine stays usable
 QUALITY_BUDGETS_S = {"better": 180.0, "best": 420.0, "ultra": 600.0}
+# Ultra warm-start (Fast-tier seed via sparrow -i) wins only with enough compression
+# budget: tie at 180s, -0.37% at 360s, -1.11% at 600s. Below this floor the Fast-layout
+# prelude costs wall time for no marker gain, so keep the sub-360s "fast" runs cold.
+# See PERFORMANCE.md §6 [2026-06-12 round 2].
+WARM_START_MIN_BUDGET_S = 360.0
 
 
 @app.post("/auto-layout")
@@ -159,10 +164,10 @@ async def auto_layout_endpoint(request: Request) -> dict:
         ultra_budget_s = float(ultra_budget_s)
     except (TypeError, ValueError):
         raise HTTPException(status_code=422, detail="`ultra_budget_s` must be a number")
-    if ultra_budget_s < 360 or ultra_budget_s > 1500:
+    if ultra_budget_s < 180 or ultra_budget_s > 2500:
         raise HTTPException(
             status_code=422,
-            detail=f"`ultra_budget_s` must be 360..1500, got {ultra_budget_s}",
+            detail=f"`ultra_budget_s` must be 180..2500, got {ultra_budget_s}",
         )
     try:
         ultra_seeds = int(body.get("ultra_seeds", 1))
@@ -254,6 +259,7 @@ async def auto_layout_endpoint(request: Request) -> dict:
             return run_separation_layout(
                 pieces, fabric_width_mm, grain_mode, FABRIC_GRAIN_DEG,
                 budget_s=ultra_budget_s, seed=GA_GUI_SEED, n_seeds=ultra_seeds,
+                warm_start=ultra_budget_s >= WARM_START_MIN_BUDGET_S,
             )
         # better / best: island-model GA with a wall-clock budget. effort is
         # forced to OPTIMIZED_EFFORT (all-but-one core) for more GA islands.

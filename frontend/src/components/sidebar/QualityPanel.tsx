@@ -46,15 +46,15 @@ export function QualityPanel({
       {quality === "ultra" && (
         <div style={styles.sepControls}>
           <div style={styles.fieldRow}>
-            <span style={{ fontSize: 13 }}>Time budget (s)</span>
+            <span style={{ fontSize: 13 }}>Time budget (180s-2500s)</span>
             <NumberField
               ariaLabel="time budget seconds"
               label="Time budget"
               unit="seconds"
               value={ultraBudgetS}
               defaultValue={600}
-              min={360}
-              max={1500}
+              min={180}
+              max={2500}
               onCommit={onUltraBudgetChange}
               style={{ width: 70 }}
             />

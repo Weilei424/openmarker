@@ -25,6 +25,7 @@ from core.layout.cancellation import CancellationError, is_cancelled
 from core.layout.clustering import group_pieces_by_base_id
 from core.layout.heuristic import (
     Placement,
+    auto_layout_polygon,
     _compute_metrics,
     _has_area_overlap,
     _layout_rotations,
@@ -288,17 +289,84 @@ def _solve_one(items: list[_SepItem], instance: dict, pieces: list[Piece],
     return placements, marker_length, utilization
 
 
+def _placements_to_jagua(items: list[_SepItem], pieces: list[Piece],
+                         placements: list[Placement], marker_len: float) -> list[dict]:
+    """Inverse of `_reconstruct`: engine Placements -> jagua `placed_items` (warm start).
+
+    Each engine placed polygon is rotated +90deg into jagua's axis frame and shifted
+    by `marker_len` in x so the layout occupies x in [0, marker_len] (jagua minimizes
+    x). Per copy: rotation offset r = (rotation_deg - base_angle) % 360; translation
+    from the untransformed `emitted` shape's vertex correspondence. Raises ValueError
+    if the mapping is not a pure translation (axis-map regression guard)."""
+    piece_map = {p.id: p for p in pieces}
+    item_by_pid = {pid: it for it in items for pid in it.piece_ids}
+    placed: list[dict] = []
+    for pl in placements:
+        it = item_by_pid[pl.piece_id]
+        piece = piece_map[pl.piece_id]
+        r = round((pl.rotation_deg - it.base_angle) % 360.0, 6)
+        epoly = _placed_polygon(piece, pl.x, pl.y, pl.rotation_deg)
+        jpoly = shapely.affinity.translate(
+            shapely.affinity.rotate(epoly, 90.0, origin=(0, 0), use_radians=False),
+            xoff=marker_len, yoff=0.0)
+        ref = shapely.affinity.rotate(it.emitted, r, origin=(0, 0), use_radians=False)
+        jc, rc = list(jpoly.exterior.coords), list(ref.exterior.coords)
+        tx, ty = jc[0][0] - rc[0][0], jc[0][1] - rc[0][1]
+        worst = max(abs(jx - (rx + tx)) + abs(jy - (ry + ty))
+                    for (jx, jy), (rx, ry) in zip(jc, rc))
+        if worst > 1e-2:
+            raise ValueError(f"warm-start vertex correspondence broke for {pl.piece_id}: {worst}")
+        placed.append({"item_id": it.index,
+                       "transformation": {"rotation": float(r), "translation": [float(tx), float(ty)]}})
+    return placed
+
+
+def _build_warm_start(items: list[_SepItem], pieces: list[Piece], fabric_width_mm: float,
+                      grain_mode: str, fabric_grain_deg: float) -> dict | None:
+    """Seed sparrow from a Fast-tier NFP-BLF layout (passed via `-i` as an ExtSPSolution).
+
+    Returns the solution dict, or None on any failure (caller falls back to a cold
+    start). sparrow can only IMPROVE a valid seed and discards a poor one, so this is
+    pure upside: on the canonical homogeneous workload it injects the repeating
+    garment-row structure sparrow cannot discover on its own (-74mm matched-seed,
+    first sub-commercial markers); on workloads where the Fast layout has no useful
+    structure it measures neutral. See PERFORMANCE.md §6 [2026-06-12 round 2]."""
+    try:
+        placements, marker, _util = auto_layout_polygon(
+            pieces, fabric_width_mm, grain_mode, fabric_grain_deg, effort=1)
+        placed_items = _placements_to_jagua(items, pieces, placements, marker)
+    except CancellationError:
+        raise                       # Stop during the prelude cancels the whole run
+    except Exception:
+        return None                 # best-effort: never let warm start break Ultra
+    return {
+        "strip_width": float(marker) + 1.0,   # +1mm slack so the seed strip is feasible
+        "layout": {"container_id": 0, "placed_items": placed_items, "density": 0.0},
+        "density": 0.0,
+        "run_time_sec": 0,
+    }
+
+
 def run_separation_layout(pieces: list[Piece], fabric_width_mm: float, grain_mode: str,
                           fabric_grain_deg: float, budget_s: float, seed: int = 42,
-                          n_seeds: int = 1) -> tuple[list[Placement], float, float]:
+                          n_seeds: int = 1, warm_start: bool = True) -> tuple[list[Placement], float, float]:
     """Run the separation (sparrow) engine. With n_seeds>1, run that many attempts
     (seeds seed..seed+n_seeds-1) IN PARALLEL and keep the shortest VALID marker.
     Mirrors auto_layout_polygon's return. Raises CancellationError on kill (->499);
-    ValueError on empty input or when every attempt is invalid (->400)."""
+    ValueError on empty input or when every attempt is invalid (->400).
+
+    With warm_start=True (default) sparrow is seeded from a Fast-tier NFP-BLF layout
+    (built ONCE here, shared across all best-of-N attempts); a Fast-layout failure
+    degrades gracefully to a cold start. The Fast layout is an add-on prelude — sparrow
+    still gets the full `budget_s`. See PERFORMANCE.md §6 [2026-06-12 round 2]."""
     if not pieces:
         raise ValueError("no pieces to lay out")
     items = _group_to_items(pieces, grain_mode, fabric_grain_deg)
     instance = _instance_json(items, fabric_width_mm)
+    if warm_start:
+        ws = _build_warm_start(items, pieces, fabric_width_mm, grain_mode, fabric_grain_deg)
+        if ws is not None:
+            instance = {**instance, "solution": ws}   # sparrow reads this as ExtSPOutput -> warm start
     seeds = [seed + k for k in range(max(1, n_seeds))]
 
     if len(seeds) == 1:
