@@ -80,7 +80,7 @@ describe("QualityPanel", () => {
     render(<QualityPanel quality="ultra" onChange={() => {}} ultraBudgetS={600}
                          onUltraBudgetChange={onUltraBudgetChange} ultraSeeds={1} />);
     const input = screen.getByLabelText(/time budget/i);
-    fireEvent.change(input, { target: { value: "2000" } });
+    fireEvent.change(input, { target: { value: "3000" } });
     fireEvent.blur(input);
     expect(screen.getByRole("alertdialog")).toBeTruthy();
     expect(onUltraBudgetChange).toHaveBeenCalledWith(600);

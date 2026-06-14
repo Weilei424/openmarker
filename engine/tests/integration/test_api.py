@@ -148,8 +148,8 @@ async def test_ultra_invalid_output_returns_400(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ultra_budget_out_of_range_422():
-    """ultra_budget_s outside 180..1500 must return 422 (lower bound dropped to 180)."""
-    for bad in (179, 1501):
+    """ultra_budget_s outside 180..2500 must return 422 (range now 180..2500)."""
+    for bad in (179, 2501):
         body = _one_piece_body(quality="ultra")
         body["ultra_budget_s"] = bad
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

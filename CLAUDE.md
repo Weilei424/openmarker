@@ -85,7 +85,7 @@ Tauri window
 - `api/main.py` — FastAPI app, CORS middleware. Routes:
   - `GET /ping` → `{"status": "ok", "version": "0.1.0"}`
   - `POST /import-dxf` → multipart upload, returns parsed pieces
-  - `POST /auto-layout` → pieces + fabric + grain + `quality` tier in, placements + marker_length + utilization out. `quality`: `fast` = NFP-BLF warm-start; `better`/`best` = GA (180s/420s budgets); `ultra` = separation engine (sparrow) at a user budget (`ultra_budget_s`, 180–1500s) + best-of-N seeds (`ultra_seeds`), warm-started from a Fast NFP-BLF layout. Runs in a worker thread via `run_in_threadpool` so other endpoints stay responsive.
+  - `POST /auto-layout` → pieces + fabric + grain + `quality` tier in, placements + marker_length + utilization out. `quality`: `fast` = NFP-BLF warm-start; `better`/`best` = GA (180s/420s budgets); `ultra` = separation engine (sparrow) at a user budget (`ultra_budget_s`, 180–2500s) + best-of-N seeds (`ultra_seeds`), warm-started from a Fast NFP-BLF layout. Runs in a worker thread via `run_in_threadpool` so other endpoints stay responsive.
   - `POST /cancel-layout` → sets a cancellation flag the layout loop checks between piece placements; returns immediately.
 - `core/dxf/parser.py` — `parse_dxf(bytes)` → `list[RawPiece]`. Uses INSERT-based strategy for ET CAD files (one INSERT = one piece, block name = piece id); falls back to flat modelspace layer scan. Both paths support chained open segments via `_chain_open_segments()`.
 - `core/geometry/normalize.py` — `normalize_piece()` translates polygon to origin, repairs invalid geometry with Shapely's `make_valid()`.
@@ -113,7 +113,7 @@ Top-level: `topbar | preview-panel | (sidebar + canvas) | statusbar`. The canvas
 - `components/canvas/CanvasWorkspace.tsx` — Konva `Stage`. Content wrapped in `<Group rotation={-90} y={fabricWidthMm}>` so the fabric visually extends right with grain pointing right. Engine math stays in original engine coords.
 - `components/canvas/PieceShape.tsx` — closed Konva `Line` polygon + optional grain arrow; click selects/deselects. No drag, no rotation handle, no collision highlight.
 - `components/sidebar/{Fabric,Grain}Panel.tsx` — sidebar controls.
-- `components/sidebar/QualityPanel.tsx` — layout-quality selector (NFP-BLF / Genetic Algorithm quick & thorough / Separation). The Separation tier reveals a time-budget `NumberField` (180–1500 s) and a best-of-N seeds radio.
+- `components/sidebar/QualityPanel.tsx` — layout-quality selector (NFP-BLF / Genetic Algorithm quick & thorough / Separation). The Separation tier reveals a time-budget `NumberField` (180–2500 s, labelled "Time budget (180s-2500s)") and a best-of-N seeds radio.
 - `components/sidebar/NumberField.tsx` — whole-number input shared by Copies / Cached results / Time budget. Shows its default as a grey placeholder, allows free typing while focused, and validates on **blur**: empty → default; valid → commit (rounded); NaN or out-of-range → `AlertModal` + reset to default (no per-keystroke auto-correct). Holds internal draft state, so external `value` changes (e.g. the Copies import reset) require a remount via React `key`.
 - `components/AlertModal.tsx` — small in-app modal (role `alertdialog`; Esc / OK to close) used instead of `window.alert()`, which is unreliable in the Tauri (WebView2) packaged app.
 - `hooks/useImportDxf.ts` — file upload to engine; returns `ImportOutcome` directly (don't read React state after awaiting — it's stale).

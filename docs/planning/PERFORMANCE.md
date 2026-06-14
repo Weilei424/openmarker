@@ -1130,8 +1130,10 @@ Add new entries here as work progresses. Each entry should record:
     **Budget-gated at `WARM_START_MIN_BUDGET_S = 360.0`** (API): warm-start is ON for
     budgets ≥360s (incl. the 600s default), OFF below — so the new 180s "fast" floor
     isn't taxed by the Fast-layout prelude (~26s sample_2, ~107s sample_4) where it
-    only ties. Also lowered the GUI/API budget floor 360→180s. 259 engine + frontend
-    tests green.
+    only ties. Also widened the GUI/API budget range 360–1500 → **180–2500s** (floor
+    down for quick runs, ceiling up for the warm-start-driven gains that keep growing
+    with budget; GUI field relabelled "Time budget (180s-2500s)"). 259 engine +
+    frontend tests green.
   - **Follow-ups filed:** (a) GA-layout warm start at equal *total* time;
     (b) periodic-lattice warm starts (the paper's "vastly superior solutions are
     attainable" on homogeneous instances — a structured generator could beat the

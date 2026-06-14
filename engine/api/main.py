@@ -164,10 +164,10 @@ async def auto_layout_endpoint(request: Request) -> dict:
         ultra_budget_s = float(ultra_budget_s)
     except (TypeError, ValueError):
         raise HTTPException(status_code=422, detail="`ultra_budget_s` must be a number")
-    if ultra_budget_s < 180 or ultra_budget_s > 1500:
+    if ultra_budget_s < 180 or ultra_budget_s > 2500:
         raise HTTPException(
             status_code=422,
-            detail=f"`ultra_budget_s` must be 180..1500, got {ultra_budget_s}",
+            detail=f"`ultra_budget_s` must be 180..2500, got {ultra_budget_s}",
         )
     try:
         ultra_seeds = int(body.get("ultra_seeds", 1))
