@@ -429,7 +429,7 @@ the bench is the path to flipping the default.
 | **Compaction post-pass (translate-only)** — settle placed pieces down-then-left into BLF's leftover gaps (fixpoint or N-pass). Hard-constraint-safe by construction: translate-only preserves grain / rotation allowance / handedness. Entry point to the separation family. Reimplement (Shapely). **SHELVED — spiked 2026-06-07, measured ≈0 (§ 6).** | Medium | ≈0 (0 to −13mm, <0.1pp) |
 | **Overlap-and-separate + Guided Local Search** — drop pieces into a too-short strip (overlaps allowed), then GLS-weighted local search nudges colliding pieces apart to feasibility; shrink strip; repeat. The academic SOTA paradigm (Umetani 2009 → sparrow 2025) for irregular **strip** packing — directly targets the ordering-brittleness wall our SA/GA-over-BLF hit. Restricted rotations ({0°,180°}) + no-flip are first-class, so manufacturing-compatible. Reimplement in Python from the papers, or wrap Rust jagua-rs/sparrow (MIT/MPL-2.0 — packaging cost). **EVALUATED 2026-06-07 → GO (§ 6).** | High | **MEASURED: sample_2×10 = 10916.5mm / 85.08% (−4.35% vs GA, valid, 180s); sample_4 −9.6%** |
 | **LP compaction / separation (Li–Milenkovic 1995)** — rigorous version of the compaction post-pass: solve for new non-overlapping positions via linear programming. Originally invented for garment **marker making** (fixed-width cloth, minimize length — our exact problem). Needs an LP solver (scipy). **SHELVED — spiked 2026-06-07, measured ≈0 (§ 6).** | Medium-High | ≈0 (−2 to −12mm, <0.1pp) |
-| **SIMD + target-cpu rebuild of the vendored `sparrow.exe`** — upstream's documented fast build is nightly + `--features=simd` + `RUSTFLAGS=-C target-cpu=…`; our vendored exe was built plain stable `cargo build --release`, and `simd` is NOT a default feature (confirmed in the pinned `Cargo.toml`) ⇒ SIMD is OFF today. sparrow is an anytime optimizer, so more evals/s at equal wall = shorter marker; compounds with warm-start (faster binary ≈ longer budget, and the warm-start win grows with budget). Ship-safe baseline (x86-64-v2/v3) vs bench-only `native`; do NOT enable `only_final_svg` (it would kill the `sols_<name>/` snapshots the Stop follow-up needs). Must clear the § 6 [2026-06-12 r2] noise-floor discipline (≥3 matched seeds vs the vendored control). **ADOPTED 2026-07-04 (§ 6) — plan in progress.** | Low | Unknown until benched (mechanism sound: quality is iteration-bound at fixed wall) |
+| **SIMD + target-cpu rebuild of the vendored `sparrow.exe`** — upstream's documented fast build is nightly + `--features=simd` + `RUSTFLAGS=-C target-cpu=…`; our vendored exe was built plain stable `cargo build --release`, and `simd` is NOT a default feature (confirmed in the pinned `Cargo.toml`) ⇒ SIMD is OFF today. sparrow is an anytime optimizer, so more evals/s at equal wall = shorter marker; compounds with warm-start (faster binary ≈ longer budget, and the warm-start win grows with budget). Ship-safe baseline (x86-64-v2/v3) vs bench-only `native`; do NOT enable `only_final_svg` (it would kill the `sols_<name>/` snapshots the Stop follow-up needs). Must clear the § 6 [2026-06-12 r2] noise-floor discipline (≥3 matched seeds vs the vendored control). **NO-GO 2026-07-04 (§ 6 [rebuild A/B]) — throughput +15–20%, marker unchanged; quality is not compute-bound at 600s.** | Low | ≈0 measured (paired means +17.2 to +43.0mm vs control = inside noise) |
 | **Periodic-lattice warm-start generator** — per base piece, build the 180° Kuperberg pair (bi-grain-legal by construction; grain-locked single-mode pieces use a plain 0° one-piece lattice), compute the densest translational lattice (Milenkovic 2002 exact CG-to-MP, global optimum, motivated by garment marker making; or the Costa–Gomes–Oliveira heuristic — NFP-derived lattice vectors, machinery we already own), tile pair-cells within the fabric width, stack per-type bands, feed sparrow via the existing `-i` warm-start converter. Directly targets sparrow's paper-stated weakness ("lacks a mechanism to repeat compact local patterns") on our homogeneous 19-types×10-copies workload; composes with best-of-N (mix lattice- and BLF-seeded attempts). **ADOPTED 2026-07-04 (§ 6) — queued after the rebuild A/B.** | Medium | Unknown; mechanism-backed (the warm-start win is measured and grows with budget) |
 
 ### 5.C Pruning meta-improvements (compose with PRs #7/#8)
@@ -1202,3 +1202,47 @@ Add new entries here as work progresses. Each entry should record:
   Milenkovic 2002, Comput. Geom. 22:205–222; Kuperberg & Kuperberg 1990 (double
   lattice; local-optimality follow-up DCG 2016); Costa, Gomes & Oliveira (EJOR,
   periodic packing of irregular shapes); github.com/la667-j/NestingLattice.
+
+### 2026-07-04 — Sidecar codegen rebuild A/B (nightly+simd, target-cpu): NO-GO
+
+- **What/why:** Rebuilt `sparrow.exe` from the same source pin `a4bfbbe` with
+  upstream's documented fast build: nightly-2026-05-07 (rustc 1.97.0-nightly
+  365c0e1d7 2026-05-06) + `--features=simd` + `-C target-cpu=…`; the shipped
+  binary was stable, no-simd, generic x86-64 (§ 6 [2026-07-04] Find A).
+  Candidates: `x86-64-v2` and `x86-64-v3` (ship-safe baselines) + `native`
+  (bench-only ceiling); no API drift from the pinned source, so the fallback
+  nightly toolchain was never needed. Full matrix per the spec: {control, v2,
+  v3, native} × seeds 42/43/44, 600s warm, sample_2×10; sample_4×6 (G3) was
+  planned but skipped once both ship candidates failed G1 — NO-GO decided
+  before G3.
+- **Result (sample_2×10 @600s warm, marker mm; all 12 runs valid, walls
+  600.2–602.4s):**
+
+  | arm | s42 | s43 | s44 | paired mean Δ vs control |
+  | --- | --- | --- | --- | --- |
+  | control (stable, no simd) | 10604.8 | 10693.3 | 10650.5 | — |
+  | v2 (x86-64-v2 + simd) | 10802.2 | 10648.4 | 10626.9 | +43.0mm (wins 2/3) |
+  | v3 (x86-64-v3 + simd) | 10732.4 | 10642.5 | 10625.4 | +17.2mm (wins 2/3) |
+  | native (ceiling, bench-only) | 10798.9 | 10649.2 | 10621.5 | +40.3mm (wins 2/3) |
+
+  G1[v2]=FAIL, G1[v3]=FAIL, G2=n/a, G3: skipped (NO-GO — no shipping
+  candidate). Throughput (informational): mean log-lines control 2213.7 vs v2
+  2548.0 / v3 2648.7 / native 2609.7 (+15–20% activity); mean improvement
+  snapshots 126.3 / 126.0 / 148.7 / 132.3. The throughput mechanism
+  materialized but did NOT convert to shorter markers — same shape as the
+  round-1 n_workers NO-GO; at 600s sparrow's quality is not compute-bound.
+  SIMD also reorders float reductions, so a rebuilt binary does not retrace
+  control's trajectory at the same seed — matched seeds decouple into
+  independent draws. Control's s42 10604.8 was an exceptionally good draw
+  (near the production best 10597.8); all arm means sit inside the
+  established warm-start noise band (June warm mean 10614.3 on these seeds).
+  sample_4×6 table: not run (G3 skipped per the NO-GO path).
+- **Decision:** NO-GO — vendored exe stays. Neither candidate passed G1, so
+  nothing ships; the vendored `sparrow.exe` and resolver ladder are untouched
+  and PROVENANCE.md is unchanged (ship Tasks 8/9 and the sample_4×6 G3 guard
+  skipped per the plan's NO-GO path). Candidate builds + `BUILDINFO.md`
+  (SHA-256s: v2 `055F46…944856C`, v3 `DA9791…ED1BDD3`, native
+  `EF99AA…BEE2BE3E2`) remain local-only in gitignored `tools/sparrow-rebuild/`
+  for any future re-test; the periodic-lattice warm-start generator (already
+  queued in § 5.B) is the next quality lever. Spike deleted;
+  `engine/tests/spike_simd_rebuild.py` removed from the repo.
