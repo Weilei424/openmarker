@@ -429,6 +429,8 @@ the bench is the path to flipping the default.
 | **Compaction post-pass (translate-only)** — settle placed pieces down-then-left into BLF's leftover gaps (fixpoint or N-pass). Hard-constraint-safe by construction: translate-only preserves grain / rotation allowance / handedness. Entry point to the separation family. Reimplement (Shapely). **SHELVED — spiked 2026-06-07, measured ≈0 (§ 6).** | Medium | ≈0 (0 to −13mm, <0.1pp) |
 | **Overlap-and-separate + Guided Local Search** — drop pieces into a too-short strip (overlaps allowed), then GLS-weighted local search nudges colliding pieces apart to feasibility; shrink strip; repeat. The academic SOTA paradigm (Umetani 2009 → sparrow 2025) for irregular **strip** packing — directly targets the ordering-brittleness wall our SA/GA-over-BLF hit. Restricted rotations ({0°,180°}) + no-flip are first-class, so manufacturing-compatible. Reimplement in Python from the papers, or wrap Rust jagua-rs/sparrow (MIT/MPL-2.0 — packaging cost). **EVALUATED 2026-06-07 → GO (§ 6).** | High | **MEASURED: sample_2×10 = 10916.5mm / 85.08% (−4.35% vs GA, valid, 180s); sample_4 −9.6%** |
 | **LP compaction / separation (Li–Milenkovic 1995)** — rigorous version of the compaction post-pass: solve for new non-overlapping positions via linear programming. Originally invented for garment **marker making** (fixed-width cloth, minimize length — our exact problem). Needs an LP solver (scipy). **SHELVED — spiked 2026-06-07, measured ≈0 (§ 6).** | Medium-High | ≈0 (−2 to −12mm, <0.1pp) |
+| **SIMD + target-cpu rebuild of the vendored `sparrow.exe`** — upstream's documented fast build is nightly + `--features=simd` + `RUSTFLAGS=-C target-cpu=…`; our vendored exe was built plain stable `cargo build --release`, and `simd` is NOT a default feature (confirmed in the pinned `Cargo.toml`) ⇒ SIMD is OFF today. sparrow is an anytime optimizer, so more evals/s at equal wall = shorter marker; compounds with warm-start (faster binary ≈ longer budget, and the warm-start win grows with budget). Ship-safe baseline (x86-64-v2/v3) vs bench-only `native`; do NOT enable `only_final_svg` (it would kill the `sols_<name>/` snapshots the Stop follow-up needs). Must clear the § 6 [2026-06-12 r2] noise-floor discipline (≥3 matched seeds vs the vendored control). **ADOPTED 2026-07-04 (§ 6) — plan in progress.** | Low | Unknown until benched (mechanism sound: quality is iteration-bound at fixed wall) |
+| **Periodic-lattice warm-start generator** — per base piece, build the 180° Kuperberg pair (bi-grain-legal by construction; grain-locked single-mode pieces use a plain 0° one-piece lattice), compute the densest translational lattice (Milenkovic 2002 exact CG-to-MP, global optimum, motivated by garment marker making; or the Costa–Gomes–Oliveira heuristic — NFP-derived lattice vectors, machinery we already own), tile pair-cells within the fabric width, stack per-type bands, feed sparrow via the existing `-i` warm-start converter. Directly targets sparrow's paper-stated weakness ("lacks a mechanism to repeat compact local patterns") on our homogeneous 19-types×10-copies workload; composes with best-of-N (mix lattice- and BLF-seeded attempts). **ADOPTED 2026-07-04 (§ 6) — queued after the rebuild A/B.** | Medium | Unknown; mechanism-backed (the warm-start win is measured and grows with budget) |
 
 ### 5.C Pruning meta-improvements (compose with PRs #7/#8)
 
@@ -1139,3 +1141,64 @@ Add new entries here as work progresses. Each entry should record:
     attainable" on homogeneous instances — a structured generator could beat the
     Fast layout as the seed); (c) the previously-filed "best-so-far on Stop" and
     a "Continue refining" button both ride the same converter.
+
+### 2026-07-04 — Second online survey: still no better engine; two "drive-sparrow-better" levers adopted (build-flags rebuild + lattice warm start)
+
+- **What / why:** Re-surveyed the field (papers, sparrow upstream, OSS, industry)
+  for anything newer than the 2026-06-07 survey and the 2026-06-12 round-2
+  conclusion ("no better engine; gains must come from how we drive sparrow").
+  Goal: find levers toward *decisively* beating the commercial 10599mm on the
+  canonical workload (current warm-started Ultra grazes it seed-dependently:
+  solo mean 10614.3, best 10572.3, production seed-42 10597.8).
+- **Result — the "no better engine" conclusion HOLDS (July 2026):**
+  - *Geometry-Aware RL* (arXiv 2606.10611, June 2026) benchmarks **against**
+    sparrow and claims only "highly competitive" utilization — i.e. no win —
+    with GPU-shaped inference and unstated grain support. *GFPack++*
+    (arXiv 2406.07579) likewise claims no strip-packing win. Watch, don't adopt.
+  - *Exact methods* (arXiv 2503.21009 branch-and-bound-and-prune / Dotted-Board
+    clique-cover MILPs) remain small-N; 190 pieces stays far out of reach.
+  - *OSS field* (deepnest-next Rust rewrite, nest2D-rust, SVGnest) is all
+    NFP+GA — the paradigm our GA tier already represents and sparrow beat.
+  - *Commercial garment tools* (SMARTmark / Optitex / NShaker) publish
+    incomparable marketing figures; recent academic garment work is efficiency
+    *prediction* (neuro-fuzzy) or zero-waste pattern *design* — not nesting.
+  - *sparrow upstream:* pin `a4bfbbe` (2026-05-07) is 10 commits behind HEAD
+    (2026-06-30) but the delta is dependency bumps only (itertools 0.14→0.15) —
+    no algorithmic change, no successor. 4 open issues, all enhancements (incl.
+    #121 "pin items in place" — relevant to a future lock-piece feature, not perf).
+    Ecosystem growing: spyrrow (Python wrapper), sparroWASM, sparrow-3d.
+  - *Precedent:* GCS (Guided Cuckoo Search — unbeaten ~a decade pre-sparrow) was
+    ALSO "clustering/BLF construction → overlap-min shrink". Independent support
+    that better *constructions* (warm starts), not a different separator, is
+    where remaining gains live.
+- **Find A — the vendored exe is under-built (§ 5.B row).** Upstream README's
+  max-performance build: `RUSTFLAGS='-C target-cpu=native'` + **nightly** +
+  `--features=simd` (portable-SIMD is nightly-gated). The pinned `Cargo.toml`
+  defines `simd` / `only_final_svg` / `live_svg` with **no default features**, and
+  `PROVENANCE.md` records our build as plain stable `cargo build --release` ⇒
+  the shipped binary has SIMD OFF and generic x86-64 codegen (release profile is
+  already `opt-level=3, lto="fat"`, so codegen flags are the only headroom).
+  Distribution caveat: `target-cpu=native` binds to the build box's ISA — ship a
+  safe baseline (x86-64-v2/v3), bench `native` only to learn the ceiling. Keep
+  the `sols_<name>/` snapshots (no `only_final_svg`) — the Stop follow-up needs them.
+- **Find B — lattice warm-start recipe concretized (§ 5.B row).** Kuperberg &
+  Kuperberg's *double lattice* = two lattices interchanged by a 180° rotation —
+  exactly the bi-grain `{0,180}` set, no mirroring involved. Milenkovic 2002
+  ("Densest translational lattice packing of non-convex polygons", Comput. Geom.
+  22:205–222) computes the globally densest translational lattice of k polygons
+  (k=2 → the 180° "Kuperberg pair") via CG-to-MP, explicitly motivated by
+  clothing manufacture. Practical heuristic lineage: Costa–Gomes–Oliveira (EJOR)
+  periodic packing; the NestingLattice Python demo shows NFP-derived lattice
+  vectors (v0, v1) — machinery we already own. NestingLattice has NO license →
+  reimplement from the papers, never copy.
+- **Decision (user, 2026-07-04):** proceed with BOTH, in order: (1) SIMD +
+  target-cpu rebuild A/B against the vendored control (low effort, pure
+  throughput lever; must clear the noise-floor discipline — ≥3 matched seeds,
+  beat the relevant mean, validator-passed markers); then (2) periodic-lattice
+  warm-start generator spike vs the Fast-BLF seed at 600s. Both documented as
+  § 5.B rows; plan for (1) started same day.
+- **Key sources:** sparrow repo + pinned `Cargo.toml` (github.com/JeroenGar/sparrow);
+  arXiv 2606.10611 (RL, June 2026); arXiv 2503.21009 (exact B&B);
+  Milenkovic 2002, Comput. Geom. 22:205–222; Kuperberg & Kuperberg 1990 (double
+  lattice; local-optimality follow-up DCG 2016); Costa, Gomes & Oliveira (EJOR,
+  periodic packing of irregular shapes); github.com/la667-j/NestingLattice.
