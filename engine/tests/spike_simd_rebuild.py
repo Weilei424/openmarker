@@ -96,8 +96,13 @@ def _run_one(exe: str, ipath: str, budget_s: int, seed: int, workdir: str) -> di
         raise ValueError(f"no final_*.json in {outdir}")
     with open(os.path.join(outdir, finals[0]), encoding="utf-8") as f:
         solution = json.load(f)
-    snapshots = len(glob.glob(os.path.join(outdir, "sols_*", "*.json")))
-    log_lines = sum(1 for _ in open(log_path, "rb"))
+    snapshots = len(glob.glob(os.path.join(outdir, "sols_*", "*")))
+    real_log = os.path.join(outdir, "log.txt")
+    if os.path.isfile(real_log):
+        with open(real_log, "rb") as f:
+            log_lines = f.read().count(b"\n")
+    else:
+        log_lines = sum(1 for _ in open(log_path, "rb"))
     return {"solution": solution, "wall_s": round(wall, 1),
             "snapshots": snapshots, "log_lines": log_lines, "log": log_path}
 
@@ -122,6 +127,11 @@ def cmd_run(args) -> int:
     deadline = time.monotonic() + args.ttl_hours * 3600.0
     out_dir = os.path.join(REPORTS, f"{args.workload.replace('.dxf', '')}_x{args.copies}")
     os.makedirs(out_dir, exist_ok=True)
+    report_path = os.path.join(out_dir, "report.json")
+    runs: list[dict] = []
+    if os.path.isfile(report_path):
+        with open(report_path, encoding="utf-8") as f:
+            runs = json.load(f)["runs"]
     pieces = _load(args.workload, args.copies)
     items, ipath = _prepare_instance(pieces, out_dir)
     exes = {}
@@ -133,9 +143,14 @@ def cmd_run(args) -> int:
     meta = {"workload": args.workload, "copies": args.copies, "budget_s": args.budget,
             "fabric": FABRIC, "grain": [GRAIN_MODE, GRAIN_DEG], "seeds": seeds,
             "arms": {a: exes[a][0] for a in arms}, "started": time.strftime("%Y-%m-%d %H:%M:%S")}
-    runs: list[dict] = []
     for seed in seeds:                      # seed-major: arms interleave within each seed
         for a in arms:                      # so box drift hits all arms of a pair equally
+            idx = next((i for i, r in enumerate(runs) if r["arm"] == a and r["seed"] == seed), None)
+            if idx is not None:
+                if runs[idx]["valid"]:
+                    print(f"  skip {a} seed={seed} (already in report)", flush=True)
+                    continue
+                del runs[idx]              # invalid row: drop it, the re-run below replaces it
             if time.monotonic() > deadline:
                 print("TTL expired — report is complete up to here", flush=True)
                 _write_report(out_dir, meta, runs)
@@ -158,7 +173,7 @@ def cmd_run(args) -> int:
             runs.append(row)
             _write_report(out_dir, meta, runs)   # kill-safe: rewrite after EVERY run
     print(f"done -> {os.path.join(out_dir, 'report.json')}", flush=True)
-    return 0
+    return 1 if any(not r["valid"] for r in runs) else 0
 
 
 def _markers(report: dict, arm: str) -> dict[int, float]:
@@ -209,6 +224,9 @@ def cmd_evaluate(args) -> int:
         print(f"workload-2 G3 ({rep2['meta']['workload']} ×{rep2['meta']['copies']}):")
         for cand in args.candidates.split(","):
             mean, wins, nn = _paired(rep2, cand, "control")
+            if nn == 0 or mean != mean:  # nn==0: no shared valid seeds; mean!=mean: NaN
+                print(f"  G3[{cand}]: n/a — no runs for this candidate in report2")
+                continue
             verdict = "PASS" if mean <= 10.0 else "FAIL (regression >10mm)"
             print(f"  G3[{cand}]: paired mean {mean:+.1f}mm over {nn} seeds -> {verdict}")
     return 0
