@@ -430,7 +430,7 @@ the bench is the path to flipping the default.
 | **Overlap-and-separate + Guided Local Search** — drop pieces into a too-short strip (overlaps allowed), then GLS-weighted local search nudges colliding pieces apart to feasibility; shrink strip; repeat. The academic SOTA paradigm (Umetani 2009 → sparrow 2025) for irregular **strip** packing — directly targets the ordering-brittleness wall our SA/GA-over-BLF hit. Restricted rotations ({0°,180°}) + no-flip are first-class, so manufacturing-compatible. Reimplement in Python from the papers, or wrap Rust jagua-rs/sparrow (MIT/MPL-2.0 — packaging cost). **EVALUATED 2026-06-07 → GO (§ 6).** | High | **MEASURED: sample_2×10 = 10916.5mm / 85.08% (−4.35% vs GA, valid, 180s); sample_4 −9.6%** |
 | **LP compaction / separation (Li–Milenkovic 1995)** — rigorous version of the compaction post-pass: solve for new non-overlapping positions via linear programming. Originally invented for garment **marker making** (fixed-width cloth, minimize length — our exact problem). Needs an LP solver (scipy). **SHELVED — spiked 2026-06-07, measured ≈0 (§ 6).** | Medium-High | ≈0 (−2 to −12mm, <0.1pp) |
 | **SIMD + target-cpu rebuild of the vendored `sparrow.exe`** — upstream's documented fast build is nightly + `--features=simd` + `RUSTFLAGS=-C target-cpu=…`; our vendored exe was built plain stable `cargo build --release`, and `simd` is NOT a default feature (confirmed in the pinned `Cargo.toml`) ⇒ SIMD is OFF today. sparrow is an anytime optimizer, so more evals/s at equal wall = shorter marker; compounds with warm-start (faster binary ≈ longer budget, and the warm-start win grows with budget). Ship-safe baseline (x86-64-v2/v3) vs bench-only `native`; do NOT enable `only_final_svg` (it would kill the `sols_<name>/` snapshots the Stop follow-up needs). Must clear the § 6 [2026-06-12 r2] noise-floor discipline (≥3 matched seeds vs the vendored control). **NO-GO 2026-07-04 (§ 6 [rebuild A/B]) — throughput +15–20%, marker unchanged; quality is not compute-bound at 600s.** | Low | ≈0 measured (paired means +17.2 to +43.0mm vs control = inside noise) |
-| **Periodic-lattice warm-start generator** — per base piece, build the 180° Kuperberg pair (bi-grain-legal by construction; grain-locked single-mode pieces use a plain 0° one-piece lattice), compute the densest translational lattice (Milenkovic 2002 exact CG-to-MP, global optimum, motivated by garment marker making; or the Costa–Gomes–Oliveira heuristic — NFP-derived lattice vectors, machinery we already own), tile pair-cells within the fabric width, stack per-type bands, feed sparrow via the existing `-i` warm-start converter. Directly targets sparrow's paper-stated weakness ("lacks a mechanism to repeat compact local patterns") on our homogeneous 19-types×10-copies workload; composes with best-of-N (mix lattice- and BLF-seeded attempts). **ADOPTED 2026-07-04 (§ 6) — queued after the rebuild A/B.** | Medium | Unknown; mechanism-backed (the warm-start win is measured and grows with budget) |
+| **Periodic-lattice warm-start generator** — per base piece, build the 180° Kuperberg pair (bi-grain-legal by construction; grain-locked single-mode pieces use a plain 0° one-piece lattice), compute the densest translational lattice (Milenkovic 2002 exact CG-to-MP, global optimum, motivated by garment marker making; or the Costa–Gomes–Oliveira heuristic — NFP-derived lattice vectors, machinery we already own), tile pair-cells within the fabric width, stack per-type bands, feed sparrow via the existing `-i` warm-start converter. Directly targets sparrow's paper-stated weakness ("lacks a mechanism to repeat compact local patterns") on our homogeneous 19-types×10-copies workload; composes with best-of-N (mix lattice- and BLF-seeded attempts). **NO-GO 2026-07-05 (§ 6 [lattice A/B]).** | Medium | MEASURED: lattice +112.6mm, banded +105.2mm paired vs warm control @600s (0/3 wins each — treatments regress to the cold plateau) |
 
 ### 5.C Pruning meta-improvements (compose with PRs #7/#8)
 
@@ -1246,3 +1246,48 @@ Add new entries here as work progresses. Each entry should record:
   for any future re-test; the periodic-lattice warm-start generator (already
   queued in § 5.B) is the next quality lever. Spike deleted;
   `engine/tests/spike_simd_rebuild.py` removed from the repo.
+
+### 2026-07-05 — Periodic-lattice warm-start A/B (lattice + banded vs Fast-BLF seed): NO-GO
+
+- **What / why:** Spiked the § 5.B periodic-lattice lever: `lattice.py`
+  generators (Kuperberg 180° pair cells, NFP-derived strip-aligned lattice
+  vectors, per-shape-group bands + settle; plus a banded-BLF ablation) seeded
+  sparrow via the production `-i` converter, vs the production Fast-BLF seed.
+  Canonical protocol: sample_2×10 @600s, matched seeds 42/43/44, sequential,
+  validator-gated seeds AND finals.
+- **Seed layouts (pre-sparrow):** control 11393.2mm / 81.52% (prelude
+  26.0s); lattice 13853.6mm / 67.05% (prelude 2.6s, ladder: 13 of 13 groups
+  on the lattice rung, zero fallbacks); banded 14831.6mm / 62.62% (prelude
+  1.6s, 13/13 blf rungs) — vs Fast-BLF reference 11393.2mm (the control
+  seed itself).
+- **Result (final markers, mm; all 9 runs / 3 seeds valid):**
+
+  | arm | s42 | s43 | s44 | paired mean vs control | wins |
+  | --- | --- | --- | --- | --- | --- |
+  | control | 10584.2 | 10638.5 | 10624.4 | — | — |
+  | lattice | 10723.6 | 10683.5 | 10777.9 | +112.6mm | 0/3 |
+  | banded | 10690.9 | 10743.4 | 10728.3 | +105.2mm | 0/3 |
+
+- **Gates:** G1 all valid (9/9 runs, 3/3 seeds); G2[lattice] NO-GO,
+  G2[banded] NO-GO (gate: mean ≤ −25.0mm AND wins ≥ 2/3); DECISIVE
+  (<10599mm on all seeds): no; G3 (sample_4×6, GO only): not run.
+- **Interpretation:** both treatment means (10728.3 / 10720.9) sit exactly
+  on the cold-start plateau (10722.7mm ± 120, n=21) — the banded arm's
+  paired deltas are nearly flat (+106.7/+104.9/+103.9). The treatments
+  behaved as if unseeded: sparrow's warm-start channel transfers a seed
+  only when it is already near the reachable plateau. The Fast-BLF seed
+  (~+6% over the plateau) steers runs to 10615.7; the periodic seeds
+  (+29%/+38%) are destroyed in the early compression phase and the runs
+  revert to cold trajectories — periodic structure does not survive that
+  much shrinking. Per-type banding itself costs ~2.5m of seed length by
+  giving up cross-type interleaving; pair-interlocking recovered ~1m
+  within bands (lattice seed vs banded seed) but nowhere near enough. The
+  generator itself was healthy: 13/13 shape groups built true lattice
+  bands in a 2.6s prelude, and every seed passed the validator — the
+  mechanism, not the implementation, is what failed.
+- **Decision:** docs-only protocol record; `lattice.py` + tests + spike
+  deleted (commit `75717c0`), code preserved verbatim in this plan doc.
+  Reports under `tools/lattice-spike/reports/` (gitignored, local-only;
+  rescued to the main tree). The "structure-only seed" idea is closed on
+  this workload — any future warm-start variant must produce a seed
+  SHORTER than the Fast-BLF layout, not merely more periodic.

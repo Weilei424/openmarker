@@ -230,3 +230,20 @@ Items not yet assigned to a phase. Rough notes captured to avoid losing context.
 > All detail (ranked open items, branch-pruning follow-ups, layout-algorithm
 > wins, shipped-but-disabled mechanisms) lives in
 > `docs/planning/PERFORMANCE.md`. Edit perf items there, not here.
+
+### Lattice warm-start spike (spec 2026-07-04) Execution Checklist
+
+- [x] P1: Worktree preflight + spec/plan/BACKLOG committed on branch
+- [x] P2: lattice.py banded pipeline (shape groups, BLF bands, stack+settle) + tests
+- [x] P3: lattice.py lattice bands (Kuperberg pair cells, NFP lattice vectors) + mechanism tests
+- [x] P4: Spike runner + smoke (3 arms × 15s × 1 copy)
+- [x] P5: Canonical matrix — 3 arms × seeds 42/43/44 @600s (~1h40m)
+- [x] P6: Gate evaluation + verdict [USER CHECKPOINT]
+- [ ] P7: Conditional GO path: sample_4×6 G3 guard (skipped — NO-GO)
+- [x] P8: Conditional NO-GO path: delete lattice.py + tests + spike
+- [x] P9: Docs (PERFORMANCE §6 + §5.B, BACKLOG outcome), PR, final review
+- Outcome: NO-GO — lattice +112.6mm, banded +105.2mm paired vs warm control
+  @600s on sample_2×10 (seeds 42/43/44, 0/3 wins each; treatments sat on the
+  cold plateau 10722.7mm); seed layouts lattice 13853.6 / banded 14831.6 vs
+  Fast-BLF 11393.2 — sparrow transfers only near-plateau seeds; DECISIVE:
+  no. See PERFORMANCE.md § 6.
