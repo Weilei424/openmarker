@@ -918,7 +918,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 **Files:**
 - Create: `WT\engine\tests\spike_lattice_warmstart.py` (throwaway; deleted in Task 9)
-- Modify: `WT\.gitignore` (append `tools/lattice-spike/` after the existing `tools/sparrow-rebuild/` line)
+- Modify: none besides the spike file — the repo's blanket `tools/` gitignore line already ignores `tools/lattice-spike/` (an earlier draft wrongly assumed an explicit `tools/sparrow-rebuild/` line existed)
 
 **Interfaces:**
 - Consumes: `lattice_layout` / `banded_blf_layout` (Tasks 2–3); production helpers `_group_to_items`, `_instance_json`, `_placements_to_jagua`, `_reconstruct`, `_validate_layout`, `_resolve_sparrow_path`, `auto_layout_polygon`, `_compute_metrics`, `_polygon_dims`.
@@ -1246,11 +1246,7 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 2: Append to `WT\.gitignore`** (directly below the existing `tools/sparrow-rebuild/` line):
-
-```
-tools/lattice-spike/
-```
+- [ ] **Step 2: Verify spike outputs are ignored** — no .gitignore edit needed: the existing blanket `tools/` line covers `tools/lattice-spike/`. Confirm: `git check-ignore tools/lattice-spike/x` exits 0.
 
 - [ ] **Step 3: Smoke run (3 arms × 15s × 1 copy, ~1min + preludes)**
 
@@ -1264,7 +1260,7 @@ Expected: three `seed[...]: marker=…` lines (lattice line includes `ladder_run
 
 ```powershell
 cd WT
-git add engine/tests/spike_lattice_warmstart.py .gitignore
+git add engine/tests/spike_lattice_warmstart.py
 git commit -m "test(engine): throwaway spike runner for the lattice warm-start A/B
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"

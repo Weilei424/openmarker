@@ -171,5 +171,4 @@ desktop/build/
 *.lock
 
 # local sparrow build (separation eval)
-tools/sparrow-rebuild/
-tools/lattice-spike/
+tools/
