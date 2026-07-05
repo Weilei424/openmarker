@@ -230,3 +230,15 @@ Items not yet assigned to a phase. Rough notes captured to avoid losing context.
 > All detail (ranked open items, branch-pruning follow-ups, layout-algorithm
 > wins, shipped-but-disabled mechanisms) lives in
 > `docs/planning/PERFORMANCE.md`. Edit perf items there, not here.
+
+### Lattice warm-start spike (spec 2026-07-04) Execution Checklist
+
+- [ ] P1: Worktree preflight + spec/plan/BACKLOG committed on branch
+- [ ] P2: lattice.py banded pipeline (shape groups, BLF bands, stack+settle) + tests
+- [ ] P3: lattice.py lattice bands (Kuperberg pair cells, NFP lattice vectors) + mechanism tests
+- [ ] P4: Spike runner + smoke (3 arms × 15s × 1 copy)
+- [ ] P5: Canonical matrix — 3 arms × seeds 42/43/44 @600s (~1h40m)
+- [ ] P6: Gate evaluation + verdict [USER CHECKPOINT]
+- [ ] P7: Conditional GO path: sample_4×6 G3 guard
+- [ ] P8: Conditional NO-GO path: delete lattice.py + tests + spike
+- [ ] P9: Docs (PERFORMANCE §6 + §5.B, BACKLOG outcome), PR, final review
