@@ -1276,8 +1276,8 @@ Add new entries here as work progresses. Each entry should record:
   paired deltas are nearly flat (+106.7/+104.9/+103.9). The treatments
   behaved as if unseeded: sparrow's warm-start channel transfers a seed
   only when it is already near the reachable plateau. The Fast-BLF seed
-  (~+7% over the plateau) steers runs to 10615.7; the periodic seeds
-  (+29%/+39%) are destroyed in the early compression phase and the runs
+  (~+6% over the plateau) steers runs to 10615.7; the periodic seeds
+  (+29%/+38%) are destroyed in the early compression phase and the runs
   revert to cold trajectories — periodic structure does not survive that
   much shrinking. Per-type banding itself costs ~2.5m of seed length by
   giving up cross-type interleaving; pair-interlocking recovered ~1m
