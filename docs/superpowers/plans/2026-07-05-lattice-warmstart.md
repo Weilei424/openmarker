@@ -261,6 +261,20 @@ def test_settle_slides_band_into_notch():
     # without settle the marker would be 260 (200 + 60); with settle the rect
     # rests at y ~= 80..140 -> marker stays 200 (2mm probe granularity slack)
     assert marker == pytest.approx(200.0, abs=2.1)
+
+
+def test_stack_frontier_never_retreats_past_earlier_bands():
+    # Band 2 settles deeper (120mm) than its own extent (60mm). The stacking
+    # frontier must stay at band 1's edge (y=200), not retreat to 140 — a
+    # third band starting below the frontier would begin INSIDE band 1's
+    # right column and settle would silently accept the overlap.
+    pieces = [_notch_l("piece_0__c0", grainline=90.0),
+              _rect("piece_1__c0", 60, 60, grainline=90.0),
+              _rect("piece_2__c0", 150, 20, grainline=90.0)]
+    placements, marker, _ = banded_blf_layout(pieces, 300.0, "single", 90.0)
+    _validate_layout(placements, pieces, 300.0, "single", 90.0)
+    # rect 150x20 rests on the notch-L column top (y 200..220)
+    assert marker == pytest.approx(220.0, abs=2.1)
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -395,8 +409,9 @@ def _settle_shift(polys: list[ShapelyPolygon], placed: list[ShapelyPolygon],
                   placed_bounds: list[tuple[float, float, float, float]]) -> float:
     """Largest safe downward (-y) slide for a band: bbox fast-forward to the
     nearest possible contact, then SETTLE_STEP_MM polygon probes until first
-    contact. The start position is clear, so 'last clear step' is well-defined;
-    the floor y >= 0 is a hard stop (spec § 4.6)."""
+    contact. The start position is clear (guaranteed by _stack_and_settle's
+    frontier invariant), so 'last clear step' is well-defined; the floor y >= 0
+    is a hard stop (spec § 4.6)."""
     floor = min(p.bounds[1] for p in polys)          # distance to y = 0
     gap = floor
     for a in polys:
@@ -422,8 +437,11 @@ def _settle_shift(polys: list[ShapelyPolygon], placed: list[ShapelyPolygon],
 
 
 def _stack_and_settle(bands: list[_Band], pieces_by_id: dict[str, Piece]) -> list[Placement]:
-    """Stack bands big-pieces-first along +y at bbox offsets, settling each band
-    toward y = 0 against the already-settled ones (spec § 4.6)."""
+    """Stack bands big-pieces-first along +y, settling each band toward y = 0
+    against the already-settled ones (spec § 4.6). Each band starts at the
+    settled FRONTIER — max y over all settled pieces — so its start position is
+    clear by construction even when an earlier band settled deeper than its own
+    extent (a plain running offset would drag the start back inside band 1)."""
     ordered = sorted(bands, key=lambda b: -b.sort_area)
     out: list[Placement] = []
     placed: list[ShapelyPolygon] = []
@@ -439,7 +457,7 @@ def _stack_and_settle(bands: list[_Band], pieces_by_id: dict[str, Piece]) -> lis
             settled = shapely.affinity.translate(poly, yoff=-shift) if shift else poly
             placed.append(settled)
             placed_bounds.append(settled.bounds)
-        y_off += band.length - shift
+        y_off = max(pb[3] for pb in placed_bounds)   # frontier, never retreats
     return out
 
 

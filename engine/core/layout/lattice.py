@@ -119,8 +119,9 @@ def _settle_shift(polys: list[ShapelyPolygon], placed: list[ShapelyPolygon],
                   placed_bounds: list[tuple[float, float, float, float]]) -> float:
     """Largest safe downward (-y) slide for a band: bbox fast-forward to the
     nearest possible contact, then SETTLE_STEP_MM polygon probes until first
-    contact. The start position is clear, so 'last clear step' is well-defined;
-    the floor y >= 0 is a hard stop (spec § 4.6)."""
+    contact. The start position is clear (guaranteed by _stack_and_settle's
+    frontier invariant), so 'last clear step' is well-defined; the floor y >= 0
+    is a hard stop (spec § 4.6)."""
     floor = min(p.bounds[1] for p in polys)          # distance to y = 0
     gap = floor
     for a in polys:
@@ -146,8 +147,11 @@ def _settle_shift(polys: list[ShapelyPolygon], placed: list[ShapelyPolygon],
 
 
 def _stack_and_settle(bands: list[_Band], pieces_by_id: dict[str, Piece]) -> list[Placement]:
-    """Stack bands big-pieces-first along +y at bbox offsets, settling each band
-    toward y = 0 against the already-settled ones (spec § 4.6)."""
+    """Stack bands big-pieces-first along +y, settling each band toward y = 0
+    against the already-settled ones (spec § 4.6). Each band starts at the
+    settled FRONTIER — max y over all settled pieces — so its start position is
+    clear by construction even when an earlier band settled deeper than its own
+    extent (a plain running offset would drag the start back inside band 1)."""
     ordered = sorted(bands, key=lambda b: -b.sort_area)
     out: list[Placement] = []
     placed: list[ShapelyPolygon] = []
@@ -163,7 +167,7 @@ def _stack_and_settle(bands: list[_Band], pieces_by_id: dict[str, Piece]) -> lis
             settled = shapely.affinity.translate(poly, yoff=-shift) if shift else poly
             placed.append(settled)
             placed_bounds.append(settled.bounds)
-        y_off += band.length - shift
+        y_off = max(pb[3] for pb in placed_bounds)   # frontier, never retreats
     return out
 
 

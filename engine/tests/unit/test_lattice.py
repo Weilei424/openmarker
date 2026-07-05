@@ -129,3 +129,17 @@ def test_settle_slides_band_into_notch():
     # without settle the marker would be 260 (200 + 60); with settle the rect
     # rests at y ~= 80..140 -> marker stays 200 (2mm probe granularity slack)
     assert marker == pytest.approx(200.0, abs=2.1)
+
+
+def test_stack_frontier_never_retreats_past_earlier_bands():
+    # Band 2 settles deeper (120mm) than its own extent (60mm). The stacking
+    # frontier must stay at band 1's edge (y=200), not retreat to 140 — a
+    # third band starting below the frontier would begin INSIDE band 1's
+    # right column and settle would silently accept the overlap.
+    pieces = [_notch_l("piece_0__c0", grainline=90.0),
+              _rect("piece_1__c0", 60, 60, grainline=90.0),
+              _rect("piece_2__c0", 150, 20, grainline=90.0)]
+    placements, marker, _ = banded_blf_layout(pieces, 300.0, "single", 90.0)
+    _validate_layout(placements, pieces, 300.0, "single", 90.0)
+    # rect 150x20 rests on the notch-L column top (y 200..220)
+    assert marker == pytest.approx(220.0, abs=2.1)

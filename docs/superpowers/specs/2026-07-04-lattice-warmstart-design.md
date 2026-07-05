@@ -139,12 +139,14 @@ rotated-polygon bbox-min (matches `_placed_polygon`).
    plain Fast-BLF (`auto_layout_polygon`, effort=1). The spike logs which rung
    fired per group.
 
-6. **Stack + settle.** Bands sorted by descending piece area, stacked along y at
-   bbox offsets, then settled: slide each band toward y=0 in 2mm steps until
-   first contact (start is clear, so "last clear step" is well-defined and safe;
-   1000-step safety cap = 2m — a deep partial-row notch in the previous band can
-   absorb far more than a token slide), recovering seam waste from ragged band
-   edges. Settle is shared by arms A and B.
+6. **Stack + settle.** Bands sorted by descending piece area; each band starts
+   at the settled FRONTIER (max y over all settled pieces — never retreats,
+   even when a band settles deeper than its own extent), then settles: slide
+   toward y=0 in 2mm steps until first contact (start is clear by the frontier
+   invariant, so "last clear step" is well-defined and safe; 1000-step safety
+   cap = 2m — a deep partial-row notch in the previous band can absorb far more
+   than a token slide), recovering seam waste from ragged band edges. Settle is
+   shared by arms A and B.
 
 Expected prelude cost: seconds (19 types × ≤~300 d-candidates × cheap line
 intersections; NFPs memoized via the existing cache).
