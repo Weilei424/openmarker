@@ -143,3 +143,105 @@ def test_stack_frontier_never_retreats_past_earlier_bands():
     _validate_layout(placements, pieces, 300.0, "single", 90.0)
     # rect 150x20 rests on the notch-L column top (y 200..220)
     assert marker == pytest.approx(220.0, abs=2.1)
+
+
+# --- lattice_layout ---
+
+from core.layout.lattice import lattice_layout
+
+
+def test_lattice_valid_and_complete():
+    pieces = _mixed_set()
+    placements, marker, util = lattice_layout(pieces, FABRIC_W, "bi", 90.0)
+    _validate_layout(placements, pieces, FABRIC_W, "bi", 90.0)
+    assert {p.piece_id for p in placements} == {p.id for p in pieces}
+    assert marker > 0 and 0 < util <= 100
+
+
+def test_lattice_rotations_stay_in_bi_grain_set():
+    placements, _, _ = lattice_layout(_mixed_set(), FABRIC_W, "bi", 90.0)
+    for p in placements:
+        assert min(p.rotation_deg % 360.0, abs(p.rotation_deg % 360.0 - 180.0),
+                   abs(p.rotation_deg % 360.0 - 360.0)) < 1e-6
+
+
+def test_lattice_single_mode_locks_rotation():
+    placements, _, _ = lattice_layout(
+        _copies(_rect, "p", 4, 300, 200, grainline=90.0), FABRIC_W, "single", 90.0)
+    assert all(abs(p.rotation_deg % 360.0) < 1e-6 for p in placements)
+
+
+def test_lattice_no_grainline_uses_cardinals_only():
+    pieces = _copies(_rect, "p", 4, 300, 200, grainline=None)
+    placements, _, _ = lattice_layout(pieces, FABRIC_W, "bi", 90.0)
+    _validate_layout(placements, pieces, FABRIC_W, "bi", 90.0)
+    for p in placements:
+        assert any(abs(((p.rotation_deg - c + 180.0) % 360.0) - 180.0) < 1e-6
+                   for c in (0.0, 90.0, 180.0, 270.0))
+
+
+def test_lattice_deterministic():
+    a = lattice_layout(_mixed_set(), FABRIC_W, "bi", 90.0)
+    b = lattice_layout(_mixed_set(), FABRIC_W, "bi", 90.0)
+    assert [(p.piece_id, p.x, p.y, p.rotation_deg) for p in a[0]] == \
+           [(p.piece_id, p.x, p.y, p.rotation_deg) for p in b[0]]
+    assert a[1] == b[1]
+
+
+def test_lattice_too_wide_raises():
+    with pytest.raises(ValueError):
+        lattice_layout(_copies(_rect, "p", 2, 1200, 100, grainline=90.0),
+                       FABRIC_W, "bi", 90.0)
+
+
+def test_lattice_ladder_log_uses_lattice_rung():
+    log = []
+    lattice_layout(_mixed_set(), FABRIC_W, "bi", 90.0, ladder_log=log)
+    assert len(log) == 3
+    assert all(rung in ("lattice", "blf") for _, rung in log)
+    assert log[0][1] == "lattice"      # the plain-rect group must lattice cleanly
+
+
+def test_lattice_falls_back_to_blf_band(monkeypatch):
+    import core.layout.lattice as lat
+    monkeypatch.setattr(lat, "_build_lattice_band",
+                        lambda group, W, gm, gd, cache: None)
+    log = []
+    pieces = _mixed_set()
+    placements, _, _ = lattice_layout(pieces, FABRIC_W, "bi", 90.0, ladder_log=log)
+    _validate_layout(placements, pieces, FABRIC_W, "bi", 90.0)
+    assert all(rung == "blf" for _, rung in log)
+
+
+def test_triangle_pair_beats_single_by_20pct():
+    # Two 180-deg right triangles tile a rectangle (100% density); the best
+    # translational single-triangle lattice is far sparser. single grain mode
+    # forbids the 180 partner -> single-cell lattice as the reference.
+    tris = _copies(_rtri, "t", 10, 300, 200, grainline=90.0)
+    m_pair = lattice_layout(tris, FABRIC_W, "bi", 90.0)[1]
+    m_single = lattice_layout(tris, FABRIC_W, "single", 90.0)[1]
+    assert m_pair <= 0.8 * m_single
+
+
+def test_rect_pair_no_gain_over_single():
+    rects = _copies(_rect, "r", 10, 300, 200, grainline=90.0)
+    m_bi = lattice_layout(rects, FABRIC_W, "bi", 90.0)[1]
+    m_single = lattice_layout(rects, FABRIC_W, "single", 90.0)[1]
+    assert abs(m_bi - m_single) <= 1.0
+
+
+def test_lattice_bias_grainline_strip():
+    # 32x330 strips with a 315-deg grainline: allowed engine rotations are
+    # {135, 315} (target = (90 - 315) % 360 = 135) — diagonal lattice.
+    strips = _copies(_rect, "s", 10, 32, 330, grainline=315.0)
+    placements, _, _ = lattice_layout(strips, 800.0, "bi", 90.0)
+    _validate_layout(placements, strips, 800.0, "bi", 90.0)
+    for p in placements:
+        assert any(abs(((p.rotation_deg - a + 180.0) % 360.0) - 180.0) < 1e-6
+                   for a in (135.0, 315.0))
+
+
+def test_lattice_single_copy_group():
+    placements, marker, _ = lattice_layout(
+        [_rect("p__c0", 300, 200, grainline=90.0)], FABRIC_W, "bi", 90.0)
+    assert len(placements) == 1 and marker == pytest.approx(200.0, abs=1e-6)

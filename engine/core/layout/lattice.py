@@ -209,3 +209,234 @@ def banded_blf_layout(pieces: list[Piece], fabric_width_mm: float, grain_mode: s
     """Arm B: per-shape-group BLF bands, stacked + settled. Deterministic."""
     return _layout(pieces, fabric_width_mm, grain_mode, fabric_grain_deg,
                    [("blf", _build_blf_band)], ladder_log)
+
+
+# ---------------------------------------------------------------------------
+# Lattice bands (arm A) — spec § 4
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _Cell:
+    """One lattice cell. Members are (engine rotation, t) with t the NFP-frame
+    translation of the raw-rotated polygon; bbox_* describe the member union."""
+    rotations: list[float]
+    offsets: list[tuple[float, float]]
+    x_extent: float
+    y_extent: float
+    bbox_min: tuple[float, float]
+
+
+def _make_cell(piece: Piece, rotations: list[float],
+               offsets: list[tuple[float, float]]) -> _Cell:
+    bounds = [
+        shapely.affinity.translate(_raw_rotated(piece, r), xoff=tx, yoff=ty).bounds
+        for r, (tx, ty) in zip(rotations, offsets)
+    ]
+    minx = min(b[0] for b in bounds)
+    miny = min(b[1] for b in bounds)
+    maxx = max(b[2] for b in bounds)
+    maxy = max(b[3] for b in bounds)
+    return _Cell(rotations, offsets, maxx - minx, maxy - miny, (minx, miny))
+
+
+def _forbidden_set(piece: Piece, cell: _Cell, cache: NfpCache):
+    """F = { t : cell overlaps (cell + t) } = union over member pairs (i, j) of
+    NFP(shape@rot_i, shape@rot_j) translated by (t_i - t_j)  (spec § 4.2)."""
+    parts = []
+    for ri, ti in zip(cell.rotations, cell.offsets):
+        for rj, tj in zip(cell.rotations, cell.offsets):
+            for nfp in _get_or_compute_nfp(cache, piece, ri, piece, rj):
+                parts.append(shapely.affinity.translate(
+                    nfp, xoff=ti[0] - tj[0], yoff=ti[1] - tj[1]))
+    return unary_union(parts)
+
+
+def _exit_along_x(F) -> float:
+    """Rightmost crossing of F with the +x axis = smallest safe horizontal
+    period w0. Any m*w0 (m >= 1) lies beyond every crossing on that line, so a
+    whole row is overlap-free by construction (spec § 4.3)."""
+    line = LineString([(0.0, 0.0), (F.bounds[2] + 1.0, 0.0)])
+    hit = F.intersection(line)
+    return 0.0 if hit.is_empty else hit.bounds[2]
+
+
+def _top_crossing(F, cx: float) -> float:
+    """Topmost crossing (y >= 0) of F with the vertical line x = cx; 0.0 when
+    the line is clear. Points at/beyond the topmost crossing are outside F
+    along that line — the conservative 'outermost exit' rule (holes in F are
+    skipped, a noted spec refinement)."""
+    top = F.bounds[3]
+    if top <= 0.0:
+        return 0.0
+    hit = F.intersection(LineString([(cx, 0.0), (cx, top + 1.0)]))
+    return 0.0 if hit.is_empty else max(0.0, hit.bounds[3])
+
+
+def _v1_height(F, w0: float, sx: float) -> float | None:
+    """Smallest safe row advance h1 for stagger sx: at/beyond the topmost
+    F-crossing of every realized inter-row column x = j*sx + m*w0 (m in Z),
+    for every row distance j while j*h1 is within F's y-extent. Constraints
+    are one-sided (>= a column's top crossing), so growing h1 never invalidates
+    an earlier j. The caps trade exhaustiveness for speed — the assembled
+    band's exact overlap check is the backstop (spec § 4.5)."""
+    fminx, _, fmaxx, fmaxy = F.bounds
+    if (fmaxx - fminx) / w0 > 64:
+        return None                           # degenerate: too many columns
+
+    def columns(dx: float) -> list[float]:
+        m_lo = math.floor((fminx - dx) / w0)
+        m_hi = math.ceil((fmaxx - dx) / w0)
+        return [dx + m * w0 for m in range(m_lo, m_hi + 1)]
+
+    h1 = max((_top_crossing(F, cx) for cx in columns(sx)), default=0.0)
+    if h1 < _MIN_PERIOD:
+        return None
+    j = 2
+    while j * h1 < fmaxy + _EPS and j <= 64:
+        req = max((_top_crossing(F, cx) for cx in columns(j * sx)), default=0.0)
+        h1 = max(h1, req / j)
+        j += 1
+    return h1
+
+
+def _band_plan(cell: _Cell, w0: float, sx: float, h1: float, copies: int,
+               fabric_width_mm: float) -> tuple[int, int, float] | None:
+    """(k, rows, band_length) for the best feasible column count, or None.
+    Row j sits at x-offset (j*sx) % w0 (columns are w0-periodic), so k must fit
+    at the WORST row offset. Feasibility is monotone in k (fewer rows -> offset
+    set shrinks) and band length is non-increasing in k, so the largest
+    feasible k wins (spec § 4.4)."""
+    cells_needed = math.ceil(copies / len(cell.rotations))
+    k_cap = int((fabric_width_mm - cell.x_extent + _EPS) // w0) + 1
+    for k in range(min(k_cap, cells_needed), 0, -1):
+        rows = math.ceil(cells_needed / k)
+        max_off = max((j * sx) % w0 for j in range(rows))
+        if max_off + (k - 1) * w0 + cell.x_extent <= fabric_width_mm + _EPS:
+            return k, rows, (rows - 1) * h1 + cell.y_extent
+    return None
+
+
+def _assemble_band(group: list[Piece], cell: _Cell, w0: float, sx: float,
+                   h1: float, k: int, fabric_width_mm: float,
+                   ) -> tuple[list[Placement], float] | None:
+    """Place the group's copies row-major (partial cell/row last) and run the
+    exact backstop: pairwise area-overlap + width bounds. Returns band-local
+    (placements, length) or None -> caller falls to the next ladder rung."""
+    n_mem = len(cell.rotations)
+    ordered = sorted(group, key=lambda p: p.id)
+    placements: list[Placement] = []
+    polys: list[ShapelyPolygon] = []
+    for idx, piece in enumerate(ordered):
+        cell_i, mem_i = divmod(idx, n_mem)
+        row, col = divmod(cell_i, k)
+        tx = (row * sx) % w0 + col * w0 + (cell.offsets[mem_i][0] - cell.bbox_min[0])
+        ty = row * h1 + (cell.offsets[mem_i][1] - cell.bbox_min[1])
+        rot = cell.rotations[mem_i]
+        poly = shapely.affinity.translate(_raw_rotated(piece, rot), xoff=tx, yoff=ty)
+        b = poly.bounds
+        placements.append(Placement(piece.id, round(b[0], 4), round(b[1], 4), rot))
+        polys.append(poly)
+    for i in range(len(polys)):
+        bi = polys[i].bounds
+        if bi[0] < -0.5 or bi[2] > fabric_width_mm + 0.5:
+            return None
+        for j in range(i + 1, len(polys)):
+            bj = polys[j].bounds
+            if bi[2] < bj[0] or bj[2] < bi[0] or bi[3] < bj[1] or bj[3] < bi[1]:
+                continue
+            if _has_area_overlap(polys[i], polys[j]):
+                return None
+    min_y = min(p.bounds[1] for p in polys)
+    max_y = max(p.bounds[3] for p in polys)
+    shifted = [Placement(p.piece_id, p.x, round(p.y - min_y, 4), p.rotation_deg)
+               for p in placements]
+    return shifted, max_y - min_y
+
+
+def _pair_offset_candidates(nfp: ShapelyPolygon) -> list[tuple[float, float]]:
+    """d candidates on the RAW NFP boundary: vertices + per-edge midpoints +
+    SEGMENT_MM densification, 1mm-deduped, stride-capped. Midpoints are
+    load-bearing (a right triangle's perfect pair offset is an edge MIDPOINT);
+    raw boundary only — simplifying can cut inside the NFP and create overlap
+    far beyond the 0.5mm² tolerance (spec § 4.1)."""
+    ring = list(nfp.exterior.coords)[:-1]
+    mids = [((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+            for (x1, y1), (x2, y2) in zip(ring, ring[1:] + ring[:1])]
+    dense = list(shapely.segmentize(nfp, SEGMENT_MM).exterior.coords)[:-1]
+    cands, seen = [], set()
+    for dx, dy in [*ring, *mids, *dense]:
+        key = (round(dx), round(dy))               # 1mm dedup grid
+        if key not in seen:
+            seen.add(key)
+            cands.append((dx, dy))
+    stride = max(1, len(cands) // D_CANDIDATE_CAP)
+    return cands[::stride]
+
+
+def _build_lattice_band(group: list[Piece], fabric_width_mm: float, grain_mode: str,
+                        fabric_grain_deg: float, cache: NfpCache) -> _Band | None:
+    """Arm-A band: densest strip-aligned lattice of single / Kuperberg-pair
+    cells, minimizing the group's exact finite-N band length (spec § 4).
+    Single-cell menus come first: they are cheap, set the pruning baseline, and
+    win ties (rectangle case)."""
+    rep = group[0]
+    rotset = _layout_rotations(grain_mode, fabric_grain_deg, rep.grainline_direction_deg)
+    if len(rotset) == 1:
+        menus = [[rotset[0]]]
+    elif len(rotset) == 2:
+        menus = [[rotset[0]], [rotset[0], rotset[1]]]
+    else:  # no grainline data -> cardinals (spec § 4.1)
+        menus = [[0.0], [90.0], [0.0, 180.0], [90.0, 270.0]]
+
+    best: tuple[float, _Cell, float, float, float, int] | None = None
+    for menu in menus:
+        if len(menu) == 1:
+            cells = [_make_cell(rep, [menu[0]], [(0.0, 0.0)])]
+        else:
+            cells = [
+                _make_cell(rep, [menu[0], menu[1]], [(0.0, 0.0), d])
+                for nfp in _get_or_compute_nfp(cache, rep, menu[0], rep, menu[1])
+                for d in _pair_offset_candidates(nfp)
+            ]
+        cells.sort(key=lambda c: c.y_extent)
+        for cell in cells:
+            if best is not None and cell.y_extent >= best[0] - _EPS:
+                break               # sorted ascending: no later cell can win
+            if cell.x_extent > fabric_width_mm + _EPS:
+                continue
+            F = _forbidden_set(rep, cell, cache)
+            if F.is_empty:
+                continue
+            w0 = _exit_along_x(F)
+            if w0 < _MIN_PERIOD:
+                continue
+            for si in range(STAGGER_SAMPLES):
+                sx = si * w0 / STAGGER_SAMPLES
+                h1 = _v1_height(F, w0, sx)
+                if h1 is None:
+                    continue
+                plan = _band_plan(cell, w0, sx, h1, len(group), fabric_width_mm)
+                if plan is None:
+                    continue
+                k, _rows, band_len = plan
+                if best is None or band_len < best[0] - _EPS:
+                    best = (band_len, cell, w0, sx, h1, k)
+    if best is None:
+        return None
+    _band_len, cell, w0, sx, h1, k = best
+    assembled = _assemble_band(group, cell, w0, sx, h1, k, fabric_width_mm)
+    if assembled is None:
+        return None
+    placements, length = assembled
+    return _Band(placements, length, rep.area)
+
+
+def lattice_layout(pieces: list[Piece], fabric_width_mm: float, grain_mode: str,
+                   fabric_grain_deg: float,
+                   ladder_log: list[tuple[str, str]] | None = None,
+                   ) -> tuple[list[Placement], float, float]:
+    """Arm A: per-shape-group Kuperberg-pair lattice bands with per-group BLF
+    fallback, stacked + settled. Deterministic."""
+    return _layout(pieces, fabric_width_mm, grain_mode, fabric_grain_deg,
+                   [("lattice", _build_lattice_band), ("blf", _build_blf_band)],
+                   ladder_log)
