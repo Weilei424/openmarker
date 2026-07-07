@@ -1291,3 +1291,58 @@ Add new entries here as work progresses. Each entry should record:
   rescued to the main tree). The "structure-only seed" idea is closed on
   this workload — any future warm-start variant must produce a seed
   SHORTER than the Fast-BLF layout, not merely more periodic.
+
+### 2026-07-07 — GA-layout warm-start A/B (equal envelope): NO-GO
+
+- **What / why:** Closed follow-up (a) of § 6 [2026-06-09] (no § 5.B row
+  exists for this lever — this entry is the record) under the § 6
+  [2026-07-05] mechanism rule (seeds transfer in proportion to plateau
+  proximity): seeded sparrow from the GA Better-tier layout (the only seed
+  denser than Fast-BLF) at honest time accounting. 3 arms: prod (Fast+600s),
+  ctl780 (Fast+754s), ga (GA-180s+600s — equal 780s envelope with ctl780).
+  Canonical protocol, matched seeds 42/43/44, sequential, validator-gated
+  seeds AND finals.
+- **Seed layouts:** fast 11393.2mm / 81.52% (prelude 27.1s); ga 11347.6mm /
+  81.85% (prelude 216.3s) — vs references 11393.2 / 11232.3.
+- **Result (final markers, mm):**
+
+  | arm | s42 | s43 | s44 | mean |
+  | --- | --- | --- | --- | --- |
+  | prod | 10620.0 | 10689.4 | 10644.9 | 10651.4 |
+  | ctl780 | 10596.8 | 10625.2 | 10641.5 | 10621.2 |
+  | ga | 10679.7 | 10606.9 | 10647.5 | 10644.7 |
+
+- **Gates:** G1 all valid (9/9 runs, 3/3 seeds); **G2-product [ga vs
+  ctl780]: NO-GO** (paired mean +23.5mm, wins 1/3); G2-mechanism [ga vs
+  prod]: NO-GO (paired mean −6.7mm, wins 1/3); dose-response [ctl780 vs
+  prod, +154s]: −30.3mm (wins 3/3); DECISIVE (<10599mm on all ga seeds): no;
+  G3 (sample_4×6, GO only): not run.
+- **Interpretation:** the GA seed was not harmful — it transferred
+  EQUIVALENTLY to Fast (mechanism paired mean ≈ 0, sign-inconsistent per
+  seed: +59.7/−82.5/+2.6mm), so its density advantage bought nothing
+  detectable at this dose. Two-part conclusion: (1) the dose was weak
+  (−45.6mm below Fast, not the planned −160.9mm, because the Better tier's
+  180s time cap makes its output vary with box state run to run), and a
+  proportional true effect (~−10mm) is invisible at n=3 against the
+  run-to-run spreads on record (69.4mm across this round's own prod
+  seeds; 120mm cold pool, § 6 [2026-06-12 round 2]); (2) even the
+  full-dose extrapolation (~−20 to −30mm) is DOMINATED by spending the
+  same envelope on sparrow itself — this very experiment's own
+  dose-response arm measured +154s of raw sparrow budget worth −30.3mm with
+  3/3 sign-consistency. Equal-time verdict: spend the envelope on sparrow,
+  not on a better seed. Combined with the periodic-lattice round (§ 6
+  [2026-07-05]), BOTH seed-side levers are now closed; the remaining
+  quality levers are budget (d — now with direct dose-response evidence),
+  best-of-N (c), and segment-chained basin hopping (f). Notable single:
+  ctl780 s42 = 10596.8mm — a sub-commercial marker at 754s with the
+  production Fast seed, foreshadowing the budget-curve round. Envelope
+  reconciliation: the GA prelude overran its nominal 180s to 216.3s (the
+  same time-cap nondeterminism), so ga's actual envelope was ~816s vs
+  ctl780's ~781s — a ~35s advantage TO THE TREATMENT that only reinforces
+  the NO-GO.
+- **Decision:** Lever (a) closed — no stronger-seed follow-up (dominated by
+  spending the same time on sparrow directly). Spike deleted (commit
+  `841131c`), code preserved verbatim in
+  `docs/superpowers/plans/2026-07-07-ga-warmstart.md`; reports under
+  `tools/ga-warmstart-spike/reports/` (gitignored, local-only; rescued to
+  the main tree).
