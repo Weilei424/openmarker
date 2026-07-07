@@ -250,10 +250,15 @@ Items not yet assigned to a phase. Rough notes captured to avoid losing context.
 
 ### GA warm-start spike (spec 2026-07-06) Execution Checklist
 
-- [ ] P1: Worktree preflight + spec/plan/BACKLOG committed on branch
-- [ ] P2: Spike runner + smoke (3 arms × 15s × 1 copy)
-- [ ] P3: Canonical matrix — prod/ctl780/ga × seeds 42/43/44 (~1h45m)
-- [ ] P4: Gate evaluation + verdict [USER CHECKPOINT]
-- [ ] P5: Conditional GO: sample_4×6 G3 guard
-- [ ] P6: Cleanup — delete spike (both paths), rescue reports
-- [ ] P7: Docs (PERFORMANCE §6 entry), BACKLOG outcome, PR, final review
+- [x] P1: Worktree preflight + spec/plan/BACKLOG committed on branch
+- [x] P2: Spike runner + smoke (3 arms × 15s × 1 copy)
+- [x] P3: Canonical matrix — prod/ctl780/ga × seeds 42/43/44 (~1h45m)
+- [x] P4: Gate evaluation + verdict [USER CHECKPOINT]
+- [ ] P5: Conditional GO: sample_4×6 G3 guard (skipped — product NO-GO)
+- [x] P6: Cleanup — delete spike (both paths), rescue reports
+- [x] P7: Docs (PERFORMANCE §6 entry), BACKLOG outcome, PR, final review
+- Outcome: NO-GO both gates — ga vs ctl780 (equal 780s envelope) paired
+  +23.5mm, 1/3 wins; ga vs prod −6.7mm, 1/3; dose-response +154s = −30.3mm
+  (3/3); GA seed 11347.6 (weak dose — time-cap nondeterminism) vs Fast
+  11393.2; DECISIVE: no. Lever (a) closed — dominated by raw sparrow
+  budget. See PERFORMANCE.md § 6.
