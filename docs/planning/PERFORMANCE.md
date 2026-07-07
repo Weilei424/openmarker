@@ -1335,7 +1335,11 @@ Add new entries here as work progresses. Each entry should record:
   quality levers are budget (d — now with direct dose-response evidence),
   best-of-N (c), and segment-chained basin hopping (f). Notable single:
   ctl780 s42 = 10596.8mm — a sub-commercial marker at 754s with the
-  production Fast seed, foreshadowing the budget-curve round.
+  production Fast seed, foreshadowing the budget-curve round. Envelope
+  reconciliation: the GA prelude overran its nominal 180s to 216.3s (the
+  same time-cap nondeterminism), so ga's actual envelope was ~816s vs
+  ctl780's ~781s — a ~35s advantage TO THE TREATMENT that only reinforces
+  the NO-GO.
 - **Decision:** Lever (a) closed — no stronger-seed follow-up (dominated by
   spending the same time on sparrow directly). Spike deleted (commit
   `841131c`), code preserved verbatim in
