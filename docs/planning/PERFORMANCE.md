@@ -1323,9 +1323,10 @@ Add new entries here as work progresses. Each entry should record:
   detectable at this dose. Two-part conclusion: (1) the dose was weak
   (−45.6mm below Fast, not the planned −160.9mm, because the Better tier's
   180s time cap makes its output vary with box state run to run), and a
-  proportional true effect (~−10mm) is invisible under the ±90mm
-  seed-to-seed spread already on record for warm-started sparrow; (2) even
-  the full-dose extrapolation (~−20 to −30mm) is DOMINATED by spending the
+  proportional true effect (~−10mm) is invisible at n=3 against the
+  run-to-run spreads on record (69.4mm across this round's own prod
+  seeds; 120mm cold pool, § 6 [2026-06-12 round 2]); (2) even the
+  full-dose extrapolation (~−20 to −30mm) is DOMINATED by spending the
   same envelope on sparrow itself — this very experiment's own
   dose-response arm measured +154s of raw sparrow budget worth −30.3mm with
   3/3 sign-consistency. Equal-time verdict: spend the envelope on sparrow,
