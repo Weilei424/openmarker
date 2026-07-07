@@ -247,3 +247,13 @@ Items not yet assigned to a phase. Rough notes captured to avoid losing context.
   cold plateau 10722.7mm); seed layouts lattice 13853.6 / banded 14831.6 vs
   Fast-BLF 11393.2 — sparrow transfers only near-plateau seeds; DECISIVE:
   no. See PERFORMANCE.md § 6.
+
+### GA warm-start spike (spec 2026-07-06) Execution Checklist
+
+- [ ] P1: Worktree preflight + spec/plan/BACKLOG committed on branch
+- [ ] P2: Spike runner + smoke (3 arms × 15s × 1 copy)
+- [ ] P3: Canonical matrix — prod/ctl780/ga × seeds 42/43/44 (~1h45m)
+- [ ] P4: Gate evaluation + verdict [USER CHECKPOINT]
+- [ ] P5: Conditional GO: sample_4×6 G3 guard
+- [ ] P6: Cleanup — delete spike (both paths), rescue reports
+- [ ] P7: Docs (PERFORMANCE §6 entry), BACKLOG outcome, PR, final review
