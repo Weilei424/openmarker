@@ -372,8 +372,8 @@ def cmd_evaluate(args) -> int:
     for prev, cur in zip(stats, stats[1:]):
         d = cur[3] - prev[3]
         db = cur[1] - prev[1]
-        print(f"    {prev[0]}->{cur[0]} (+{db}s): {d:+.1f}mm total, "
-              f"{d / (db / 100.0):+.2f}mm/100s")
+        rate = f"{d / (db / 100.0):+.2f}mm/100s" if db else "n/a (equal budgets)"
+        print(f"    {prev[0]}->{cur[0]} (+{db}s): {d:+.1f}mm total, {rate}")
     crossed_arms = [s for s in stats if s[5]]
     if crossed_arms:
         a, b = crossed_arms[0][0], crossed_arms[0][1]
@@ -388,7 +388,7 @@ def cmd_evaluate(args) -> int:
 def cmd_smoke(args) -> int:
     """1-copy sanity of all three arms @15s (~2 min incl. the Fast prelude)."""
     args.workload, args.copies = "sample_2.dxf", 1
-    args.arms = "b600:fast:15,b1200:fast:15,b2500:fast:15"
+    args.arms = "b600:fast:15,b1200:fast:20,b2500:fast:25"
     args.seeds, args.ttl_hours = "42", 1.0
     rc = cmd_run(args)
     print("SMOKE PASS" if rc == 0 else f"SMOKE FAIL: rc={rc}")
@@ -426,7 +426,7 @@ Expected: one `seed[fast]` line, three `marker=… util=… wall=…` lines, `SM
 ```powershell
 D:\openmarker\engine\.venv\Scripts\python.exe engine\tests\spike_budget_curve.py evaluate --report tools\budget-curve\reports\sample_2_x1\report.json
 ```
-Expected: three per-arm lines (each arm shows its single seed → `1/1 below 10599` and a CROSSED flag — expected at 1 copy, where markers are ~1140mm; the rule is only meaningful at ×10), a 2-row marginal table, and a DECISIVE line — no crash, no NaN.
+Expected: three per-arm lines (each arm shows its single seed → `1/1 below 10599` and a CROSSED flag — expected at 1 copy, where markers are ~1140mm; the rule is only meaningful at ×10), a 2-row marginal table with real +5s deltas, and a DECISIVE line — no crash, no NaN. (The rate guard prints `n/a (equal budgets)` if arms share a budget.)
 
 - [ ] **Step 3: Commit**
 
