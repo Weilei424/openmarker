@@ -276,3 +276,13 @@ Items not yet assigned to a phase. Rough notes captured to avoid losing context.
   borderline extension skipped as verdict-moot); marginal −6.73mm/100s then
   −2.16mm/100s; DECISIVE: no; lever (f) test budget: 2500s. See
   PERFORMANCE.md § 6.
+
+### Basin-hopping round (spec 2026-07-08) Execution Checklist
+
+- [ ] P1: Worktree preflight + spec/plan/BACKLOG committed on branch
+- [ ] P2: Spike runner + smoke (chain plumbing on 1 copy)
+- [ ] P3: Matrix — cont/chain2/chain5 × seeds 42/43/44 @2500s (~6h20m)
+- [ ] P4: Gate evaluation + verdict [USER CHECKPOINT]
+- [ ] P5: Conditional GO: sample_4×6 G3 guard @2500s
+- [ ] P6: Cleanup — delete spike (both paths), rescue reports
+- [ ] P7: Docs (PERFORMANCE §6 entry), BACKLOG outcome, PR, final review
