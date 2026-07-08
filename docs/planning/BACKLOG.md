@@ -265,9 +265,14 @@ Items not yet assigned to a phase. Rough notes captured to avoid losing context.
 
 ### Budget-curve round (spec 2026-07-07) Execution Checklist
 
-- [ ] P1: Worktree preflight + spec/plan/BACKLOG committed on branch
-- [ ] P2: Spike runner + smoke (3 arms × 15s × 1 copy)
-- [ ] P3: Curve matrix — b600/b1200/b2500 × seeds 42/43/44 (~3h40m)
-- [ ] P4: Curve evaluation + verdict [USER CHECKPOINT]
-- [ ] P5: Cleanup — delete spike (both paths), rescue reports
-- [ ] P6: Docs (PERFORMANCE §6 entry), BACKLOG outcome, PR, final review
+- [x] P1: Worktree preflight + spec/plan/BACKLOG committed on branch
+- [x] P2: Spike runner + smoke (3 arms × 15s × 1 copy)
+- [x] P3: Curve matrix — b600/b1200/b2500 × seeds 42/43/44 (~3h40m)
+- [x] P4: Curve evaluation + verdict [USER CHECKPOINT]
+- [x] P5: Cleanup — delete spike (both paths), rescue reports
+- [x] P6: Docs (PERFORMANCE §6 entry), BACKLOG outcome, PR, final review
+- Outcome: NOT CROSSED — means 600s 10658.7 / 1200s 10618.4 / 2500s 10590.3
+  (first sub-commercial MEAN; 1/3 seeds below, consistency failed;
+  borderline extension skipped as verdict-moot); marginal −6.73mm/100s then
+  −2.16mm/100s; DECISIVE: no; lever (f) test budget: 2500s. See
+  PERFORMANCE.md § 6.

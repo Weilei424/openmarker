@@ -421,7 +421,7 @@ if __name__ == "__main__":
 cd WT
 D:\openmarker\engine\.venv\Scripts\python.exe engine\tests\spike_budget_curve.py smoke
 ```
-Expected: one `seed[fast]` line, three `marker=… util=… wall=…` lines, `SMOKE PASS`, exit 0. Sanity-check `WT\tools\budget-curve\reports\sample_2_x1\report.json` (all rows valid, `budget_s` = 15 on each) and `git status --short` (nothing under `tools/`). Also run the evaluator against the smoke report to exercise its code path end-to-end:
+Expected: one `seed[fast]` line, three `marker=… util=… wall=…` lines, `SMOKE PASS`, exit 0. Sanity-check `WT\tools\budget-curve\reports\sample_2_x1\report.json` (all rows valid; `budget_s` = 15/20/25 per arm) and `git status --short` (nothing under `tools/`). Also run the evaluator against the smoke report to exercise its code path end-to-end:
 
 ```powershell
 D:\openmarker\engine\.venv\Scripts\python.exe engine\tests\spike_budget_curve.py evaluate --report tools\budget-curve\reports\sample_2_x1\report.json
