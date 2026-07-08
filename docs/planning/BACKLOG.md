@@ -262,3 +262,17 @@ Items not yet assigned to a phase. Rough notes captured to avoid losing context.
   (3/3); GA seed 11347.6 (weak dose — time-cap nondeterminism) vs Fast
   11393.2; DECISIVE: no. Lever (a) closed — dominated by raw sparrow
   budget. See PERFORMANCE.md § 6.
+
+### Budget-curve round (spec 2026-07-07) Execution Checklist
+
+- [x] P1: Worktree preflight + spec/plan/BACKLOG committed on branch
+- [x] P2: Spike runner + smoke (3 arms × 15s × 1 copy)
+- [x] P3: Curve matrix — b600/b1200/b2500 × seeds 42/43/44 (~3h40m)
+- [x] P4: Curve evaluation + verdict [USER CHECKPOINT]
+- [x] P5: Cleanup — delete spike (both paths), rescue reports
+- [x] P6: Docs (PERFORMANCE §6 entry), BACKLOG outcome, PR, final review
+- Outcome: NOT CROSSED — means 600s 10658.7 / 1200s 10618.4 / 2500s 10590.3
+  (first sub-commercial MEAN; 1/3 seeds below, consistency failed;
+  borderline extension skipped as verdict-moot); marginal −6.73mm/100s then
+  −2.16mm/100s; DECISIVE: no; lever (f) test budget: 2500s. See
+  PERFORMANCE.md § 6.

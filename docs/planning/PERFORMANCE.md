@@ -1346,3 +1346,60 @@ Add new entries here as work progresses. Each entry should record:
   `docs/superpowers/plans/2026-07-07-ga-warmstart.md`; reports under
   `tools/ga-warmstart-spike/reports/` (gitignored, local-only; rescued to
   the main tree).
+
+### 2026-07-08 — Warm-start budget curve (600/1200/2500s): NOT CROSSED
+
+- **What / why:** Characterized follow-up (d) of § 6 [2026-06-09] (no § 5.B
+  row exists for this lever — this entry is the record): the old "600→1200
+  = +0.39pp, diminishing" reading was a COLD-era measurement; this round
+  re-measures it warm, motivated by the GA round's +154s = −30.3mm (3/3)
+  dose-response (§ 6 [2026-07-07 GA A/B]). All arms = production Fast warm
+  start, solo runs, matched seeds 42/43/44, seed-major trios,
+  validator-gated seed + finals.
+- **Seed:** fast 11393.2mm / 81.52% (prelude 27.9s).
+- **Curve (final markers, mm):**
+
+  | budget | s42 | s43 | s44 | mean | below 10599 |
+  | --- | --- | --- | --- | --- | --- |
+  | 600s | 10621.2 | 10699.5 | 10655.5 | 10658.7 | 0/3 |
+  | 1200s | 10599.8 | 10614.8 | 10640.5 | 10618.4 | 0/3 |
+  | 2500s | 10558.6 | 10612.6 | 10599.6 | 10590.3 | 1/3 |
+
+  (754s cross-check from § 6 [2026-07-07 GA A/B]: mean 10621.2 — deviates
+  from this round's 600→1200 interpolation (~10648 at 754s) by ~27mm,
+  within cross-round noise.)
+- **Marginal value:** 600→1200: −40.4mm (−6.73mm/100s); 1200→2500: −28.1mm
+  (−2.16mm/100s). Flattest segment: 1200→2500 → lever (f) test budget
+  2500s.
+- **Decision rules:** CROSSED = mean < 10599 AND ≥2/3 seeds below;
+  borderline ±15mm → extend seeds. Outcome: b600 and b1200 miss on both
+  halves (means 10658.7 / 10618.4; 0/3 seeds below each — b1200's s42
+  10599.8 misses by 0.8mm). b2500's mean (10590.3) clears the mean
+  threshold, but only 1/3 seeds are individually below 10599 (s42 10558.6
+  yes; s43 10612.6 no; s44 10599.6 misses by 0.6mm) — the consistency half
+  fails → **NOT CROSSED**. b2500's mean sits inside the ±15mm borderline
+  band (|10590.3−10599| = 8.7), which by protocol mandates a seeds-45/46
+  extension; **that extension was skipped as verdict-moot, by user
+  approval** — crossing at n=5 needs ≥4/5 seeds below (3·below ≥ 2·5), and
+  with 2 of the first 3 seeds already above 10599, the best case after 2
+  more seeds is 3/5 (< 4/5): the extension could only tighten the mean
+  estimate, not flip the verdict. Recorded here as the round's one protocol
+  deviation.
+- **Interpretation:** the 2500s mean (10590.3mm) is the first sub-commercial
+  **mean** in project history; s42's 10558.6mm is the all-time best marker
+  from a production seed; s44 missed the target by 0.6mm (10599.6mm). The
+  budget lever genuinely works — the curve keeps paying through 2500s
+  (−40.4mm then −28.1mm) — but a single continuous 2500s trajectory lands a
+  coin-flip around the target rather than decisively under it: only 1/3
+  seeds cross, and per-seed spread widens again at 2500s (54.0mm:
+  10558.6→10612.6) after tightening at 1200s (40.7mm), against 78.3mm at
+  600s. The flattening 1200→2500s segment is exactly the stagnation
+  signature that lever (f) (segment-chained basin hopping) targets;
+  best-of-N composition (−35–50mm at equal wall, § 6 [2026-06-12 round 2])
+  is the other pincer on top of a 2500s budget.
+- **Decision:** NOT CROSSED → no Ultra-default change filed; next levers:
+  (f) at 2500s (chained vs continuous, equal wall) and (c) best-of-N
+  composed at 2500s. Spike deleted (commit `c2c4454`), code preserved
+  verbatim in `docs/superpowers/plans/2026-07-07-budget-curve.md`; reports
+  under `tools/budget-curve/reports/` (gitignored, local-only; rescued to
+  the main tree).
