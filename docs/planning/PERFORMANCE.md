@@ -1403,3 +1403,58 @@ Add new entries here as work progresses. Each entry should record:
   verbatim in `docs/superpowers/plans/2026-07-07-budget-curve.md`; reports
   under `tools/budget-curve/reports/` (gitignored, local-only; rescued to
   the main tree).
+
+### 2026-07-09 — Segment-chained basin hopping (2500s equal wall): NO-GO
+
+- **What / why:** Tested lever (f) at the budget the § 6 [2026-07-08] curve
+  named (1200→2500s flattens to −2.16mm/100s): K fresh sparrow processes per
+  run, each re-seeded via `-i` from the VALIDATED best-so-far layout (production
+  converter round-trip, per-segment G1) with RNG seed+1000·(j−1) — resetting GLS
+  weights / shrink schedule / trajectory while carrying the best layout.
+  Keep-best explicit; `cont` ≡ `chain1`; chain arms pay their own orchestration
+  overhead (conservative). Matched seeds 42/43/44, sequential, quiet box. Spike
+  code preserved verbatim in `docs/superpowers/plans/2026-07-08-basin-hopping.md`.
+- **Seed:** Fast NFP-BLF 11393.2mm / 81.52% (prelude 27.7s), built once, shared
+  as segment 1 of every arm.
+- **Result (final markers, mm; all 9 validator-clean):**
+
+| arm | s42 | s43 | s44 | mean | vs cont (paired) | wins | below 10599 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| cont (chain1) | 10551.9 | 10618.8 | 10571.5 | 10580.7 | — | — | 2/3 |
+| chain2 (2×1250s) | 10577.0 | 10595.1 | 10613.6 | 10595.2 | +14.5 | 1/3 | 2/3 |
+| chain5 (5×500s) | 10606.5 | 10607.6 | 10571.4 | 10595.2 | +14.4 | 2/3 | 1/3 |
+
+  cont anchor: the budget-curve 2500s row mean was 10590.3; cont here is 10580.7,
+  agreeing within the ±120mm cold-plateau noise band (pooled cont@2500 across
+  rounds, n=6, mean 10585.5). cont s42 = **10551.9mm is the new all-time-best
+  production-seeded single marker** (prior best 10558.6, § 6 [2026-07-08]).
+- **Segment mechanism readout (late = segment ≥2):** chain2 improved on its
+  best-so-far in its one late segment on every seed (s42/s43/s44 = 1/1 each);
+  chain5 improved in 4/4 late segments on s42 and s44, 3/4 on s43 (seg 3 flat).
+  So **every chain run found a genuinely better basin after a restart** — the
+  perturbation mechanism works (largest single late hop −92.7mm, chain5 s44
+  seg2→seg3). But it does not pay: chain5 s44 climbed through all four late
+  segments (10670.6→10571.4, −99.2mm total) only to draw level with cont's
+  single-trajectory 10571.5 (−0.1mm). Restart gains ≈ segmentation cost.
+- **Gates:** G1 — Fast seed, every segment reconstruction, and all 9 arm finals
+  validator-clean. G2[chain2] NO-GO (+14.5mm paired, 1/3 wins). G2[chain5] NO-GO
+  (+14.4mm paired; 2/3 wins meets the wins bar but the paired mean is > 0, which
+  fails the primary criterion). DECISIVE (any arm all 3 seeds < 10599): no — best
+  is cont/chain2 at 2/3. G3 (sample_4×6 @2500s): not run (GO-only guard).
+- **Interpretation:** The 1200→2500s flattening the budget curve read as
+  stagnation is not a single-basin trap that perturbation-restarts break open. A
+  continuous 2500s trajectory already reaches the depths the restarts find, and
+  re-seeding from its own best forfeits K−1 re-compressions to get back there.
+  K=2 (1250s) and K=5 (500s) are indistinguishable on the finals (means tie at
+  10595.2; secondary metrics split — chain2 is 2/3 below-target vs chain5 1/3,
+  chain5 is 2/3 wins vs chain2 1/3), so deeper cuts neither clearly help nor hurt
+  in this range: the per-restart re-warm cost, not the cut depth, dominates.
+  best-of-N stays the live composition lever precisely because it adds trajectory
+  diversity WITHOUT shortening any single trajectory's budget (−35–50mm at equal
+  wall, § 6 [2026-06-12 round 2]) — the opposite tradeoff from chaining.
+- **Decision:** NO-GO → lever (f) closed. With the seed-side levers (lattice
+  § 6 [2026-07-05], GA § 6 [2026-07-07]) and now the chaining lever all closed,
+  the remaining measured lever toward decisively beating 10599 is best-of-N
+  composition at 2500s (lever c). No Ultra-default change. Spike deleted; reports
+  under `tools/basin-hopping/reports/` (gitignored, local-only; rescued to the
+  main tree).
