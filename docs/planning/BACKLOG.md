@@ -279,10 +279,11 @@ Items not yet assigned to a phase. Rough notes captured to avoid losing context.
 
 ### Basin-hopping round (spec 2026-07-08) Execution Checklist
 
-- [ ] P1: Worktree preflight + spec/plan/BACKLOG committed on branch
-- [ ] P2: Spike runner + smoke (chain plumbing on 1 copy)
-- [ ] P3: Matrix — cont/chain2/chain5 × seeds 42/43/44 @2500s (~6h20m)
-- [ ] P4: Gate evaluation + verdict [USER CHECKPOINT]
-- [ ] P5: Conditional GO: sample_4×6 G3 guard @2500s
-- [ ] P6: Cleanup — delete spike (both paths), rescue reports
+- [x] P1: Worktree preflight + spec/plan/BACKLOG committed on branch
+- [x] P2: Spike runner + smoke (chain plumbing on 1 copy)
+- [x] P3: Matrix — cont/chain2/chain5 × seeds 42/43/44 @2500s (~6h20m)
+- [x] P4: Gate evaluation + verdict [USER CHECKPOINT]
+- [x] P5: Conditional GO: sample_4×6 G3 guard @2500s — SKIPPED (GO-only; NO-GO verdict)
+- [x] P6: Cleanup — delete spike (both paths), rescue reports
 - [ ] P7: Docs (PERFORMANCE §6 entry), BACKLOG outcome, PR, final review
+- Outcome: NO-GO — chain2 +14.5mm (1/3 wins), chain5 +14.4mm (2/3 wins, mean > 0) paired vs cont @2500s equal wall; cont mean 10580.7 (anchor 10590.3), 2/3 below target; every chain run improved in ≥1 late segment (restart mechanism confirmed) but the segmentation cost is not repaid at equal wall; K=2 ≈ K=5; DECISIVE: no. cont s42 10551.9mm = new all-time-best production-seeded marker. Lever (f) closed; remaining measured lever = best-of-N at 2500s. See PERFORMANCE.md § 6 [2026-07-09].
