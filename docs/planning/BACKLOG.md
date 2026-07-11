@@ -287,3 +287,15 @@ Items not yet assigned to a phase. Rough notes captured to avoid losing context.
 - [x] P6: Cleanup — delete spike (both paths), rescue reports
 - [ ] P7: Docs (PERFORMANCE §6 entry), BACKLOG outcome, PR, final review
 - Outcome: NO-GO — chain2 +14.5mm (1/3 wins), chain5 +14.4mm (2/3 wins, mean > 0) paired vs cont @2500s equal wall; cont mean 10580.7 (anchor 10590.3), 2/3 below target; every chain run improved in ≥1 late segment (restart mechanism confirmed) but the segmentation cost is not repaid at equal wall; K=2 ≈ K=5; DECISIVE: no. cont s42 10551.9mm = new all-time-best production-seeded marker. Lever (f) closed; remaining measured lever = best-of-N at 2500s. See PERFORMANCE.md § 6 [2026-07-09].
+
+### Race+fork round (spec 2026-07-09) Execution Checklist
+
+- [x] P1: Worktree preflight + spec/plan/BACKLOG committed on branch
+- [x] P2: Spike runner + smokes 1–4 (-e/-c flag semantics + mini pipeline on 1 copy)
+- [x] P3: Matrix — seq3/racefork × blocks 51-54/61-64/71-74 @7500s wall (~12.5h)
+- [x] P4: Gate evaluation + verdict [USER CHECKPOINT]
+- [x] P5: Conditional (racefork productization only): sample_4×6 G3 @7500s — SKIPPED (candidate = seq3; guard fires only for racefork)
+- [x] P6: Cleanup — delete spike (both paths), rescue reports
+- [ ] P7: Docs (PERFORMANCE §6 entry), BACKLOG outcome, PR, final review
+- Outcome: DECISIVE — BOTH arms crossed 10599 at 3/3 fresh-seed reps (first in project history): seq3 mean 10542.3 (3/3 below), racefork mean 10534.4 (3/3 below, r1 10487.0 = all-time best); G2 paired −7.9mm (2/3 wins) → borderline extension skipped as verdict-moot (user-approved); productization candidate = seq3 (ties rule). See PERFORMANCE.md § 6 [2026-07-10].
+- [ ] Follow-up (GO): wire sequential best-of-N (seq3-style) into `run_separation_layout` as a sequential orchestration mode (component scheduling inside the user budget; cancellation across members via the existing kill registry; GUI exposure + budget presentation decided in that spec) — separate spec/plan/PR.
