@@ -1458,3 +1458,71 @@ Add new entries here as work progresses. Each entry should record:
   composition at 2500s (lever c). No Ultra-default change. Spike deleted; reports
   under `tools/basin-hopping/reports/` (gitignored, local-only; rescued to the
   main tree).
+
+### 2026-07-10 — Race + fork vs sequential best-of-N (7500s equal wall): DECISIVE — campaign target crossed (GO: seq3)
+
+- **What / why:** Tested the two levers the [2026-07-09] trajectory mining
+  exposed: explore is rung-deterministic per seed (probes are faithful) and
+  compress is a lottery (+26..+73mm, same-state spread 28.1mm). `racefork` =
+  4 explore-only probes ×450s → winner explore rerun 2000s from scratch →
+  K=7 compress-only forks ×500s from its end state (`-e`/`-c`/`-i` driver
+  composition; no binary change; sparrow accepted `-e 0`/`-c 0` directly —
+  the 1s fallback never fired). `seq3` = sequential best-of-3 full warm runs
+  @2500s (production behavior ×3, keep best). Equal 7500s wall, 3
+  replications on fresh seed blocks 51–54/61–64/71–74 (no lucky-42
+  recycling), hardware-flat (one 3-thread process at a time). One mid-run
+  kill was recovered cleanly by resume (kill-safe report held 5/6 rows; only
+  the in-flight rep re-ran).
+- **Seed:** fast 11393.2mm / 81.52% (prelude 25.8s), built once, shared by
+  every probe, rerun, and seq member.
+- **Result (arm finals per rep, mm; all 6 validator-clean):**
+
+| arm | r1 (51–54) | r2 (61–64) | r3 (71–74) | mean | vs anchor 10585.5 | below 10599 |
+| --- | --- | --- | --- | --- | --- | --- |
+| seq3 | 10497.5 | 10563.7 | 10565.7 | 10542.3 | −43.2 | 3/3 |
+| racefork | **10487.0** | 10565.7 | 10550.5 | 10534.4 | −51.1 | 3/3 |
+
+  G2 paired (racefork − seq3): −10.5 / +2.0 / −15.2 → mean **−7.9mm**, wins
+  2/3. **racefork r1 10487.0mm / 88.57% is the new all-time-best marker**
+  (prior 10551.9; commercial 10599 beaten by 112mm). seq3's walls
+  7508.0/7503.4/7506.9s; racefork's 7307.7/7307.2/7313.5s (≈195s under the
+  envelope — the treatment paid its own overhead, as designed).
+- **Mechanism readout:** probe→rerun rung agreement EXACT in 3/3 reps
+  (10591.7 / 10655.5 / 10634.2 — the explore-determinism assumption held in
+  production). Winner seeds s53/s62/s73; block 51–54 held an exceptional
+  seed (s53's 450s probe was already sub-commercial at 10591.7). Fork
+  best-of-k curves (E[min], k=1→7): r1 10497.4→10487.0 (−10.4), r2
+  10571.7→10565.7 (−6.0), r3 10566.1→10550.5 (−15.6) — extra compress
+  tickets pay, with diminishing returns. Explore-end → best-fork gains
+  −30.8/−47.2/−62.4mm, inside the mined +26..+73 range. In r1 a single fork
+  ticket ≈ seq3's own compress (10497.4 vs 10497.5) — the edge is the extra
+  tickets, not the fork mechanism per se.
+- **Gates:** G1 — seed, all 3 explore-end states, and all 6 arm finals
+  validator-clean. DECISIVE[seq3] = yes (3/3 < 10599); DECISIVE[racefork] =
+  yes (3/3). G2 → formally BORDERLINE (−7.9mm ∈ (−25, 0], 2/3 wins); the
+  pre-registered blocks-81–94 extension was SKIPPED as verdict-moot with
+  user approval (documented deviation): at n=5 racefork needs the two new
+  reps to sum ≤ −101.3mm paired (avg −50.7/rep vs max observed |Δ| 15.2)
+  AND win both — implausible; every plausible outcome yields candidate =
+  seq3 via the ties-to-seq3 rule. G3: not run (only fires when racefork is
+  the productization arm; seq3 is a pure composition of production runs).
+- **Interpretation:** The campaign question is answered: trajectory
+  diversity at a 2500s-per-trajectory budget decisively clears the
+  commercial target — grazing is over. Fresh-seed blocks vindicated the
+  protocol (both policies harvested the same exceptional basin in r1;
+  results are not a lucky-42 artifact). racefork's −7.9mm paired edge is
+  real-looking but under the −25mm productization bar, and both of its
+  mechanisms are now measured for future use: probes transfer exactly,
+  fork tickets are worth −6..−16mm per best-of-7. seq3's nine member runs
+  double as fresh cont@2500 draws (10497.5–10618.2, mean 10577.7, 7/9
+  below), moving the campaign pool to n=15, mean 10580.8, 10/15 below.
+- **Decision:** GO — productization follow-up filed: wire sequential
+  best-of-N (seq3-style) into `run_separation_layout` as a sequential
+  orchestration mode (component scheduling inside the user budget,
+  cancellation across members via the existing kill registry, GUI exposure
+  + budget presentation decided in that spec). The racefork machinery
+  (probes + compress forks) stays documented here and in the plan doc for
+  the filed best-so-far-on-Stop / "Continue refining" follow-ups. Spike
+  deleted, code preserved in `docs/superpowers/plans/2026-07-09-race-fork.md`;
+  reports under `tools/race-fork/reports/` (gitignored, local-only; rescued
+  to the main tree).
