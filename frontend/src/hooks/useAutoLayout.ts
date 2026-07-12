@@ -12,6 +12,7 @@ export function useAutoLayout() {
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const inFlightQualityRef = useRef<LayoutQuality | null>(null);
 
   const runAutoLayout = useCallback(
     async (
@@ -32,6 +33,7 @@ export function useAutoLayout() {
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
+      inFlightQualityRef.current = quality;
 
       setStatus("loading");
       setErrorMessage(null);
@@ -57,6 +59,13 @@ export function useAutoLayout() {
           signal: controller.signal,
         });
         if (!res.ok) {
+          if (res.status === 499) {
+            // Engine confirmed the cancel with nothing completed (ultra keeps
+            // the request open on Stop; other tiers normally abort client-side).
+            setStatus("idle");
+            setErrorMessage(null);
+            return { ok: false, aborted: true };
+          }
           const err = await res.json().catch(() => ({}));
           throw new Error((err as { detail?: string }).detail ?? `HTTP ${res.status}`);
         }
@@ -64,7 +73,13 @@ export function useAutoLayout() {
         setStatus("idle");
         return { ok: true, data };
       } catch (e) {
-        if (e instanceof Error && (e.name === "AbortError" || /aborted/i.test(e.message))) {
+        // DOMException (thrown by a real aborted fetch, and by jsdom's fetch
+        // mocks in tests) does NOT satisfy `instanceof Error` per the DOM
+        // spec — must check it alongside Error to catch legitimate aborts.
+        if (
+          (e instanceof Error || e instanceof DOMException) &&
+          (e.name === "AbortError" || /aborted/i.test(e.message))
+        ) {
           setStatus("idle");
           setErrorMessage(null);
           return { ok: false, aborted: true };
@@ -84,7 +99,11 @@ export function useAutoLayout() {
 
   const abort = useCallback(() => {
     fetch(`${ENGINE_URL}/cancel-layout`, { method: "POST" }).catch(() => {});
-    abortRef.current?.abort();
+    if (inFlightQualityRef.current !== "ultra") {
+      abortRef.current?.abort();
+    }
+    // Ultra: keep the request open — the engine returns the best completed
+    // member (stopped_early) or 499 when nothing completed yet.
   }, []);
 
   return { runAutoLayout, abort, status, errorMessage };
