@@ -73,9 +73,10 @@ export function useAutoLayout() {
         setStatus("idle");
         return { ok: true, data };
       } catch (e) {
-        // DOMException (thrown by a real aborted fetch, and by jsdom's fetch
-        // mocks in tests) does NOT satisfy `instanceof Error` per the DOM
-        // spec — must check it alongside Error to catch legitimate aborts.
+        // Under jsdom (29.x) DOMException fails `instanceof Error` (jsdom/jsdom#3820),
+        // so abort rejections from test mocks fell through to the error branch.
+        // Real Chromium/WebView2 already returns true here — checking DOMException
+        // alongside Error keeps the guard correct without depending on the engine.
         if (
           (e instanceof Error || e instanceof DOMException) &&
           (e.name === "AbortError" || /aborted/i.test(e.message))
