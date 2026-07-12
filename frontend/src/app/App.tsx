@@ -7,6 +7,7 @@ import { useImportDxf, type ImportOutcome } from "../hooks/useImportDxf";
 import { usePlacements } from "../hooks/usePlacements";
 import { useAutoLayout } from "../hooks/useAutoLayout";
 import { useLayoutCache } from "../hooks/useLayoutCache";
+import { useLayoutProgress } from "../hooks/useLayoutProgress";
 import { PreviewPanel } from "../components/PreviewPanel";
 import { MenuBar } from "../components/MenuBar";
 import { CachedLayoutTabs } from "../components/CachedLayoutTabs";
@@ -47,6 +48,7 @@ export default function App() {
   const [includeEffortInKey, setIncludeEffortInKey] = useState<boolean>(false);
 
   const { runAutoLayout, abort: abortAutoLayout, status: autoStatus, errorMessage: autoError } = useAutoLayout();
+  const layoutProgress = useLayoutProgress(autoStatus === "loading" && quality === "ultra");
   const { entries, activeId, activeEntry, setActiveId, closeTab, refresh: refreshCache, clearAll: clearCache } = useLayoutCache();
 
   // Form-state expansion: used as the input to the next Auto Layout call.
@@ -169,7 +171,11 @@ export default function App() {
     if (outcome.ok) {
       await refreshCache();
       setActiveId(outcome.data.id);
+      const stoppedNote = outcome.data.stopped_early
+        ? `Stopped — kept best of ${outcome.data.members_completed} completed run(s). `
+        : "";
       setStatusMessage(
+        stoppedNote +
         `Auto layout: ${outcome.data.placements.length} piece${outcome.data.placements.length !== 1 ? "s" : ""} · ` +
         `Marker: ${Math.round(outcome.data.marker_length_mm)} mm · ` +
         `Utilization: ${outcome.data.utilization_pct}%`
@@ -345,7 +351,13 @@ export default function App() {
             {autoStatus === "loading" && (
               <>
                 <p style={styles.advancedHint}>
-                  {`Optimizing (${quality})… ${formatDuration(elapsedMs)} elapsed`}
+                  {quality === "ultra" && layoutProgress?.active
+                    ? `Separation run ${layoutProgress.member} of ${layoutProgress.n_members} — ` +
+                      `${formatDuration((layoutProgress.total_elapsed_s ?? 0) * 1000)} elapsed` +
+                      (layoutProgress.best_marker_mm != null
+                        ? ` — best so far ${Math.round(layoutProgress.best_marker_mm)} mm`
+                        : "")
+                    : `Optimizing (${quality})… ${formatDuration(elapsedMs)} elapsed`}
                 </p>
                 <div className="progress-indeterminate" />
               </>
