@@ -326,6 +326,26 @@ def test_progress_reports_member_during_run(monkeypatch):
     assert seen == [(1, True), (2, True)]
 
 
+def test_unexpected_exception_still_writes_final_snapshot(monkeypatch):
+    def fake_solve(*a, **k):
+        raise FileNotFoundError("sparrow binary missing")
+    monkeypatch.setattr(sep, "_solve_one", fake_solve)
+    with pytest.raises(FileNotFoundError):
+        sep.run_separation_layout([_rect("p__c0", 60, 40, 90.0)], 200.0, "bi", 90.0,
+                                  budget_s=5, seed=42, n_seeds=2, warm_start=False)
+    snap = prog.get_progress()
+    assert snap["active"] is False and snap["members_completed"] == 0
+
+
+def test_single_member_invalid_message_unwrapped(monkeypatch):
+    def fake_solve(*a, **k):
+        raise ValueError("separation layout invalid: off-grain")
+    monkeypatch.setattr(sep, "_solve_one", fake_solve)
+    with pytest.raises(ValueError, match="^separation layout invalid: off-grain$"):
+        sep.run_separation_layout([_rect("p__c0", 60, 40, 90.0)], 200.0, "bi", 90.0,
+                                  budget_s=5, seed=42, n_seeds=1, warm_start=False)
+
+
 # --- warm start (#7b): Fast-tier NFP-BLF layout fed to sparrow via -i ---
 
 from core.layout.heuristic import auto_layout_polygon

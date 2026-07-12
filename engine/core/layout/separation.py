@@ -387,35 +387,39 @@ def run_separation_layout(pieces: list[Piece], fabric_width_mm: float, grain_mod
     completed = 0
     last_member = 0
     run_started = time.time()
-    for k, s in enumerate(seeds, start=1):
-        last_member = k
-        set_progress(active=True, member=k, n_members=len(seeds),
+    try:
+        for k, s in enumerate(seeds, start=1):
+            last_member = k
+            set_progress(active=True, member=k, n_members=len(seeds),
+                         members_completed=completed,
+                         best_marker_mm=best[1] if best is not None else None,
+                         budget_s=float(budget_s), run_started_ts=run_started,
+                         member_started_ts=time.time(), stopped_early=False)
+            try:
+                result = _solve_one(items, instance, pieces, fabric_width_mm,
+                                    grain_mode, fabric_grain_deg, budget_s, s)
+            except CancellationError:
+                cancelled = True
+                break
+            except ValueError as e:
+                errors.append(str(e))
+                continue
+            completed += 1
+            if best is None or result[1] < best[1]:
+                best = result
+    finally:
+        # Final snapshot on EVERY exit path — including unexpected exceptions —
+        # so /layout-progress can never report a crashed run as still active.
+        set_progress(active=False, member=last_member, n_members=len(seeds),
                      members_completed=completed,
                      best_marker_mm=best[1] if best is not None else None,
                      budget_s=float(budget_s), run_started_ts=run_started,
-                     member_started_ts=time.time(), stopped_early=False)
-        try:
-            result = _solve_one(items, instance, pieces, fabric_width_mm,
-                                grain_mode, fabric_grain_deg, budget_s, s)
-        except CancellationError:
-            cancelled = True
-            break
-        except ValueError as e:
-            errors.append(str(e))
-            continue
-        completed += 1
-        if best is None or result[1] < best[1]:
-            best = result
-    # Final snapshot on EVERY exit path — the API reads the outcome from it
-    # right after this call returns/raises.
-    set_progress(active=False, member=last_member, n_members=len(seeds),
-                 members_completed=completed,
-                 best_marker_mm=best[1] if best is not None else None,
-                 budget_s=float(budget_s), run_started_ts=run_started,
-                 member_started_ts=time.time(),
-                 stopped_early=cancelled and best is not None)
+                     member_started_ts=time.time(),
+                     stopped_early=cancelled and best is not None)
     if cancelled and best is None:
         raise CancellationError("separation run cancelled")
     if best is None:
+        if len(seeds) == 1 and errors:
+            raise ValueError(errors[0])   # single attempt: today's unwrapped message
         raise ValueError("all separation attempts invalid: " + "; ".join(errors[:3]))
     return best
