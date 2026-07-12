@@ -24,6 +24,7 @@ from core.layout.cancellation import (
     reset_cancellation,
 )
 from core.layout.heuristic import auto_layout_polygon
+from core.layout.progress import get_progress
 from core.layout.separation import run_separation_layout
 from core.layout.grain import FABRIC_GRAIN_DEG
 from core.models.piece import BoundingBox, Piece as PieceModel
@@ -133,7 +134,11 @@ async def auto_layout_endpoint(request: Request) -> dict:
         "duration_ms": 1234,        // Phase 6: layout duration
         "placements": [{"piece_id": "...", "x": 0, "y": 0, "rotation_deg": 0}],
         "marker_length_mm": 1234.5,
-        "utilization_pct": 82.4
+        "utilization_pct": 82.4,
+        // quality="ultra" only (sequential best-of-N, spec 2026-07-12):
+        "stopped_early": false,     // True if Stop cut the run short (best-so-far kept)
+        "members_completed": 3,     // seeds actually run before returning
+        "members_requested": 3      // ultra_seeds as requested
     }
     """
     body = await request.json()
@@ -284,6 +289,15 @@ async def auto_layout_endpoint(request: Request) -> dict:
         raise HTTPException(status_code=400, detail=str(exc))
     duration_ms = int((time.perf_counter() - start) * 1000)
 
+    # Ultra: the run's final progress snapshot carries the stop outcome
+    # (sequential best-of-N, spec 2026-07-12). Defaults cover stubbed tests.
+    stopped_early = False
+    members_completed = ultra_seeds
+    if quality == "ultra":
+        snap = get_progress()
+        stopped_early = bool(snap.get("stopped_early", False))
+        members_completed = int(snap.get("members_completed", ultra_seeds))
+
     placements_serialized = [
         {"piece_id": pl.piece_id, "x": pl.x, "y": pl.y, "rotation_deg": pl.rotation_deg}
         for pl in placements
@@ -307,7 +321,10 @@ async def auto_layout_endpoint(request: Request) -> dict:
         created_at=time.monotonic(),
         quality=quality,
         ultra_budget_s=ultra_budget_s,
-        ultra_seeds=ultra_seeds,
+        # Truthful key: a stop after k of N members IS the best-of-k artifact
+        # (same seeds 42..42+k-1 a real best-of-k run uses) — cache it as such
+        # so the requested-N key stays free for a full re-run.
+        ultra_seeds=members_completed if (quality == "ultra" and stopped_early) else ultra_seeds,
     )
     # TEMP(phase6-bench): tag the entry with the effort level used to compute it,
     # so future lookups with include_effort_in_key=True can find it.
@@ -323,6 +340,9 @@ async def auto_layout_endpoint(request: Request) -> dict:
         "placements": placements_serialized,
         "marker_length_mm": marker_length,
         "utilization_pct": utilization,
+        **({"stopped_early": stopped_early,
+            "members_completed": members_completed,
+            "members_requested": ultra_seeds} if quality == "ultra" else {}),
     }
 
 
@@ -339,6 +359,18 @@ def cancel_layout() -> dict:
     from core.layout.separation import kill_current_sparrow
     kill_current_sparrow()
     return {"ok": True}
+
+
+@app.get("/layout-progress")
+def layout_progress() -> dict:
+    """Current layout-run progress snapshot (single-flight; see core.layout.progress).
+    Adds server-computed elapsed fields while a run is active."""
+    snap = get_progress()
+    if snap.get("active"):
+        now = time.time()
+        snap["total_elapsed_s"] = round(now - snap["run_started_ts"], 1)
+        snap["member_elapsed_s"] = round(now - snap["member_started_ts"], 1)
+    return snap
 
 
 def _summary(entry) -> dict:
