@@ -14,7 +14,7 @@ import subprocess
 import sys
 import tempfile
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 from dataclasses import dataclass
 
 import shapely.affinity
@@ -32,6 +32,7 @@ from core.layout.heuristic import (
     _placed_polygon,
     _polygon_dims,
 )
+from core.layout.progress import set_progress
 
 _VENDORED = os.path.join(os.path.dirname(__file__), "..", "..", "vendor", "sparrow", "sparrow.exe")
 
@@ -350,15 +351,26 @@ def _build_warm_start(items: list[_SepItem], pieces: list[Piece], fabric_width_m
 def run_separation_layout(pieces: list[Piece], fabric_width_mm: float, grain_mode: str,
                           fabric_grain_deg: float, budget_s: float, seed: int = 42,
                           n_seeds: int = 1, warm_start: bool = True) -> tuple[list[Placement], float, float]:
-    """Run the separation (sparrow) engine. With n_seeds>1, run that many attempts
-    (seeds seed..seed+n_seeds-1) IN PARALLEL and keep the shortest VALID marker.
-    Mirrors auto_layout_polygon's return. Raises CancellationError on kill (->499);
-    ValueError on empty input or when every attempt is invalid (->400).
+    """Run the separation (sparrow) engine. With n_seeds>1, run that many members
+    (seeds seed..seed+n_seeds-1) SEQUENTIALLY — one 3-thread sparrow process at a
+    time, each with the full `budget_s` (the configuration validated in PR #23) —
+    and keep the shortest VALID marker. Mirrors auto_layout_polygon's return.
 
-    With warm_start=True (default) sparrow is seeded from a Fast-tier NFP-BLF layout
-    (built ONCE here, shared across all best-of-N attempts); a Fast-layout failure
-    degrades gracefully to a cold start. The Fast layout is an add-on prelude — sparrow
-    still gets the full `budget_s`. See PERFORMANCE.md §6 [2026-06-12 round 2]."""
+    Cancellation (Stop): the in-flight member is killed; if at least one member
+    already COMPLETED, its best result is RETURNED — the caller reads
+    core.layout.progress for `stopped_early`/`members_completed`. With no
+    completed member, raises CancellationError (->499). ValueError on empty
+    input or when every member is invalid (->400).
+
+    Progress: a snapshot is written at every member start and a FINAL snapshot
+    (`active: False`, counts preserved, `stopped_early` set) on every exit path;
+    the run never clears it — the next run overwrites. Single-flight by design
+    (the app has one global cancel flag and runs one layout at a time).
+
+    With warm_start=True (default) sparrow is seeded from a Fast-tier NFP-BLF
+    layout (built ONCE, shared by all members); a Fast-layout failure degrades
+    gracefully to a cold start. See PERFORMANCE.md §6 [2026-06-12 round 2] +
+    [2026-07-10]."""
     if not pieces:
         raise ValueError("no pieces to lay out")
     items = _group_to_items(pieces, grain_mode, fabric_grain_deg)
@@ -369,25 +381,41 @@ def run_separation_layout(pieces: list[Piece], fabric_width_mm: float, grain_mod
             instance = {**instance, "solution": ws}   # sparrow reads this as ExtSPOutput -> warm start
     seeds = [seed + k for k in range(max(1, n_seeds))]
 
-    if len(seeds) == 1:
-        return _solve_one(items, instance, pieces, fabric_width_mm, grain_mode,
-                          fabric_grain_deg, budget_s, seeds[0])
-
-    results: list[tuple[list[Placement], float, float]] = []
+    best: tuple[list[Placement], float, float] | None = None
     errors: list[str] = []
     cancelled = False
-    with ThreadPoolExecutor(max_workers=len(seeds)) as ex:
-        futures = [ex.submit(_solve_one, items, instance, pieces, fabric_width_mm,
-                             grain_mode, fabric_grain_deg, budget_s, s) for s in seeds]
-        for fut in as_completed(futures):
-            try:
-                results.append(fut.result())
-            except CancellationError:
-                cancelled = True
-            except ValueError as e:
-                errors.append(str(e))
-    if cancelled:
+    completed = 0
+    last_member = 0
+    run_started = time.time()
+    for k, s in enumerate(seeds, start=1):
+        last_member = k
+        set_progress(active=True, member=k, n_members=len(seeds),
+                     members_completed=completed,
+                     best_marker_mm=best[1] if best is not None else None,
+                     budget_s=float(budget_s), run_started_ts=run_started,
+                     member_started_ts=time.time(), stopped_early=False)
+        try:
+            result = _solve_one(items, instance, pieces, fabric_width_mm,
+                                grain_mode, fabric_grain_deg, budget_s, s)
+        except CancellationError:
+            cancelled = True
+            break
+        except ValueError as e:
+            errors.append(str(e))
+            continue
+        completed += 1
+        if best is None or result[1] < best[1]:
+            best = result
+    # Final snapshot on EVERY exit path — the API reads the outcome from it
+    # right after this call returns/raises.
+    set_progress(active=False, member=last_member, n_members=len(seeds),
+                 members_completed=completed,
+                 best_marker_mm=best[1] if best is not None else None,
+                 budget_s=float(budget_s), run_started_ts=run_started,
+                 member_started_ts=time.time(),
+                 stopped_early=cancelled and best is not None)
+    if cancelled and best is None:
         raise CancellationError("separation run cancelled")
-    if not results:
+    if best is None:
         raise ValueError("all separation attempts invalid: " + "; ".join(errors[:3]))
-    return min(results, key=lambda r: r[1])  # shortest marker_length
+    return best
