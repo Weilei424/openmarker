@@ -63,6 +63,10 @@ export interface AutoLayoutResponse {
   placements: AutoLayoutPlacement[];
   marker_length_mm: number;
   utilization_pct: number;
+  // Ultra only (sequential best-of-N): present on ultra responses.
+  stopped_early?: boolean;      // Stop kept the best completed run
+  members_completed?: number;
+  members_requested?: number;
 }
 
 export interface CachedLayoutSummary {

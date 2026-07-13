@@ -200,6 +200,16 @@ def test_kill_current_sparrow_terminates_all_concurrent():
 # --- run_separation_layout ---
 
 import core.layout.separation as sep_mod
+import core.layout.progress as prog
+from core.layout.cancellation import CancellationError
+from core.layout.heuristic import Placement as _Pl
+
+
+@pytest.fixture(autouse=True)
+def _fresh_progress():
+    prog.clear_progress()
+    yield
+    prog.clear_progress()
 
 
 def test_run_separation_layout_assembles(monkeypatch):
@@ -226,10 +236,7 @@ def test_run_separation_layout_empty_raises():
         sep_mod.run_separation_layout([], 200.0, "bi", 90.0, budget_s=5)
 
 
-from core.layout.heuristic import Placement as _Pl
-
-
-def test_best_of_n_returns_shortest_valid(monkeypatch):
+def test_best_of_n_sequential_order_and_shortest_valid(monkeypatch):
     calls = []
     def fake_solve(items, instance, pieces, fw, gm, fg, budget_s, seed):
         calls.append(seed)
@@ -239,8 +246,11 @@ def test_best_of_n_returns_shortest_valid(monkeypatch):
     pieces = [_rect("p__c0", 60, 40, 90.0)]
     placements, marker, util = sep.run_separation_layout(
         pieces, 200.0, "bi", 90.0, budget_s=5, seed=42, n_seeds=3, warm_start=False)
-    assert sorted(calls) == [42, 43, 44]
-    assert marker == 800.0   # shortest valid wins
+    assert calls == [42, 43, 44]     # strictly sequential, in seed order
+    assert marker == 800.0           # shortest valid wins
+    snap = prog.get_progress()
+    assert snap["active"] is False and snap["members_completed"] == 3
+    assert snap["stopped_early"] is False and snap["best_marker_mm"] == 800.0
 
 
 def test_best_of_n_all_invalid_raises(monkeypatch):
@@ -252,18 +262,88 @@ def test_best_of_n_all_invalid_raises(monkeypatch):
                                   budget_s=5, seed=42, n_seeds=2, warm_start=False)
 
 
-def test_best_of_n_cancel_takes_precedence(monkeypatch):
-    # Even when one seed returns a valid result, a cancelled attempt makes the whole
-    # run raise CancellationError (Stop must never return a partial best-of-N result).
-    from core.layout.cancellation import CancellationError
+def test_invalid_member_skipped_run_continues(monkeypatch):
+    def fake_solve(items, instance, pieces, fw, gm, fg, budget_s, seed):
+        if seed == 42:
+            raise ValueError("separation layout invalid: overlap")
+        return ([_Pl("p__c0", 0.0, 0.0, 0.0)], 800.0, 50.0)
+    monkeypatch.setattr(sep, "_solve_one", fake_solve)
+    placements, marker, util = sep.run_separation_layout(
+        [_rect("p__c0", 60, 40, 90.0)], 200.0, "bi", 90.0,
+        budget_s=5, seed=42, n_seeds=2, warm_start=False)
+    assert marker == 800.0
+    assert prog.get_progress()["members_completed"] == 1
+
+
+def test_cancel_mid_run_returns_best_so_far(monkeypatch):
+    # NEW CONTRACT (spec 2026-07-12 §2 Stop transport, inverting the pre-PR#23
+    # behavior): Stop keeps the best COMPLETED member instead of discarding it.
     def fake_solve(items, instance, pieces, fw, gm, fg, budget_s, seed):
         if seed == 42:
             return ([_Pl("p__c0", 0.0, 0.0, 0.0)], 900.0, 50.0)
         raise CancellationError("cancelled")
     monkeypatch.setattr(sep, "_solve_one", fake_solve)
+    placements, marker, util = sep.run_separation_layout(
+        [_rect("p__c0", 60, 40, 90.0)], 200.0, "bi", 90.0,
+        budget_s=5, seed=42, n_seeds=3, warm_start=False)
+    assert marker == 900.0
+    snap = prog.get_progress()
+    assert snap["stopped_early"] is True
+    assert snap["members_completed"] == 1 and snap["active"] is False
+
+
+def test_cancel_before_any_completion_raises(monkeypatch):
+    def fake_solve(*a, **k):
+        raise CancellationError("cancelled")
+    monkeypatch.setattr(sep, "_solve_one", fake_solve)
     with pytest.raises(CancellationError):
         sep.run_separation_layout([_rect("p__c0", 60, 40, 90.0)], 200.0, "bi", 90.0,
                                   budget_s=5, seed=42, n_seeds=2, warm_start=False)
+    snap = prog.get_progress()
+    assert snap["stopped_early"] is False and snap["members_completed"] == 0
+
+
+def test_warm_start_built_once_for_n_members(monkeypatch):
+    ws_calls = []
+    monkeypatch.setattr(sep, "_build_warm_start",
+                        lambda *a, **k: ws_calls.append(1) or None)
+    monkeypatch.setattr(sep, "_solve_one",
+                        lambda *a, **k: ([_Pl("p__c0", 0.0, 0.0, 0.0)], 800.0, 50.0))
+    sep.run_separation_layout([_rect("p__c0", 60, 40, 90.0)], 200.0, "bi", 90.0,
+                              budget_s=500, seed=42, n_seeds=3, warm_start=True)
+    assert len(ws_calls) == 1
+
+
+def test_progress_reports_member_during_run(monkeypatch):
+    seen = []
+    def fake_solve(items, instance, pieces, fw, gm, fg, budget_s, seed):
+        snap = prog.get_progress()
+        seen.append((snap["member"], snap["active"]))
+        return ([_Pl("p__c0", 0.0, 0.0, 0.0)], 800.0 + seed, 50.0)
+    monkeypatch.setattr(sep, "_solve_one", fake_solve)
+    sep.run_separation_layout([_rect("p__c0", 60, 40, 90.0)], 200.0, "bi", 90.0,
+                              budget_s=5, seed=42, n_seeds=2, warm_start=False)
+    assert seen == [(1, True), (2, True)]
+
+
+def test_unexpected_exception_still_writes_final_snapshot(monkeypatch):
+    def fake_solve(*a, **k):
+        raise FileNotFoundError("sparrow binary missing")
+    monkeypatch.setattr(sep, "_solve_one", fake_solve)
+    with pytest.raises(FileNotFoundError):
+        sep.run_separation_layout([_rect("p__c0", 60, 40, 90.0)], 200.0, "bi", 90.0,
+                                  budget_s=5, seed=42, n_seeds=2, warm_start=False)
+    snap = prog.get_progress()
+    assert snap["active"] is False and snap["members_completed"] == 0
+
+
+def test_single_member_invalid_message_unwrapped(monkeypatch):
+    def fake_solve(*a, **k):
+        raise ValueError("separation layout invalid: off-grain")
+    monkeypatch.setattr(sep, "_solve_one", fake_solve)
+    with pytest.raises(ValueError, match="^separation layout invalid: off-grain$"):
+        sep.run_separation_layout([_rect("p__c0", 60, 40, 90.0)], 200.0, "bi", 90.0,
+                                  budget_s=5, seed=42, n_seeds=1, warm_start=False)
 
 
 # --- warm start (#7b): Fast-tier NFP-BLF layout fed to sparrow via -i ---

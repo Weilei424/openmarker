@@ -85,4 +85,12 @@ describe("QualityPanel", () => {
     expect(screen.getByRole("alertdialog")).toBeTruthy();
     expect(onUltraBudgetChange).toHaveBeenCalledWith(600);
   });
+
+  it("shows the runs label and computed total-time hint for ultra", () => {
+    render(<QualityPanel quality="ultra" onChange={() => {}}
+                         ultraBudgetS={2500} ultraSeeds={3}
+                         onUltraBudgetChange={() => {}} onUltraSeedsChange={() => {}} />);
+    expect(screen.getByText("Runs (keep best of N)")).toBeTruthy();
+    expect(screen.getByText("Total ≈ 125m 0s (3 × 2500s)")).toBeTruthy();
+  });
 });

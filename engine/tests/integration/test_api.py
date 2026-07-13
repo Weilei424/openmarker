@@ -240,3 +240,122 @@ async def test_ultra_passes_budget_and_seeds(monkeypatch):
     assert captured["budget_s"] == 900.0
     assert captured["n_seeds"] == 3
     assert captured["warm_start"] is True    # 900 >= 360 -> warm-start ON
+
+
+# ---------------------------------------------------------------------------
+# Sequential best-of-N: response flags + truthful-key partial caching + progress
+# ---------------------------------------------------------------------------
+
+import core.layout.progress as prog
+
+
+def _ultra_body(seeds: int = 3, budget: float = 600.0, filename: str = None) -> dict:
+    """Build an ultra-quality /auto-layout body from the file's existing
+    _one_piece_body fixture. Pass an explicit `filename` so multiple calls in
+    one test share a cache identity (needed by the truthful-key test below);
+    otherwise each call gets its own nonce'd filename so it never collides
+    with cache state left by other tests (this file has no cache-reset
+    fixture — nonce'd filenames are how it dodges dedup collisions)."""
+    body = _one_piece_body(quality="ultra")
+    if filename is not None:
+        body["filename"] = filename
+    body["ultra_seeds"] = seeds
+    body["ultra_budget_s"] = budget
+    return body
+
+
+@pytest.mark.asyncio
+async def test_ultra_response_carries_member_fields(monkeypatch):
+    import api.main as main
+
+    def _stub(pieces, fabric_width_mm, grain_mode, fabric_grain_deg, budget_s,
+              seed=42, n_seeds=1, warm_start=True):
+        prog.set_progress(active=False, members_completed=n_seeds, stopped_early=False)
+        return ([], 1000.0, 50.0)
+
+    monkeypatch.setattr(main, "run_separation_layout", _stub)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post("/auto-layout", json=_ultra_body(seeds=3))
+    assert res.status_code == 200
+    data = res.json()
+    assert data["stopped_early"] is False
+    assert data["members_completed"] == 3 and data["members_requested"] == 3
+
+
+@pytest.mark.asyncio
+async def test_ultra_stopped_early_cached_under_truthful_key(monkeypatch):
+    import api.main as main
+    import uuid
+
+    fname = f"ultra_truthful_{uuid.uuid4().hex[:8]}.dxf"
+    calls = []
+
+    def _stub(pieces, fabric_width_mm, grain_mode, fabric_grain_deg, budget_s,
+              seed=42, n_seeds=1, warm_start=True):
+        calls.append(n_seeds)
+        prog.set_progress(active=False, members_completed=1, stopped_early=True)
+        return ([], 1000.0, 50.0)
+
+    monkeypatch.setattr(main, "run_separation_layout", _stub)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post("/auto-layout", json=_ultra_body(seeds=3, filename=fname))
+
+        # Repeat of the ORIGINAL-N request: the N=3 key is unoccupied -> re-runs.
+        prog.clear_progress()
+
+        def _stub2(pieces, fabric_width_mm, grain_mode, fabric_grain_deg, budget_s,
+                   seed=42, n_seeds=1, warm_start=True):
+            calls.append(n_seeds)
+            prog.set_progress(active=False, members_completed=n_seeds, stopped_early=False)
+            return ([], 990.0, 51.0)
+
+        monkeypatch.setattr(main, "run_separation_layout", _stub2)
+        res2 = await client.post("/auto-layout", json=_ultra_body(seeds=3, filename=fname))
+
+        # A request for N = members_completed (1) HITS the truthful-key entry.
+        res3 = await client.post("/auto-layout", json=_ultra_body(seeds=1, filename=fname))
+
+    assert res.status_code == 200
+    assert res.json()["stopped_early"] is True
+    assert res.json()["members_completed"] == 1
+
+    assert res2.status_code == 200 and len(calls) == 2
+
+    assert res3.status_code == 200 and len(calls) == 2   # cache hit, no third run
+    assert res3.json()["marker_length_mm"] == 1000.0
+
+
+@pytest.mark.asyncio
+async def test_ultra_cancel_with_nothing_completed_stays_499(monkeypatch):
+    import api.main as main
+    from core.layout.cancellation import CancellationError
+
+    def _stub(*a, **k):
+        prog.set_progress(active=False, members_completed=0, stopped_early=False)
+        raise CancellationError("cancelled")
+
+    monkeypatch.setattr(main, "run_separation_layout", _stub)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post("/auto-layout", json=_ultra_body(seeds=2))
+    assert res.status_code == 499
+
+
+@pytest.mark.asyncio
+async def test_layout_progress_idle_and_midrun():
+    import time
+
+    prog.clear_progress()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.get("/layout-progress")
+        assert res.status_code == 200 and res.json() == {"active": False}
+
+        prog.set_progress(active=True, member=2, n_members=3, members_completed=1,
+                          best_marker_mm=10552.0, budget_s=2500.0,
+                          run_started_ts=time.time() - 100.0,
+                          member_started_ts=time.time() - 40.0, stopped_early=False)
+        res = await client.get("/layout-progress")
+    snap = res.json()
+    assert snap["active"] is True and snap["member"] == 2
+    assert 99.0 <= snap["total_elapsed_s"] <= 105.0
+    assert 39.0 <= snap["member_elapsed_s"] <= 45.0
+    prog.clear_progress()

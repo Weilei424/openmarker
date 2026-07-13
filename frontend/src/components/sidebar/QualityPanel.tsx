@@ -59,7 +59,7 @@ export function QualityPanel({
               style={{ width: 70 }}
             />
           </div>
-          <div style={{ fontSize: 13, marginTop: 6 }} aria-label="seeds">Seeds (best of N)</div>
+          <div style={{ fontSize: 13, marginTop: 6 }} aria-label="seeds">Runs (keep best of N)</div>
           {[1, 2, 3, 4].map((n) => (
             <label key={n} style={styles.radioRow}>
               <input type="radio" name="ultra-seeds" checked={ultraSeeds === n}
@@ -67,6 +67,9 @@ export function QualityPanel({
               <span style={{ fontSize: 13 }}>{n}</span>
             </label>
           ))}
+          <p style={styles.totalHint}>
+            {`Total ≈ ${Math.floor((ultraSeeds * ultraBudgetS) / 60)}m ${(ultraSeeds * ultraBudgetS) % 60}s (${ultraSeeds} × ${ultraBudgetS}s)`}
+          </p>
         </div>
       )}
     </div>
@@ -102,5 +105,12 @@ const styles = {
     alignItems: "center",
     gap: 6,
     marginTop: 4,
+  },
+  totalHint: {
+    fontSize: 12,
+    color: "var(--color-text-muted)",
+    fontStyle: "italic" as const,
+    marginTop: 4,
+    marginBottom: 0,
   },
 } as const;
