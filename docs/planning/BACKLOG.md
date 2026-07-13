@@ -298,7 +298,7 @@ Items not yet assigned to a phase. Rough notes captured to avoid losing context.
 - [x] P6: Cleanup — delete spike (both paths), rescue reports
 - [ ] P7: Docs (PERFORMANCE §6 entry), BACKLOG outcome, PR, final review
 - Outcome: DECISIVE — BOTH arms crossed 10599 at 3/3 fresh-seed reps (first in project history): seq3 mean 10542.3 (3/3 below), racefork mean 10534.4 (3/3 below, r1 10487.0 = all-time best); G2 paired −7.9mm (2/3 wins) → borderline extension skipped as verdict-moot (user-approved); productization candidate = seq3 (ties rule). See PERFORMANCE.md § 6 [2026-07-10].
-- [x] Follow-up (GO): wire sequential best-of-N (seq3-style) into `run_separation_layout` as a sequential orchestration mode (component scheduling inside the user budget; cancellation across members via the existing kill registry; GUI exposure + budget presentation decided in that spec) — separate spec/plan/PR. (IN PROGRESS — see the productization section below.)
+- [x] Follow-up (GO): wire sequential best-of-N (seq3-style) into `run_separation_layout` as a sequential orchestration mode (component scheduling inside the user budget; cancellation across members via the existing kill registry; GUI exposure + budget presentation decided in that spec) — separate spec/plan/PR. (shipped — see the productization section below.)
 
 ### Sequential best-of-N productization (GO follow-up from PR #23)
 
